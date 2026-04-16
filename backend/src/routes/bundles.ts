@@ -11,6 +11,7 @@ import {
 import { getLiveNAV } from '../services/pricing';
 import { calculateNAV, calculateIssuePrice } from '../services/nav';
 import { getMarketProbability } from '../services/polymarket';
+import { analyzeDiversification } from '../services/analytics';
 import { Bundle, BundleWithLegs } from '../types';
 import { validate, createBundleSchema } from '../utils/validation';
 
@@ -267,6 +268,37 @@ router.get('/:id/performance', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('GET /api/bundles/:id/performance error:', err);
     res.status(500).json({ error: 'Failed to calculate performance metrics' });
+  }
+});
+
+/**
+ * GET /api/bundles/:id/analysis
+ * Diversification and risk analysis for a bundle's legs.
+ */
+router.get('/:id/analysis', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const bundle = await getBundleById(id);
+    if (!bundle) return res.status(404).json({ error: 'Bundle not found' });
+
+    const legs = await getLegsByBundleId(id);
+    if (legs.length === 0) return res.status(404).json({ error: 'No legs found' });
+
+    // Refresh probabilities first
+    const navResult = await getLiveNAV(id);
+
+    const analysis = analyzeDiversification(legs);
+
+    res.json({
+      bundle_id: id,
+      bundle_name: bundle.name,
+      risk_tier: bundle.risk_tier,
+      current_nav: navResult?.nav ?? 0,
+      analysis,
+    });
+  } catch (err) {
+    console.error('GET /api/bundles/:id/analysis error:', err);
+    res.status(500).json({ error: 'Failed to analyze bundle' });
   }
 });
 

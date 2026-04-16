@@ -45,6 +45,12 @@ const apiDocs = {
     },
     {
       method: 'GET',
+      path: '/api/bundles/:id/analysis',
+      description: 'Diversification and risk analysis for a bundle. Returns HHI weight concentration, probability dispersion, NAV standard deviation, scenario analysis (best/worst/expected case with upside/downside), and per-leg risk contributions.',
+      response: '{ bundle_id, bundle_name, risk_tier, current_nav, analysis: { diversification_score (0-100), weight_concentration (HHI), probability_dispersion, expected_nav, nav_std_dev, scenarios: { best_case, worst_case, expected, upside, downside }, leg_risk: [{ leg_id, question, weight, probability, risk_contribution, marginal_impact }] } }',
+    },
+    {
+      method: 'GET',
       path: '/api/bundles/compare',
       description: 'Compare multiple bundles side-by-side. Returns enriched data for each bundle plus a comparison summary identifying highest NAV, lowest risk, most resolved, and best performance.',
       query_params: ['ids - comma-separated bundle UUIDs (required, max 5)'],
@@ -252,6 +258,25 @@ const apiDocs = {
       path: '/api/webhook/health',
       description: 'Health check for the Helius webhook endpoint. Use as Helius ping URL.',
       response: '{ status: "ok", service: "helius-webhook" }',
+    },
+    // Batch
+    {
+      method: 'POST',
+      path: '/api/batch/nav',
+      description: 'Get live NAV for multiple bundles in one request. Fetches latest Polymarket prices for each bundle concurrently.',
+      body: {
+        bundle_ids: 'string[] (required) - array of bundle UUIDs, max 20',
+      },
+      response: '{ count: number, results: { [bundle_id]: NAVResult | { error: string } } }',
+    },
+    {
+      method: 'POST',
+      path: '/api/batch/bundles',
+      description: 'Get full bundle data (with legs) for multiple bundles in one request. Fetches concurrently.',
+      body: {
+        bundle_ids: 'string[] (required) - array of bundle UUIDs, max 20',
+      },
+      response: '{ count: number, results: { [bundle_id]: BundleWithLegs | { error: string } } }',
     },
   ],
 };

@@ -12,6 +12,7 @@ import { adminRoutes } from './routes/admin';
 import { leaderboardRoutes } from './routes/leaderboard';
 import { demoRoutes } from './routes/demo';
 import { webhookRoutes } from './routes/webhook';
+import { batchRoutes } from './routes/batch';
 import { startCronJobs } from './services/cron';
 import { supabase } from './db/supabase';
 import { requestLogger } from './middleware/requestLogger';
@@ -118,6 +119,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/demo', demoRoutes);
 app.use('/api/docs', docsRoutes);
 app.use('/api/webhook', webhookRoutes);
+app.use('/api/batch', batchRoutes);
 
 // Root redirect to API docs
 app.get('/', (_req, res) => res.redirect('/api/docs'));
