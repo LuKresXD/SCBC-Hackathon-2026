@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { getAllBundles, createNAVSnapshot } from '../db/queries';
+import { getAllBundles, createNAVSnapshot, getActiveAlertsByBundle, triggerAlert } from '../db/queries';
 import { getLiveNAV, checkAndUpdateResolutions } from './pricing';
 
 /**
@@ -30,6 +30,29 @@ async function refreshAllBundles(): Promise<void> {
         // Check for newly resolved legs
         const resolved = await checkAndUpdateResolutions(bundle.id);
         totalNewlyResolved += resolved.length;
+
+        // Check price alerts for this bundle
+        if (navResult) {
+          try {
+            const alerts = await getActiveAlertsByBundle(bundle.id);
+            const navChangePercent = bundle.issue_price > 0
+              ? ((navResult.nav - bundle.issue_price) / bundle.issue_price) * 100
+              : 0;
+
+            for (const alert of alerts) {
+              let shouldTrigger = false;
+              if (alert.alert_type === 'above' && navResult.nav >= alert.threshold) shouldTrigger = true;
+              if (alert.alert_type === 'below' && navResult.nav <= alert.threshold) shouldTrigger = true;
+              if (alert.alert_type === 'change_percent' && Math.abs(navChangePercent) >= alert.threshold) shouldTrigger = true;
+
+              if (shouldTrigger) {
+                await triggerAlert(alert.id, navResult.nav);
+              }
+            }
+          } catch (alertErr) {
+            // Alert checking is non-critical, don't fail the cron
+          }
+        }
       } catch (err) {
         console.error(`Cron: failed to refresh bundle ${bundle.id} (${bundle.name}):`, err);
       }
