@@ -194,9 +194,17 @@ router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
     const enriched = await Promise.all(
       positions.map(async (pos) => {
         const bundle = await getBundleById(pos.bundle_id);
-        const navResult = await getLiveNAV(pos.bundle_id);
 
-        const currentNav = navResult?.nav ?? pos.entry_price;
+        // For resolved/cancelled bundles, use stored legs (final NAV is fixed).
+        // Only hit Polymarket for active bundles.
+        let currentNav: number;
+        if (bundle?.status === 'active') {
+          const navResult = await getLiveNAV(pos.bundle_id);
+          currentNav = navResult?.nav ?? pos.entry_price;
+        } else {
+          const legs = await getLegsByBundleId(pos.bundle_id);
+          currentNav = legs.length > 0 ? calculateNAV(legs, pos.bundle_id).nav : pos.entry_price;
+        }
         const currentValue = pos.tokens_held * currentNav;
         const unrealizedPnl = currentValue - pos.deposited_usdc;
 

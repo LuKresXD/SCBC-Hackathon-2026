@@ -30,10 +30,17 @@ export const createBundleSchema = z.object({
     .max(20),
 }).refine(
   (data) => {
-    const specifiedWeights = data.legs.filter((l) => l.weight !== undefined);
-    if (specifiedWeights.length === 0) return true; // auto-assigned weights are always valid
+    const specifiedCount = data.legs.filter((l) => l.weight !== undefined).length;
+    // Require all-or-none: either every leg has a weight, or none do.
+    return specifiedCount === 0 || specifiedCount === data.legs.length;
+  },
+  { message: 'Either specify weights for all legs or none (auto-assigned)' }
+).refine(
+  (data) => {
+    const specifiedCount = data.legs.filter((l) => l.weight !== undefined).length;
+    if (specifiedCount !== data.legs.length) return true; // auto-assign path is always valid
     const totalWeight = data.legs.reduce((sum, l) => sum + (l.weight ?? 0), 0);
-    return totalWeight <= 1.01; // small tolerance for floating point
+    return totalWeight >= 0.99 && totalWeight <= 1.01; // must sum to ~1.0
   },
   { message: 'Leg weights must sum to approximately 1.0' }
 );
