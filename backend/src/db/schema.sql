@@ -63,3 +63,37 @@ create index idx_transactions_bundle_id on transactions(bundle_id);
 create index idx_transactions_wallet_address on transactions(wallet_address);
 create index idx_nav_snapshots_bundle_id on nav_snapshots(bundle_id);
 create index idx_nav_snapshots_created_at on nav_snapshots(created_at);
+
+-- PPN (Principal Protected Notes) vaults
+create table ppn_vaults (
+  id uuid primary key default gen_random_uuid(),
+  bundle_id uuid not null references bundles(id) on delete cascade,
+  wallet_address text not null,
+  principal_usdc numeric not null,
+  yield_deployed_usdc numeric not null default 0,
+  estimated_apy numeric not null default 0.08,
+  vault_address text,
+  status text not null default 'active',
+  maturity_date date not null,
+  created_at timestamptz not null default now()
+);
+
+create index idx_ppn_vaults_wallet on ppn_vaults(wallet_address);
+create index idx_ppn_vaults_bundle on ppn_vaults(bundle_id);
+
+-- Price alerts
+create table price_alerts (
+  id uuid primary key default gen_random_uuid(),
+  bundle_id uuid not null references bundles(id) on delete cascade,
+  wallet_address text not null,
+  alert_type text not null check (alert_type in ('above', 'below', 'change_percent')),
+  threshold numeric not null,
+  triggered boolean not null default false,
+  triggered_at timestamptz,
+  triggered_nav numeric,
+  created_at timestamptz not null default now()
+);
+
+create index idx_price_alerts_wallet on price_alerts(wallet_address);
+create index idx_price_alerts_bundle on price_alerts(bundle_id);
+create index idx_price_alerts_active on price_alerts(bundle_id) where triggered = false;

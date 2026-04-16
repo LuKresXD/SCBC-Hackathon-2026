@@ -132,3 +132,49 @@ export interface AppConfig {
   polymarketApiUrl: string;
   structuringFee: number; // 0.005 = 0.5%
 }
+
+// === PPN (Principal Protected Notes) types ===
+
+export interface PPNVault {
+  id: string;
+  bundle_id: string;
+  wallet_address: string;
+  principal_usdc: number;        // Original deposit, locked in Meteora vault
+  yield_deployed_usdc: number;   // Accumulated yield deployed into bundles
+  estimated_apy: number;         // Current estimated APY from Meteora
+  vault_address: string;         // Solana vault address
+  status: 'active' | 'matured' | 'withdrawn';
+  created_at: string;
+  maturity_date: string;
+}
+
+export interface PPNDepositRequest {
+  bundle_id: string;
+  wallet_address: string;
+  amount_usdc: number;
+  maturity_days?: number; // default 30
+}
+
+export interface PPNDepositResponse {
+  vault_id: string;
+  bundle_id: string;
+  principal_usdc: number;
+  estimated_apy: number;
+  estimated_yield_at_maturity: number;
+  maturity_date: string;
+  message: string;
+}
+
+// === Alert types ===
+
+export interface PriceAlert {
+  id: string;
+  bundle_id: string;
+  wallet_address: string;
+  alert_type: 'above' | 'below' | 'change_percent';
+  threshold: number;          // For above/below: NAV threshold. For change_percent: % change
+  triggered: boolean;
+  triggered_at?: string;
+  triggered_nav?: number;
+  created_at: string;
+}

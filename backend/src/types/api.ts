@@ -361,6 +361,73 @@ export interface SSEPortfolioEvent {
   timestamp: string;
 }
 
+// ============================================================================
+// PPN (Principal Protected Notes) Types
+// ============================================================================
+
+/** POST /api/ppn/deposit request body */
+export interface PPNDepositRequest {
+  bundle_id: string;
+  wallet_address: string;
+  amount_usdc: number;
+  maturity_days?: number; // 7-365, default 30
+}
+
+/** POST /api/ppn/deposit */
+export interface PPNDepositResponse {
+  vault_id: string;
+  bundle_id: string;
+  principal_usdc: number;
+  estimated_apy: number;
+  estimated_yield_at_maturity: number;
+  maturity_date: string;
+  message: string;
+}
+
+/** Enriched vault in portfolio response */
+export interface PPNVaultEnriched {
+  vault_id: string;
+  bundle_id: string;
+  bundle_name: string;
+  bundle_status: string;
+  principal_usdc: number;
+  yield_deployed_usdc: number;
+  accrued_yield: number;
+  projected_total_yield: number;
+  estimated_apy: number;
+  status: 'active' | 'matured' | 'withdrawn';
+  days_elapsed: number;
+  days_remaining: number;
+  maturity_date: string;
+  created_at: string;
+  total_value: number;
+}
+
+/** GET /api/ppn/portfolio/:walletAddress */
+export interface PPNPortfolioResponse {
+  wallet_address: string;
+  vaults: PPNVaultEnriched[];
+  summary: {
+    total_vaults: number;
+    total_principal: number;
+    total_accrued_yield: number;
+    total_value: number;
+    principal_protected: true;
+  };
+}
+
+/** POST /api/ppn/withdraw/:vaultId */
+export interface PPNWithdrawResponse {
+  vault_id: string;
+  wallet_address: string;
+  principal_returned: number;
+  yield_earned: number;
+  total_payout: number;
+  days_held: number;
+  effective_apy: number;
+  message: string;
+}
+
 /** Standard error response shape */
 export interface APIError {
   error: string;
@@ -419,5 +486,11 @@ export const API_ENDPOINTS = {
   demo: {
     simulateLifecycle: '/api/demo/simulate-lifecycle',
     status: '/api/demo/status',
+  },
+
+  ppn: {
+    deposit: '/api/ppn/deposit',
+    portfolio: (wallet: string) => `/api/ppn/portfolio/${wallet}`,
+    withdraw: (vaultId: string) => `/api/ppn/withdraw/${vaultId}`,
   },
 } as const;

@@ -278,6 +278,62 @@ const apiDocs = {
       },
       response: '{ count: number, results: { [bundle_id]: BundleWithLegs | { error: string } } }',
     },
+    // PPN (Principal Protected Notes)
+    {
+      method: 'POST',
+      path: '/api/ppn/deposit',
+      description: 'Create a PPN (Principal Protected Note) position. Principal is locked in a Meteora yield vault for safety; only accrued yield is deployed into the linked bundle. Returns vault details and yield projections.',
+      body: {
+        bundle_id: 'string (required) - UUID of the bundle to link yield deployment to',
+        wallet_address: 'string (required) - Solana wallet address',
+        amount_usdc: 'number (required) - USDC amount to deposit as principal',
+        maturity_days: 'number (optional) - days until maturity, 7-365, default 30',
+      },
+      response: '{ vault_id, bundle_id, principal_usdc, estimated_apy, estimated_yield_at_maturity, maturity_date, message } (201 Created)',
+    },
+    {
+      method: 'GET',
+      path: '/api/ppn/portfolio/:walletAddress',
+      description: 'Get all PPN vaults for a wallet with yield projections, accrued yield, days remaining, and portfolio summary. Principal is always protected.',
+      response: '{ wallet_address, vaults: [{ vault_id, bundle_id, bundle_name, bundle_status, principal_usdc, yield_deployed_usdc, accrued_yield, projected_total_yield, estimated_apy, status, days_elapsed, days_remaining, maturity_date, created_at, total_value }], summary: { total_vaults, total_principal, total_accrued_yield, total_value, principal_protected: true } }',
+    },
+    {
+      method: 'POST',
+      path: '/api/ppn/withdraw/:vaultId',
+      description: 'Withdraw from a matured PPN vault. Returns principal + accumulated yield. Fails if vault has not reached maturity (returns days remaining and early withdrawal info).',
+      response: '{ vault_id, wallet_address, principal_returned, yield_earned, total_payout, days_held, effective_apy, message }',
+    },
+    // Price Alerts
+    {
+      method: 'POST',
+      path: '/api/alerts',
+      description: 'Create a new price alert. Triggers when NAV crosses the specified threshold (above/below) or changes by a percentage.',
+      body: {
+        bundle_id: 'string (required) - UUID of the bundle to monitor',
+        wallet_address: 'string (required) - wallet address to associate the alert with',
+        alert_type: 'string (required) - "above" | "below" | "change_percent"',
+        threshold: 'number (required) - NAV threshold for above/below, or percentage for change_percent',
+      },
+      response: 'PriceAlert (201 Created)',
+    },
+    {
+      method: 'GET',
+      path: '/api/alerts/:walletAddress',
+      description: 'Get all price alerts for a wallet, with counts of active and triggered alerts.',
+      response: '{ wallet_address, count, active, triggered, alerts: PriceAlert[] }',
+    },
+    {
+      method: 'POST',
+      path: '/api/alerts/check/:bundleId',
+      description: 'Check and trigger alerts for a bundle based on current live NAV. Compares NAV against all active alerts. Called by cron or manually.',
+      response: '{ bundle_id, current_nav, nav_change_percent, alerts_checked, alerts_triggered, triggered: [{ alert_id, wallet_address, alert_type, threshold, current_nav }] }',
+    },
+    {
+      method: 'DELETE',
+      path: '/api/alerts/:alertId',
+      description: 'Delete a price alert by ID.',
+      response: '{ deleted: true, alert_id: string }',
+    },
   ],
 };
 

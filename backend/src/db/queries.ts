@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Bundle, Leg, Position, Transaction, BundleWithLegs, NAVSnapshot, LegNAVContribution } from '../types';
+import { Bundle, Leg, Position, Transaction, BundleWithLegs, NAVSnapshot, LegNAVContribution, PPNVault, PriceAlert } from '../types';
 
 // --- Bundles ---
 
@@ -383,6 +383,88 @@ export async function getAllTransactions(params?: {
   return data ?? [];
 }
 
+// --- PPN Vaults ---
+
+export async function createPPNVault(
+  vault: Omit<PPNVault, 'id' | 'created_at'>
+): Promise<PPNVault | null> {
+  const { data, error } = await supabase
+    .from('ppn_vaults')
+    .insert(vault)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('createPPNVault error:', error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function getPPNVaultsByWallet(walletAddress: string): Promise<PPNVault[]> {
+  const { data, error } = await supabase
+    .from('ppn_vaults')
+    .select('*')
+    .eq('wallet_address', walletAddress)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('getPPNVaultsByWallet error:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function getPPNVaultById(id: string): Promise<PPNVault | null> {
+  const { data, error } = await supabase
+    .from('ppn_vaults')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    console.error('getPPNVaultById error:', error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function updatePPNVaultYield(
+  id: string,
+  yieldDeployed: number
+): Promise<PPNVault | null> {
+  const { data, error } = await supabase
+    .from('ppn_vaults')
+    .update({ yield_deployed_usdc: yieldDeployed })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('updatePPNVaultYield error:', error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function updatePPNVaultStatus(
+  id: string,
+  status: PPNVault['status']
+): Promise<PPNVault | null> {
+  const { data, error } = await supabase
+    .from('ppn_vaults')
+    .update({ status })
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('updatePPNVaultStatus error:', error.message);
+    return null;
+  }
+  return data;
+}
+
 export async function getAllLegs(): Promise<Leg[]> {
   const { data, error } = await supabase
     .from('legs')
@@ -423,4 +505,85 @@ export async function getTransactionStats(): Promise<{
   const total_fees = transactions.reduce((sum, t) => sum + t.fee_usdc, 0);
 
   return { total_deposited, total_redeemed, total_fees };
+}
+
+// --- Price Alerts ---
+
+export async function createPriceAlert(
+  alert: Omit<PriceAlert, 'id' | 'created_at' | 'triggered' | 'triggered_at' | 'triggered_nav'>
+): Promise<PriceAlert | null> {
+  const { data, error } = await supabase
+    .from('price_alerts')
+    .insert(alert)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('createPriceAlert error:', error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function getAlertsByWallet(walletAddress: string): Promise<PriceAlert[]> {
+  const { data, error } = await supabase
+    .from('price_alerts')
+    .select('*')
+    .eq('wallet_address', walletAddress)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('getAlertsByWallet error:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function getActiveAlertsByBundle(bundleId: string): Promise<PriceAlert[]> {
+  const { data, error } = await supabase
+    .from('price_alerts')
+    .select('*')
+    .eq('bundle_id', bundleId)
+    .eq('triggered', false);
+
+  if (error) {
+    console.error('getActiveAlertsByBundle error:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function triggerAlert(
+  alertId: string,
+  nav: number
+): Promise<PriceAlert | null> {
+  const { data, error } = await supabase
+    .from('price_alerts')
+    .update({
+      triggered: true,
+      triggered_at: new Date().toISOString(),
+      triggered_nav: nav,
+    })
+    .eq('id', alertId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('triggerAlert error:', error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function deleteAlert(alertId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('price_alerts')
+    .delete()
+    .eq('id', alertId);
+
+  if (error) {
+    console.error('deleteAlert error:', error.message);
+    return false;
+  }
+  return true;
 }
