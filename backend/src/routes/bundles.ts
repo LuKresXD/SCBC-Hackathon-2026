@@ -99,6 +99,85 @@ router.get('/name/:name', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/bundles/compare
+ * Compare multiple bundles side-by-side.
+ * Query param: ?ids=uuid1,uuid2,uuid3 (comma-separated, max 5)
+ * Must be defined BEFORE /:id to avoid route conflict.
+ */
+router.get('/compare', async (req: Request, res: Response) => {
+  try {
+    const idsParam = req.query.ids as string | undefined;
+    if (!idsParam) {
+      return res.status(400).json({ error: 'ids query parameter is required (comma-separated UUIDs)' });
+    }
+
+    const ids = idsParam.split(',').map((id) => id.trim()).filter(Boolean);
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'At least one bundle ID is required' });
+    }
+    if (ids.length > 5) {
+      return res.status(400).json({ error: 'Maximum 5 bundles can be compared at once' });
+    }
+
+    const results = await Promise.all(
+      ids.map(async (id) => {
+        const bundleWithLegs = await getBundleWithLegs(id);
+        if (!bundleWithLegs) return null;
+
+        const navResult = await getLiveNAV(id);
+        const currentNav = navResult?.nav ?? bundleWithLegs.nav;
+
+        const activeLegs = bundleWithLegs.legs.filter((l) => l.status === 'active');
+        const avgProbability = activeLegs.length > 0
+          ? activeLegs.reduce((sum, l) => sum + l.probability, 0) / activeLegs.length
+          : 0;
+
+        const resDate = new Date(bundleWithLegs.resolution_date);
+        const now = new Date();
+        const daysToResolution = Math.max(0, Math.ceil((resDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+
+        const navChangePercent = bundleWithLegs.issue_price > 0
+          ? ((currentNav - bundleWithLegs.issue_price) / bundleWithLegs.issue_price) * 100
+          : 0;
+
+        return {
+          id: bundleWithLegs.id,
+          name: bundleWithLegs.name,
+          risk_tier: bundleWithLegs.risk_tier,
+          status: bundleWithLegs.status,
+          issue_price: bundleWithLegs.issue_price,
+          current_nav: Math.round(currentNav * 10000) / 10000,
+          nav_change_percent: Math.round(navChangePercent * 100) / 100,
+          num_legs: bundleWithLegs.num_legs,
+          resolved_legs: bundleWithLegs.resolved_legs,
+          avg_probability: Math.round(avgProbability * 10000) / 10000,
+          days_to_resolution: daysToResolution,
+          resolution_date: bundleWithLegs.resolution_date,
+        };
+      })
+    );
+
+    const bundles = results.filter((b) => b !== null);
+    if (bundles.length === 0) {
+      return res.status(404).json({ error: 'No bundles found for the provided IDs' });
+    }
+
+    // Build comparison summary
+    const comparison = {
+      highest_nav: bundles.reduce((best, b) => (b.current_nav > best.current_nav ? b : best), bundles[0]).name,
+      lowest_risk: bundles.reduce((best, b) => (b.risk_tier > best.risk_tier ? b : best), bundles[0]).name,
+      most_resolved: bundles.reduce((best, b) => (b.resolved_legs > best.resolved_legs ? b : best), bundles[0]).name,
+      best_performance: bundles.reduce((best, b) => (b.nav_change_percent > best.nav_change_percent ? b : best), bundles[0]).name,
+    };
+
+    res.json({ bundles, comparison });
+  } catch (err) {
+    console.error('GET /api/bundles/compare error:', err);
+    res.status(500).json({ error: 'Failed to compare bundles' });
+  }
+});
+
+/**
  * GET /api/bundles/:id/performance
  * Rich performance metrics for a bundle including risk analysis.
  */

@@ -45,6 +45,13 @@ const apiDocs = {
     },
     {
       method: 'GET',
+      path: '/api/bundles/compare',
+      description: 'Compare multiple bundles side-by-side. Returns enriched data for each bundle plus a comparison summary identifying highest NAV, lowest risk, most resolved, and best performance.',
+      query_params: ['ids - comma-separated bundle UUIDs (required, max 5)'],
+      response: '{ bundles: [{ id, name, risk_tier, status, issue_price, current_nav, nav_change_percent, num_legs, resolved_legs, avg_probability, days_to_resolution, resolution_date }], comparison: { highest_nav, lowest_risk, most_resolved, best_performance } }',
+    },
+    {
+      method: 'GET',
       path: '/api/bundles/:id',
       description: 'Get single bundle by UUID with all legs and current NAV',
       response: 'BundleWithLegs',
@@ -184,6 +191,12 @@ const apiDocs = {
       description: 'SSE stream for live portfolio value updates. Recalculates all positions every 30 seconds.',
       response: 'SSE stream - data: { wallet_address, positions: [{ bundle_id, tokens_held, entry_price, deposited_usdc, current_nav, current_value, pnl }], total_deposited, total_current_value, total_pnl, timestamp }',
     },
+    {
+      method: 'GET',
+      path: '/api/sse/bundles',
+      description: 'SSE stream for all active bundles with NAV updates. Sends initial snapshot immediately, then refreshes every 60 seconds. Useful for dashboard views.',
+      response: 'SSE stream - data: { count, bundles: [{ id, name, risk_tier, status, issue_price, current_nav, nav_change_percent, num_legs, resolved_legs, avg_probability }], timestamp }',
+    },
     // Admin
     {
       method: 'GET',
@@ -225,6 +238,20 @@ const apiDocs = {
       path: '/api/demo/status',
       description: 'Returns demo status: demo wallet address, active/total bundle counts, and usage instructions.',
       response: '{ demo_wallet: string, note: string, active_bundles: number, total_bundles: number }',
+    },
+    // Webhooks (Helius / Solana)
+    {
+      method: 'POST',
+      path: '/api/webhook/helius',
+      description: 'Helius webhook handler for Solana on-chain events. Expects an array of event objects. Processes TOKEN_MINT, TOKEN_BURN, and TRANSFER events.',
+      body: '[{ type: string, description: string, signature: string, ... }]',
+      response: '{ processed: number, total: number }',
+    },
+    {
+      method: 'GET',
+      path: '/api/webhook/health',
+      description: 'Health check for the Helius webhook endpoint. Use as Helius ping URL.',
+      response: '{ status: "ok", service: "helius-webhook" }',
     },
   ],
 };
