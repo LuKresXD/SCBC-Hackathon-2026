@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { getAllBundles } from '../db/queries';
+import { getAllBundles, createNAVSnapshot } from '../db/queries';
 import { getLiveNAV, checkAndUpdateResolutions } from './pricing';
 
 /**
@@ -22,6 +22,9 @@ async function refreshAllBundles(): Promise<void> {
         const navResult = await getLiveNAV(bundle.id);
         if (navResult) {
           totalLegsUpdated += navResult.legs.filter((l) => l.status === 'active').length;
+
+          // Record NAV snapshot for historical charts
+          await createNAVSnapshot(bundle.id, navResult.nav, navResult.legs);
         }
 
         // Check for newly resolved legs

@@ -11,8 +11,8 @@ const apiDocs = {
     {
       method: 'GET',
       path: '/api/health',
-      description: 'Health check',
-      response: '{ status: string, timestamp: string }',
+      description: 'Comprehensive health check. Tests Supabase DB and Polymarket API connectivity, reports uptime and memory usage.',
+      response: '{ status: "ok" | "degraded", timestamp: string, uptime_seconds: number, memory_mb: number, services: { supabase: { status, latency_ms, error? }, polymarket: { status, latency_ms, error? } } }',
     },
     {
       method: 'GET',
@@ -74,8 +74,12 @@ const apiDocs = {
     {
       method: 'GET',
       path: '/api/nav/:bundleId/history',
-      description: 'NAV history for a bundle. Currently returns single snapshot; time-series tracking planned.',
-      response: '{ bundle_id, history: [NAVResult] }',
+      description: 'NAV history for a bundle. Returns historical snapshots recorded every 2 minutes by cron, suitable for rendering price charts.',
+      query_params: [
+        'since - ISO datetime string, return all snapshots since this time (e.g. 2024-01-01T00:00:00Z)',
+        'limit - max snapshots to return (default 100, ignored if since is provided)',
+      ],
+      response: '{ bundle_id, count: number, history: NAVSnapshot[] } where NAVSnapshot = { id, bundle_id, nav, legs_data: LegNAVContribution[], created_at }',
     },
     // Deposit
     {
@@ -94,6 +98,12 @@ const apiDocs = {
       path: '/api/deposit/portfolio/:walletAddress',
       description: 'Get all positions for a wallet with current NAV values, unrealized PnL, and total portfolio summary.',
       response: '{ wallet_address, positions: [{ position_id, bundle_id, bundle_name, tokens_held, entry_price, deposited_usdc, current_nav, current_value, unrealized_pnl, pnl_percent }], total_value, total_deposited, total_pnl, total_pnl_percent }',
+    },
+    {
+      method: 'GET',
+      path: '/api/deposit/transactions/:walletAddress',
+      description: 'Get transaction history for a wallet. Returns all deposits, redemptions, and transfers enriched with bundle names.',
+      response: '{ wallet_address, count, transactions: [{ id, bundle_id, bundle_name, type, amount_usdc, tokens, fee_usdc, tx_signature?, created_at }] }',
     },
     // Markets
     {
@@ -147,6 +157,14 @@ const apiDocs = {
       },
       response: '{ wallet_address, bundle_id, bundle_name, total_tokens, final_nav, payout_usdc, transaction_id }',
     },
+    // Leaderboard
+    {
+      method: 'GET',
+      path: '/api/leaderboard',
+      description: 'Top wallets by total deposited value. Groups all positions by wallet, sums deposits, and ranks.',
+      query_params: ['limit - max wallets to return (default 10, max 100)'],
+      response: '{ count: number, wallets: [{ wallet_address, total_deposited, position_count, approximate_value }] }',
+    },
     // SSE (Server-Sent Events)
     {
       method: 'GET',
@@ -159,6 +177,30 @@ const apiDocs = {
       path: '/api/sse/portfolio/:walletAddress',
       description: 'SSE stream for live portfolio value updates. Recalculates all positions every 30 seconds.',
       response: 'SSE stream - data: { wallet_address, positions: [{ bundle_id, tokens_held, entry_price, deposited_usdc, current_nav, current_value, pnl }], total_deposited, total_current_value, total_pnl, timestamp }',
+    },
+    // Admin
+    {
+      method: 'GET',
+      path: '/api/admin/stats',
+      description: 'Platform-level statistics: bundle counts, position/transaction totals, USDC deposit/redemption/fee aggregates.',
+      response: '{ total_bundles, active_bundles, resolved_bundles, total_legs, total_positions, total_transactions, total_deposited_usdc, total_redeemed_usdc, total_fees_collected, timestamp }',
+    },
+    {
+      method: 'POST',
+      path: '/api/admin/bundles/:id/cancel',
+      description: 'Cancel an active bundle. Sets status to cancelled. Returns error if bundle is not active.',
+      response: 'Bundle (updated with status: cancelled)',
+    },
+    {
+      method: 'GET',
+      path: '/api/admin/transactions',
+      description: 'List all transactions with optional filters. Ordered by created_at descending.',
+      query_params: [
+        'wallet - filter by wallet address',
+        'type - filter by type (deposit | redemption | transfer)',
+        'limit - max results (default 50)',
+      ],
+      response: '{ count: number, transactions: Transaction[] }',
     },
   ],
 };

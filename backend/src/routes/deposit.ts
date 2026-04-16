@@ -5,6 +5,7 @@ import {
   createTransaction,
   getPositionsByWallet,
   getPositionsByWalletAndBundle,
+  getTransactionsByWallet,
   updatePositionTokens,
   getLegsByBundleId,
 } from '../db/queries';
@@ -234,6 +235,44 @@ router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('GET /api/deposit/portfolio/:walletAddress error:', err);
     res.status(500).json({ error: 'Failed to fetch portfolio' });
+  }
+});
+
+/**
+ * GET /api/deposit/transactions/:walletAddress
+ * Get transaction history for a wallet, enriched with bundle names.
+ */
+router.get('/transactions/:walletAddress', async (req: Request, res: Response) => {
+  try {
+    const { walletAddress } = req.params;
+    const transactions = await getTransactionsByWallet(walletAddress);
+
+    // Enrich each transaction with bundle name
+    const enriched = await Promise.all(
+      transactions.map(async (tx) => {
+        const bundle = await getBundleById(tx.bundle_id);
+        return {
+          id: tx.id,
+          bundle_id: tx.bundle_id,
+          bundle_name: bundle?.name ?? 'Unknown',
+          type: tx.type,
+          amount_usdc: tx.amount_usdc,
+          tokens: tx.tokens,
+          fee_usdc: tx.fee_usdc,
+          tx_signature: tx.tx_signature,
+          created_at: tx.created_at,
+        };
+      })
+    );
+
+    res.json({
+      wallet_address: walletAddress,
+      count: enriched.length,
+      transactions: enriched,
+    });
+  } catch (err) {
+    console.error('GET /api/deposit/transactions/:walletAddress error:', err);
+    res.status(500).json({ error: 'Failed to fetch transactions' });
   }
 });
 

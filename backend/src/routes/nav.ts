@@ -5,6 +5,8 @@ import {
   getLegsByBundleId,
   updateBundleStatus,
   updateLegResolution,
+  getNAVHistory,
+  getNAVHistorySince,
 } from '../db/queries';
 
 const router = Router();
@@ -32,23 +34,29 @@ router.get('/:bundleId', async (req: Request, res: Response) => {
 
 /**
  * GET /api/nav/:bundleId/history
- * Placeholder: returns current NAV snapshot.
- * TODO: add time-series NAV tracking for historical charts.
+ * Returns historical NAV snapshots for rendering price charts.
+ * Query params:
+ *   ?since=<ISO datetime> - return all snapshots since this time
+ *   ?limit=<number>       - max snapshots to return (default 100, ignored if since is provided)
+ * Snapshots are recorded every 2 minutes by cron.
  */
 router.get('/:bundleId/history', async (req: Request, res: Response) => {
   try {
     const { bundleId } = req.params;
-    const navResult = await getLiveNAV(bundleId);
+    const { since, limit } = req.query;
 
-    if (!navResult) {
-      return res.status(404).json({ error: `Bundle not found or has no legs: ${bundleId}` });
+    let history;
+    if (since && typeof since === 'string') {
+      history = await getNAVHistorySince(bundleId, since);
+    } else {
+      const parsedLimit = limit ? parseInt(limit as string, 10) : 100;
+      history = await getNAVHistory(bundleId, parsedLimit);
     }
 
-    // Return as single-element array for future compatibility
-    // when we add actual historical tracking
     res.json({
       bundle_id: bundleId,
-      history: [navResult],
+      count: history.length,
+      history,
     });
   } catch (err) {
     console.error('GET /api/nav/:bundleId/history error:', err);

@@ -5,11 +5,13 @@ import { getPositionsByWallet } from '../db/queries';
 const router = Router();
 
 const NAV_INTERVAL_MS = 30_000; // 30 seconds
+const HEARTBEAT_INTERVAL_MS = 15_000; // 15 seconds
 
 /**
  * GET /api/sse/nav/:bundleId
  * Server-Sent Events stream for live NAV updates.
  * Sends initial NAV immediately, then refreshes every 30 seconds.
+ * Heartbeat every 15 seconds to keep connections alive through proxies.
  */
 router.get('/nav/:bundleId', async (req: Request, res: Response) => {
   const { bundleId } = req.params;
@@ -21,6 +23,9 @@ router.get('/nav/:bundleId', async (req: Request, res: Response) => {
   res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
   res.flushHeaders();
 
+  // Tell clients to auto-reconnect after 5 seconds
+  res.write('retry: 5000\n\n');
+
   const sendNAV = async () => {
     try {
       const navResult = await getLiveNAV(bundleId);
@@ -31,6 +36,8 @@ router.get('/nav/:bundleId', async (req: Request, res: Response) => {
           timestamp: navResult.timestamp,
         };
         res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } else {
+        res.write(`event: error\ndata: ${JSON.stringify({ error: 'NAV not available for this bundle' })}\n\n`);
       }
     } catch (err) {
       console.error(`SSE nav error for bundle ${bundleId}:`, err);
@@ -42,11 +49,17 @@ router.get('/nav/:bundleId', async (req: Request, res: Response) => {
   await sendNAV();
 
   // Then refresh every 30 seconds
-  const interval = setInterval(sendNAV, NAV_INTERVAL_MS);
+  const navInterval = setInterval(sendNAV, NAV_INTERVAL_MS);
+
+  // Heartbeat to keep connection alive through proxies
+  const heartbeatInterval = setInterval(() => {
+    res.write(': heartbeat\n\n');
+  }, HEARTBEAT_INTERVAL_MS);
 
   // Clean up on client disconnect
   req.on('close', () => {
-    clearInterval(interval);
+    clearInterval(navInterval);
+    clearInterval(heartbeatInterval);
     res.end();
   });
 });
@@ -55,6 +68,7 @@ router.get('/nav/:bundleId', async (req: Request, res: Response) => {
  * GET /api/sse/portfolio/:walletAddress
  * Server-Sent Events stream for portfolio value updates.
  * Recalculates all positions for the wallet every 30 seconds.
+ * Heartbeat every 15 seconds to keep connections alive through proxies.
  */
 router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
   const { walletAddress } = req.params;
@@ -65,6 +79,9 @@ router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
+
+  // Tell clients to auto-reconnect after 5 seconds
+  res.write('retry: 5000\n\n');
 
   const sendPortfolio = async () => {
     try {
@@ -118,11 +135,17 @@ router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
   await sendPortfolio();
 
   // Then refresh every 30 seconds
-  const interval = setInterval(sendPortfolio, NAV_INTERVAL_MS);
+  const portfolioInterval = setInterval(sendPortfolio, NAV_INTERVAL_MS);
+
+  // Heartbeat to keep connection alive through proxies
+  const heartbeatInterval = setInterval(() => {
+    res.write(': heartbeat\n\n');
+  }, HEARTBEAT_INTERVAL_MS);
 
   // Clean up on client disconnect
   req.on('close', () => {
-    clearInterval(interval);
+    clearInterval(portfolioInterval);
+    clearInterval(heartbeatInterval);
     res.end();
   });
 });

@@ -63,6 +63,14 @@ export interface NAVResult {
   timestamp: string;
 }
 
+export interface NAVSnapshot {
+  id: string;
+  bundle_id: string;
+  nav: number;
+  legs_data: LegNAVContribution[];
+  created_at: string;
+}
+
 export interface LegNAVContribution {
   leg_id: string;
   question: string;

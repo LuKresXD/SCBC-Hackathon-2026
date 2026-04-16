@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Bundle, Leg, Position, Transaction, BundleWithLegs } from '../types';
+import { Bundle, Leg, Position, Transaction, BundleWithLegs, NAVSnapshot, LegNAVContribution } from '../types';
 
 // --- Bundles ---
 
@@ -281,4 +281,146 @@ export async function updatePositionTokens(
     return null;
   }
   return data;
+}
+
+// --- NAV Snapshots ---
+
+export async function createNAVSnapshot(
+  bundleId: string,
+  nav: number,
+  legsData: LegNAVContribution[]
+): Promise<NAVSnapshot | null> {
+  const { data, error } = await supabase
+    .from('nav_snapshots')
+    .insert({ bundle_id: bundleId, nav, legs_data: legsData })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('createNAVSnapshot error:', error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function getNAVHistory(
+  bundleId: string,
+  limit: number = 100
+): Promise<NAVSnapshot[]> {
+  const { data, error } = await supabase
+    .from('nav_snapshots')
+    .select('*')
+    .eq('bundle_id', bundleId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('getNAVHistory error:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function getNAVHistorySince(
+  bundleId: string,
+  since: string
+): Promise<NAVSnapshot[]> {
+  const { data, error } = await supabase
+    .from('nav_snapshots')
+    .select('*')
+    .eq('bundle_id', bundleId)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('getNAVHistorySince error:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+// --- Admin / Stats ---
+
+export async function getAllPositions(): Promise<Position[]> {
+  const { data, error } = await supabase
+    .from('positions')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('getAllPositions error:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function getAllTransactions(params?: {
+  wallet?: string;
+  type?: string;
+  limit?: number;
+}): Promise<Transaction[]> {
+  let query = supabase
+    .from('transactions')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (params?.wallet) {
+    query = query.eq('wallet_address', params.wallet);
+  }
+  if (params?.type) {
+    query = query.eq('type', params.type);
+  }
+  if (params?.limit) {
+    query = query.limit(params.limit);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('getAllTransactions error:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function getAllLegs(): Promise<Leg[]> {
+  const { data, error } = await supabase
+    .from('legs')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('getAllLegs error:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function getTransactionStats(): Promise<{
+  total_deposited: number;
+  total_redeemed: number;
+  total_fees: number;
+}> {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*');
+
+  if (error) {
+    console.error('getTransactionStats error:', error.message);
+    return { total_deposited: 0, total_redeemed: 0, total_fees: 0 };
+  }
+
+  const transactions = data ?? [];
+
+  const total_deposited = transactions
+    .filter((t) => t.type === 'deposit')
+    .reduce((sum, t) => sum + t.amount_usdc, 0);
+
+  const total_redeemed = transactions
+    .filter((t) => t.type === 'redemption')
+    .reduce((sum, t) => sum + t.amount_usdc, 0);
+
+  const total_fees = transactions.reduce((sum, t) => sum + t.fee_usdc, 0);
+
+  return { total_deposited, total_redeemed, total_fees };
 }

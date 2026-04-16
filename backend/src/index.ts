@@ -8,7 +8,10 @@ import { depositRoutes } from './routes/deposit';
 import { marketRoutes } from './routes/markets';
 import { sseRoutes } from './routes/sse';
 import { docsRoutes } from './routes/docs';
+import { adminRoutes } from './routes/admin';
+import { leaderboardRoutes } from './routes/leaderboard';
 import { startCronJobs } from './services/cron';
+import { supabase } from './db/supabase';
 
 const app = express();
 
@@ -42,8 +45,56 @@ const marketLimiter = rateLimit({
 });
 
 // Health check
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/api/health', async (_req, res) => {
+  const services: {
+    supabase: { status: 'ok' | 'error'; latency_ms: number; error?: string };
+    polymarket: { status: 'ok' | 'error'; latency_ms: number; error?: string };
+  } = {
+    supabase: { status: 'ok', latency_ms: 0 },
+    polymarket: { status: 'ok', latency_ms: 0 },
+  };
+
+  let overall: 'ok' | 'degraded' = 'ok';
+
+  // Check Supabase
+  try {
+    const start = Date.now();
+    const { error } = await supabase.from('bundles').select('id').limit(1);
+    services.supabase.latency_ms = Date.now() - start;
+    if (error) {
+      services.supabase.status = 'error';
+      services.supabase.error = error.message;
+      overall = 'degraded';
+    }
+  } catch (err: any) {
+    services.supabase.status = 'error';
+    services.supabase.error = err.message ?? 'Unknown error';
+    overall = 'degraded';
+  }
+
+  // Check Polymarket API
+  try {
+    const start = Date.now();
+    const resp = await fetch('https://gamma-api.polymarket.com/markets?limit=1');
+    services.polymarket.latency_ms = Date.now() - start;
+    if (!resp.ok) {
+      services.polymarket.status = 'error';
+      services.polymarket.error = `HTTP ${resp.status}`;
+      overall = 'degraded';
+    }
+  } catch (err: any) {
+    services.polymarket.status = 'error';
+    services.polymarket.error = err.message ?? 'Unknown error';
+    overall = 'degraded';
+  }
+
+  res.json({
+    status: overall,
+    timestamp: new Date().toISOString(),
+    uptime_seconds: Math.floor(process.uptime()),
+    memory_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024 * 100) / 100,
+    services,
+  });
 });
 
 // Routes
@@ -52,6 +103,8 @@ app.use('/api/nav', navRoutes);
 app.use('/api/deposit', depositRoutes);
 app.use('/api/markets', marketLimiter, marketRoutes);
 app.use('/api/sse', sseRoutes);
+app.use('/api/leaderboard', leaderboardRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/docs', docsRoutes);
 
 // Root redirect to API docs

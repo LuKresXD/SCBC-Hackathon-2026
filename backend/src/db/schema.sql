@@ -48,8 +48,18 @@ create table transactions (
   created_at timestamptz not null default now()
 );
 
+create table nav_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  bundle_id uuid not null references bundles(id) on delete cascade,
+  nav numeric not null,
+  legs_data jsonb not null,
+  created_at timestamptz not null default now()
+);
+
 create index idx_legs_bundle_id on legs(bundle_id);
 create index idx_positions_bundle_id on positions(bundle_id);
 create index idx_positions_wallet_address on positions(wallet_address);
 create index idx_transactions_bundle_id on transactions(bundle_id);
 create index idx_transactions_wallet_address on transactions(wallet_address);
+create index idx_nav_snapshots_bundle_id on nav_snapshots(bundle_id);
+create index idx_nav_snapshots_created_at on nav_snapshots(created_at);
