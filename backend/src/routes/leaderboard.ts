@@ -20,8 +20,9 @@ router.get('/', async (req: Request, res: Response) => {
       .order('created_at', { ascending: false });
 
     if (error) {
+      // Table may not exist yet - return empty rather than 500
       console.error('Leaderboard query error:', error.message);
-      return res.status(500).json({ error: 'Failed to fetch positions' });
+      return res.json({ count: 0, wallets: [] });
     }
 
     if (!positions || positions.length === 0) {
