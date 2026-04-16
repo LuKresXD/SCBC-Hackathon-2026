@@ -99,6 +99,99 @@ router.get('/name/:name', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/bundles/:id/performance
+ * Rich performance metrics for a bundle including risk analysis.
+ */
+router.get('/:id/performance', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const bundle = await getBundleById(id);
+    if (!bundle) return res.status(404).json({ error: 'Bundle not found' });
+
+    const legs = await getLegsByBundleId(id);
+    if (legs.length === 0) return res.status(404).json({ error: 'No legs found' });
+
+    const navResult = await getLiveNAV(id);
+    const currentNav = navResult?.nav ?? 0;
+
+    // Calculate metrics
+    const activeLegs = legs.filter(l => l.status === 'active');
+    const wonLegs = legs.filter(l => l.status === 'won');
+    const lostLegs = legs.filter(l => l.status === 'lost');
+
+    // Probability distribution stats for active legs
+    const activeProbs = activeLegs.map(l => l.probability);
+    const avgProb = activeProbs.length > 0 ? activeProbs.reduce((s, p) => s + p, 0) / activeProbs.length : 0;
+    const minProb = activeProbs.length > 0 ? Math.min(...activeProbs) : 0;
+    const maxProb = activeProbs.length > 0 ? Math.max(...activeProbs) : 0;
+
+    // Spread (max - min probability) - lower = more correlated
+    const spread = maxProb - minProb;
+
+    // Standard deviation of probabilities
+    const variance = activeProbs.length > 0
+      ? activeProbs.reduce((s, p) => s + Math.pow(p - avgProb, 2), 0) / activeProbs.length
+      : 0;
+    const stdDev = Math.sqrt(variance);
+
+    // NAV vs issue price change
+    const navChange = currentNav - bundle.issue_price;
+    const navChangePercent = bundle.issue_price > 0 ? (navChange / bundle.issue_price) * 100 : 0;
+
+    // Resolution progress
+    const resolvedCount = wonLegs.length + lostLegs.length;
+    const resolutionProgress = legs.length > 0 ? resolvedCount / legs.length : 0;
+
+    // Weighted win rate (of resolved legs only)
+    const resolvedWeight = [...wonLegs, ...lostLegs].reduce((s, l) => s + l.weight, 0);
+    const wonWeight = wonLegs.reduce((s, l) => s + l.weight, 0);
+    const weightedWinRate = resolvedWeight > 0 ? wonWeight / resolvedWeight : null;
+
+    // Days to resolution
+    const resDate = new Date(bundle.resolution_date);
+    const now = new Date();
+    const daysToResolution = Math.max(0, Math.ceil((resDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+
+    // Risk score: simple heuristic based on tier and NAV vs issue
+    const riskMultiplier = bundle.risk_tier === 90 ? 0.5 : bundle.risk_tier === 70 ? 1.0 : 1.5;
+    const riskScore = Math.min(10, Math.max(1, Math.round(riskMultiplier * (1 + stdDev * 10) * 10) / 10));
+
+    res.json({
+      bundle_id: id,
+      bundle_name: bundle.name,
+      risk_tier: bundle.risk_tier,
+      status: bundle.status,
+      current_nav: currentNav,
+      issue_price: bundle.issue_price,
+      nav_change: Math.round(navChange * 10000) / 10000,
+      nav_change_percent: Math.round(navChangePercent * 100) / 100,
+      legs_summary: {
+        total: legs.length,
+        active: activeLegs.length,
+        won: wonLegs.length,
+        lost: lostLegs.length,
+        resolution_progress: Math.round(resolutionProgress * 100) / 100,
+        weighted_win_rate: weightedWinRate !== null ? Math.round(weightedWinRate * 100) / 100 : null,
+      },
+      probability_stats: {
+        average: Math.round(avgProb * 10000) / 10000,
+        min: Math.round(minProb * 10000) / 10000,
+        max: Math.round(maxProb * 10000) / 10000,
+        spread: Math.round(spread * 10000) / 10000,
+        std_dev: Math.round(stdDev * 10000) / 10000,
+      },
+      risk_score: riskScore,
+      days_to_resolution: daysToResolution,
+      resolution_date: bundle.resolution_date,
+      created_at: bundle.created_at,
+    });
+  } catch (err) {
+    console.error('GET /api/bundles/:id/performance error:', err);
+    res.status(500).json({ error: 'Failed to calculate performance metrics' });
+  }
+});
+
+/**
  * GET /api/bundles/:id
  * Get single bundle with all legs and current NAV.
  */

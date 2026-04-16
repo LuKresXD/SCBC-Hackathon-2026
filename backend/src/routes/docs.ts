@@ -39,6 +39,12 @@ const apiDocs = {
     },
     {
       method: 'GET',
+      path: '/api/bundles/:id/performance',
+      description: 'Rich performance metrics for a bundle including probability distribution, risk score, NAV change, resolution progress.',
+      response: '{ bundle_id, bundle_name, risk_tier, status, current_nav, issue_price, nav_change, nav_change_percent, legs_summary: { total, active, won, lost, resolution_progress, weighted_win_rate }, probability_stats: { average, min, max, spread, std_dev }, risk_score, days_to_resolution, resolution_date, created_at }',
+    },
+    {
+      method: 'GET',
       path: '/api/bundles/:id',
       description: 'Get single bundle by UUID with all legs and current NAV',
       response: 'BundleWithLegs',
@@ -201,6 +207,24 @@ const apiDocs = {
         'limit - max results (default 50)',
       ],
       response: '{ count: number, transactions: Transaction[] }',
+    },
+    // Demo
+    {
+      method: 'POST',
+      path: '/api/demo/simulate-lifecycle',
+      description: 'Demo-only: Runs a full product lifecycle simulation in one call. Picks a random active bundle (or uses bundle_id from body), simulates a deposit, and returns the full lifecycle data including NAV and portfolio snapshot.',
+      body: {
+        bundle_id: 'string (optional) - UUID of bundle. Picks random active bundle if omitted.',
+        wallet_address: 'string (optional) - defaults to demo-wallet-001',
+        amount_usdc: 'number (optional) - USDC amount to deposit, defaults to 100',
+      },
+      response: '{ demo: true, lifecycle: { step_1_bundle: BundleWithLegs, step_2_deposit: { transaction_id, bundle_id, wallet_address, amount_usdc, fee_usdc, net_usdc, tokens_minted, issue_price }, step_3_nav: NAVResult, step_4_portfolio: { wallet_address, bundle_id, total_tokens, total_deposited, current_nav, current_value, unrealized_pnl, pnl_percent, position_count } }, message: string }',
+    },
+    {
+      method: 'GET',
+      path: '/api/demo/status',
+      description: 'Returns demo status: demo wallet address, active/total bundle counts, and usage instructions.',
+      response: '{ demo_wallet: string, note: string, active_bundles: number, total_bundles: number }',
     },
   ],
 };

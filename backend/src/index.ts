@@ -10,8 +10,11 @@ import { sseRoutes } from './routes/sse';
 import { docsRoutes } from './routes/docs';
 import { adminRoutes } from './routes/admin';
 import { leaderboardRoutes } from './routes/leaderboard';
+import { demoRoutes } from './routes/demo';
 import { startCronJobs } from './services/cron';
 import { supabase } from './db/supabase';
+import { requestLogger } from './middleware/requestLogger';
+import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
 
@@ -23,7 +26,13 @@ app.use(cors({
   credentials: true,
 }));
 
+// Explicit preflight handler for all routes
+app.options('*', cors());
+
 app.use(express.json());
+
+// Request logging
+app.use(requestLogger);
 
 // Rate limiting: 100 req/min per IP (general)
 const generalLimiter = rateLimit({
@@ -105,10 +114,14 @@ app.use('/api/markets', marketLimiter, marketRoutes);
 app.use('/api/sse', sseRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/demo', demoRoutes);
 app.use('/api/docs', docsRoutes);
 
 // Root redirect to API docs
 app.get('/', (_req, res) => res.redirect('/api/docs'));
+
+// Global error handler (must be after all routes)
+app.use(errorHandler);
 
 app.listen(config.port, () => {
   console.log(`LuKres backend running on port ${config.port}`);
