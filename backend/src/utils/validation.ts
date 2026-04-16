@@ -28,7 +28,15 @@ export const createBundleSchema = z.object({
     )
     .min(1)
     .max(20),
-});
+}).refine(
+  (data) => {
+    const specifiedWeights = data.legs.filter((l) => l.weight !== undefined);
+    if (specifiedWeights.length === 0) return true; // auto-assigned weights are always valid
+    const totalWeight = data.legs.reduce((sum, l) => sum + (l.weight ?? 0), 0);
+    return totalWeight <= 1.01; // small tolerance for floating point
+  },
+  { message: 'Leg weights must sum to approximately 1.0' }
+);
 
 export const depositSchema = z.object({
   bundle_id: z.string().uuid(),

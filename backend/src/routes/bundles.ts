@@ -165,7 +165,7 @@ router.get('/compare', async (req: Request, res: Response) => {
     // Build comparison summary
     const comparison = {
       highest_nav: bundles.reduce((best, b) => (b.current_nav > best.current_nav ? b : best), bundles[0]).name,
-      lowest_risk: bundles.reduce((best, b) => (b.risk_tier > best.risk_tier ? b : best), bundles[0]).name,
+      lowest_risk: bundles.reduce((best, b) => (b.risk_tier < best.risk_tier ? b : best), bundles[0]).name,
       most_resolved: bundles.reduce((best, b) => (b.resolved_legs > best.resolved_legs ? b : best), bundles[0]).name,
       best_performance: bundles.reduce((best, b) => (b.nav_change_percent > best.nav_change_percent ? b : best), bundles[0]).name,
     };

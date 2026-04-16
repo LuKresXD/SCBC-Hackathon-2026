@@ -49,9 +49,9 @@ async function refreshAllBundles(): Promise<void> {
  */
 export function startCronJobs(): void {
   // Every 2 minutes: refresh all active bundle probabilities
-  cron.schedule('*/2 * * * *', () => {
+  cron.schedule('*/2 * * * *', async () => {
     console.log('[cron] Starting bundle refresh...');
-    refreshAllBundles();
+    await refreshAllBundles();
   });
 
   console.log('[cron] Price refresh cron scheduled (every 2 minutes)');
