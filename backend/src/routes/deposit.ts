@@ -4,11 +4,15 @@ import {
   createPosition,
   createTransaction,
   getPositionsByWallet,
+  getPositionsByWalletAndBundle,
+  updatePositionTokens,
   getLegsByBundleId,
 } from '../db/queries';
 import { getIssuePriceForBundle, getLiveNAV } from '../services/pricing';
+import { calculateNAV, isFullyResolved } from '../services/nav';
 import { config } from '../config';
 import { DepositRequest, DepositResponse } from '../types';
+import { validate, depositSchema, redeemSchema } from '../utils/validation';
 
 const router = Router();
 
@@ -18,20 +22,9 @@ const router = Router();
  *
  * Body: { bundle_id, wallet_address, amount_usdc }
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', validate(depositSchema), async (req: Request, res: Response) => {
   try {
     const { bundle_id, wallet_address, amount_usdc } = req.body as DepositRequest;
-
-    // Validate required fields
-    if (!bundle_id || !wallet_address || amount_usdc === undefined) {
-      return res.status(400).json({
-        error: 'Missing required fields: bundle_id, wallet_address, amount_usdc',
-      });
-    }
-
-    if (typeof amount_usdc !== 'number' || amount_usdc <= 0) {
-      return res.status(400).json({ error: 'amount_usdc must be a positive number' });
-    }
 
     // Fetch bundle
     const bundle = await getBundleById(bundle_id);
@@ -94,6 +87,92 @@ router.post('/', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('POST /api/deposit error:', err);
     res.status(500).json({ error: 'Failed to process deposit' });
+  }
+});
+
+/**
+ * POST /api/deposit/redeem
+ * Redeem tokens from a fully resolved bundle. Calculates payout based on final NAV.
+ *
+ * Body: { bundle_id, wallet_address }
+ */
+router.post('/redeem', validate(redeemSchema), async (req: Request, res: Response) => {
+  try {
+    const { bundle_id, wallet_address } = req.body;
+
+    // Fetch bundle
+    const bundle = await getBundleById(bundle_id);
+    if (!bundle) {
+      return res.status(404).json({ error: `Bundle not found: ${bundle_id}` });
+    }
+
+    if (bundle.status !== 'resolved') {
+      return res.status(400).json({
+        error: `Bundle is not resolved yet (status: ${bundle.status}). All legs must resolve before redemption.`,
+      });
+    }
+
+    // Fetch positions for this wallet + bundle
+    const positions = await getPositionsByWalletAndBundle(wallet_address, bundle_id);
+    if (positions.length === 0) {
+      return res.status(404).json({
+        error: `No positions found for wallet ${wallet_address} in bundle ${bundle_id}`,
+      });
+    }
+
+    // Fetch legs and verify full resolution
+    const legs = await getLegsByBundleId(bundle_id);
+    if (!isFullyResolved(legs)) {
+      return res.status(400).json({
+        error: 'Not all legs are resolved. Redemption requires every leg to have a final outcome.',
+      });
+    }
+
+    // Calculate final NAV
+    const navResult = calculateNAV(legs, bundle_id);
+    const finalNav = navResult.nav;
+
+    // Sum total tokens across all positions for this wallet + bundle
+    const totalTokens = positions.reduce((sum, pos) => sum + pos.tokens_held, 0);
+
+    if (totalTokens <= 0) {
+      return res.status(400).json({ error: 'No tokens available for redemption (already redeemed?)' });
+    }
+
+    // Payout = total tokens * final NAV
+    const payoutUsdc = Math.round(totalTokens * finalNav * 1_000_000) / 1_000_000;
+
+    // Burn tokens: set each position's tokens_held to 0
+    await Promise.all(
+      positions.map((pos) => updatePositionTokens(pos.id, 0))
+    );
+
+    // Create redemption transaction
+    const transaction = await createTransaction({
+      bundle_id,
+      wallet_address,
+      type: 'redemption',
+      amount_usdc: payoutUsdc,
+      tokens: totalTokens,
+      fee_usdc: 0,
+    });
+
+    if (!transaction) {
+      return res.status(500).json({ error: 'Failed to create redemption transaction' });
+    }
+
+    res.status(200).json({
+      wallet_address,
+      bundle_id,
+      bundle_name: bundle.name,
+      total_tokens: totalTokens,
+      final_nav: finalNav,
+      payout_usdc: payoutUsdc,
+      transaction_id: transaction.id,
+    });
+  } catch (err) {
+    console.error('POST /api/deposit/redeem error:', err);
+    res.status(500).json({ error: 'Failed to process redemption' });
   }
 });
 

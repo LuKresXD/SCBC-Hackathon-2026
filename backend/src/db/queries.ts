@@ -246,3 +246,39 @@ export async function getTransactionsByWallet(walletAddress: string): Promise<Tr
   }
   return data ?? [];
 }
+
+export async function getPositionsByWalletAndBundle(
+  walletAddress: string,
+  bundleId: string
+): Promise<Position[]> {
+  const { data, error } = await supabase
+    .from('positions')
+    .select('*')
+    .eq('wallet_address', walletAddress)
+    .eq('bundle_id', bundleId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('getPositionsByWalletAndBundle error:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function updatePositionTokens(
+  positionId: string,
+  tokensHeld: number
+): Promise<Position | null> {
+  const { data, error } = await supabase
+    .from('positions')
+    .update({ tokens_held: tokensHeld })
+    .eq('id', positionId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('updatePositionTokens error:', error.message);
+    return null;
+  }
+  return data;
+}

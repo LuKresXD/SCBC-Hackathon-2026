@@ -12,6 +12,7 @@ import { getLiveNAV } from '../services/pricing';
 import { calculateNAV, calculateIssuePrice } from '../services/nav';
 import { getMarketProbability } from '../services/polymarket';
 import { Bundle, BundleWithLegs } from '../types';
+import { validate, createBundleSchema } from '../utils/validation';
 
 const router = Router();
 
@@ -134,33 +135,9 @@ router.get('/:id', async (req: Request, res: Response) => {
  *   }]
  * }
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', validate(createBundleSchema), async (req: Request, res: Response) => {
   try {
     const { name, risk_tier, resolution_date, description, theme, legs } = req.body;
-
-    // Validate required fields
-    if (!name || !risk_tier || !resolution_date) {
-      return res.status(400).json({
-        error: 'Missing required fields: name, risk_tier, resolution_date',
-      });
-    }
-
-    if (![90, 70, 50].includes(risk_tier)) {
-      return res.status(400).json({ error: 'risk_tier must be 90, 70, or 50' });
-    }
-
-    if (!legs || !Array.isArray(legs) || legs.length === 0) {
-      return res.status(400).json({ error: 'At least one leg is required' });
-    }
-
-    for (let i = 0; i < legs.length; i++) {
-      const leg = legs[i];
-      if (!leg.market_id || !leg.question) {
-        return res.status(400).json({
-          error: `Leg ${i} missing required fields: market_id, question`,
-        });
-      }
-    }
 
     // Fetch live probabilities for each leg
     const legProbabilities = await Promise.all(
@@ -182,7 +159,7 @@ router.post('/', async (req: Request, res: Response) => {
       weight: legWeights[i],
     }));
     const issuePrice = calculateIssuePrice(
-      issueLegs.map((l, i) => ({
+      issueLegs.map((l: { probability: number; weight: number }, i: number) => ({
         ...l,
         id: '',
         bundle_id: '',

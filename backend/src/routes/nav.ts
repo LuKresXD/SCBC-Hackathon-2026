@@ -1,5 +1,11 @@
 import { Router, Request, Response } from 'express';
-import { getLiveNAV } from '../services/pricing';
+import { getLiveNAV, checkAndUpdateResolutions } from '../services/pricing';
+import { isFullyResolved } from '../services/nav';
+import {
+  getLegsByBundleId,
+  updateBundleStatus,
+  updateLegResolution,
+} from '../db/queries';
 
 const router = Router();
 
@@ -47,6 +53,103 @@ router.get('/:bundleId/history', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('GET /api/nav/:bundleId/history error:', err);
     res.status(500).json({ error: 'Failed to fetch NAV history' });
+  }
+});
+
+/**
+ * POST /api/nav/:bundleId/check-resolutions
+ * Manually trigger resolution check for a bundle.
+ * If all legs resolve, auto-updates bundle status to 'resolved'.
+ */
+router.post('/:bundleId/check-resolutions', async (req: Request, res: Response) => {
+  try {
+    const { bundleId } = req.params;
+
+    const newlyResolved = await checkAndUpdateResolutions(bundleId);
+
+    // Check if all legs are now resolved
+    const allLegs = await getLegsByBundleId(bundleId);
+    if (allLegs.length === 0) {
+      return res.status(404).json({ error: `No legs found for bundle: ${bundleId}` });
+    }
+
+    let bundleFullyResolved = false;
+    if (isFullyResolved(allLegs)) {
+      await updateBundleStatus(bundleId, 'resolved');
+      bundleFullyResolved = true;
+    }
+
+    res.json({
+      bundle_id: bundleId,
+      newly_resolved: newlyResolved.map((leg) => ({
+        leg_id: leg.id,
+        question: leg.question,
+        status: leg.status,
+        resolution_value: leg.resolution_value,
+      })),
+      newly_resolved_count: newlyResolved.length,
+      total_legs: allLegs.length,
+      resolved_legs: allLegs.filter((l) => l.status !== 'active').length,
+      bundle_fully_resolved: bundleFullyResolved,
+    });
+  } catch (err) {
+    console.error('POST /api/nav/:bundleId/check-resolutions error:', err);
+    res.status(500).json({ error: 'Failed to check resolutions' });
+  }
+});
+
+/**
+ * POST /api/nav/:bundleId/simulate-resolution
+ * FOR DEMO ONLY: manually force-resolve a leg.
+ * Body: { leg_id, outcome: 'won' | 'lost' }
+ */
+router.post('/:bundleId/simulate-resolution', async (req: Request, res: Response) => {
+  try {
+    const { bundleId } = req.params;
+    const { leg_id, outcome } = req.body;
+
+    if (!leg_id || !outcome) {
+      return res.status(400).json({
+        error: 'Missing required fields: leg_id, outcome',
+      });
+    }
+
+    if (outcome !== 'won' && outcome !== 'lost') {
+      return res.status(400).json({
+        error: 'outcome must be "won" or "lost"',
+      });
+    }
+
+    const resolutionValue = outcome === 'won' ? 1.0 : 0.0;
+
+    const updatedLeg = await updateLegResolution(leg_id, outcome, resolutionValue);
+    if (!updatedLeg) {
+      return res.status(404).json({ error: `Leg not found: ${leg_id}` });
+    }
+
+    // Check if all legs are now resolved; if so, update bundle status
+    const allLegs = await getLegsByBundleId(bundleId);
+    let bundleFullyResolved = false;
+    if (isFullyResolved(allLegs)) {
+      await updateBundleStatus(bundleId, 'resolved');
+      bundleFullyResolved = true;
+    }
+
+    res.json({
+      bundle_id: bundleId,
+      leg: {
+        leg_id: updatedLeg.id,
+        question: updatedLeg.question,
+        status: updatedLeg.status,
+        resolution_value: updatedLeg.resolution_value,
+      },
+      total_legs: allLegs.length,
+      resolved_legs: allLegs.filter((l) => l.status !== 'active').length,
+      bundle_fully_resolved: bundleFullyResolved,
+    });
+  } catch (err) {
+    console.error('POST /api/nav/:bundleId/simulate-resolution error:', err);
+    res.status(500).json({ error: 'Failed to simulate resolution' });
   }
 });
 
