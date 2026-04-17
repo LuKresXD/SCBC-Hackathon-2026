@@ -531,8 +531,8 @@ function MarketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
                 onMouseLeave={e=>{e.currentTarget.style.background=C.card;e.currentTarget.style.borderColor=C.border;}}
               >
                 <PulseGauge prob={p.prob} color={color} size={isMobile?44:56} />
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:isMobile?11:12,color:C.textPrimary,fontFamily:FS,marginBottom:4,lineHeight:1.3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.label}</div>
+                <div style={{flex:1,minWidth:0,overflow:"hidden"}}>
+                  <div style={{fontSize:isMobile?11:12,color:C.textPrimary,fontFamily:FS,marginBottom:4,lineHeight:1.3,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{p.label}</div>
                   <div style={{display:"flex",alignItems:"baseline",gap:6}}>
                     <span style={{fontSize:isMobile?15:18,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"-0.01em"}}>{p.prob}%</span>
                     <span style={{fontSize:11,color:p.change>=0?C.green:C.red,fontFamily:FS,fontWeight:500}}>
@@ -629,6 +629,7 @@ function DetailPage({ bundle, fromTab, onBack, demoMode, demoUsdc, onDemoDeposit
   onDemoDeposit:(bundleId:string, usdcAmount:number) => void,
   onDemoPpnDeposit:(bundleId:string, usdcAmount:number) => void,
 }) {
+  const isMobile = useMobile();
   const [usdcAmt,setUsdcAmt]=useState("");
   const [ppnMode,setPpnMode]=useState(false);
   const [confirmed,setConfirmed]=useState(false);
@@ -681,7 +682,7 @@ function DetailPage({ bundle, fromTab, onBack, demoMode, demoUsdc, onDemoDeposit
           </div>
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:20}}>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 300px",gap:20}}>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:14,padding:"20px 20px 16px"}}>
             <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,letterSpacing:"0.06em",marginBottom:14}}>NAV HISTORY (30 days)</div>
@@ -876,15 +877,15 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
           </div>
         )}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:24}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:isMobile?8:12,marginBottom:24}}>
         {[
           ["TOTAL VALUE",`$${totalValue.toFixed(2)}`,C.green],
           ["UNREALIZED P&L",`${totalPnl>=0?"+":""}$${totalPnl.toFixed(2)}`,totalPnl>=0?C.green:C.red],
           ["WEIGHTED PROB",`${weightedProb.toFixed(1)}%`,C.teal]
         ].map(([label,val,color])=>(
-          <div key={label as string} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:12,padding:"18px 20px"}}>
-            <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.07em",marginBottom:10}}>{label as string}</div>
-            <div style={{fontSize:26,fontWeight:500,color:color as string,fontFamily:FS,letterSpacing:"-0.01em"}}>{val as string}</div>
+          <div key={label as string} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:12,padding:isMobile?"12px 10px":"18px 20px"}}>
+            <div style={{fontSize:isMobile?8:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.07em",marginBottom:isMobile?6:10,lineHeight:1.3}}>{label as string}</div>
+            <div style={{fontSize:isMobile?16:26,fontWeight:500,color:color as string,fontFamily:FS,letterSpacing:"-0.01em"}}>{val as string}</div>
           </div>
         ))}
       </div>
