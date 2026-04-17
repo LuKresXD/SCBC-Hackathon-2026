@@ -1,5 +1,16 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+  return isMobile;
+}
 
 const C = {
   bg: "#0a0e13", surface: "#0f1520", card: "#131c28", cardHover: "#172030",
@@ -1172,6 +1183,9 @@ export default function App() {
   const [showWalletModal,setShowWalletModal]=useState(false);
 
   // DEMO MODE — now DEFAULT ON, clean $10k slate
+  const isMobile = useIsMobile();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   const [demoMode, setDemoMode] = useState(true);
   const [demoUsdc, setDemoUsdc] = useState(DEMO_STARTING_USDC);
   const [demoPortfolio, setDemoPortfolio] = useState<Position[]>([]);
@@ -1260,15 +1274,57 @@ export default function App() {
           to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
+
+      {/* Mobile overlay backdrop */}
+      {isMobile && sidebarOpen && (
+        <div onClick={()=>setSidebarOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:40,backdropFilter:"blur(2px)"}} />
+      )}
+
+      {/* Mobile top bar */}
+      {isMobile && (
+        <div style={{position:"fixed",top:0,left:0,right:0,height:56,background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",zIndex:30}}>
+          <div>
+            <div style={{fontSize:18,fontWeight:800,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.08em"}}>LUKRES</div>
+          </div>
+          <button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{background:"none",border:`0.5px solid ${C.border}`,borderRadius:8,padding:"7px 10px",cursor:"pointer",color:C.textSecondary,fontSize:16,lineHeight:1,display:"flex",alignItems:"center",gap:6}}>
+            {sidebarOpen ? "✕" : "☰"}
+          </button>
+        </div>
+      )}
+
       <div style={{display:"flex",minHeight:"100vh",background:C.bg}}>
-        <div style={{width:220,background:C.surface,borderRight:`0.5px solid ${C.border}`,padding:"24px 12px",display:"flex",flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh",overflowY:"auto"}}>
+        <div style={{
+          width:220,
+          background:C.surface,
+          borderRight:`0.5px solid ${C.border}`,
+          padding:"24px 12px",
+          display:"flex",
+          flexDirection:"column",
+          flexShrink:0,
+          // Desktop: sticky sidebar. Mobile: fixed overlay sliding in from left
+          ...(isMobile ? {
+            position:"fixed",
+            top:0,
+            left:0,
+            height:"100vh",
+            zIndex:50,
+            transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
+            transition:`transform 0.3s ${EASE}`,
+            overflowY:"auto",
+          } : {
+            position:"sticky",
+            top:0,
+            height:"100vh",
+            overflowY:"auto",
+          })
+        }}>
           <div style={{padding:"0 10px",marginBottom:32}}>
             <div style={{fontSize:22,fontWeight:800,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.08em"}}>LUKRES</div>
             <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginTop:3,letterSpacing:"0.06em"}}>STRUCTURED PREDICTIONS</div>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:2,flex:1}}>
             {[{id:"markets",label:"Markets"},{id:"baskets",label:"Baskets"},{id:"portfolio",label:"Portfolio"},{id:"about",label:"About"}].map(n=>(
-              <NavItem key={n.id} label={n.label} active={tab===n.id||(tab==="detail"&&fromTab===n.id)} onClick={()=>setTab(n.id as TabId)} />
+              <NavItem key={n.id} label={n.label} active={tab===n.id||(tab==="detail"&&fromTab===n.id)} onClick={()=>{setTab(n.id as TabId);if(isMobile)setSidebarOpen(false);}} />
             ))}
           </div>
 
@@ -1324,7 +1380,7 @@ export default function App() {
             </div>
           </div>
         </div>
-        <div style={{flex:1,padding:"32px 36px",overflowY:"auto"}}>
+        <div style={{flex:1,padding: isMobile ? "76px 16px 24px" : "32px 36px",overflowY:"auto"}}>
           {tab==="markets"&&<MarketsPage onSelect={handleSelect} />}
           {tab==="baskets"&&<BasketsPage onSelect={handleSelect} />}
           {tab==="detail"&&selectedBundle&&<DetailPage bundle={selectedBundle} fromTab={fromTab} onBack={handleBack} demoMode={demoMode} demoUsdc={demoUsdc} onDemoDeposit={handleDemoDeposit} onDemoPpnDeposit={handleDemoPpnDeposit} />}
