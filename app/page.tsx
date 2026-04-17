@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, createContext, useContext } from "react";
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false);
@@ -11,6 +11,8 @@ function useIsMobile() {
   }, []);
   return isMobile;
 }
+const MobileCtx = createContext(false);
+const useMobile = () => useContext(MobileCtx);
 
 const C = {
   bg: "#0a0e13", surface: "#0f1520", card: "#131c28", cardHover: "#172030",
@@ -417,13 +419,14 @@ function Ticker() {
 }
 
 function FeaturedHero({ bundle, onClick }: { bundle:Bundle, onClick:()=>void }) {
+  const isMobile = useMobile();
   const color = tc(bundle.tier);
   return (
     <div onClick={onClick} style={{
       background:`linear-gradient(135deg, ${C.card} 0%, ${C.surface} 100%)`,
       border:`0.5px solid ${C.border}`,
       borderRadius:18,
-      padding:"28px 32px",
+      padding: isMobile ? "20px 18px" : "28px 32px",
       cursor:"pointer",
       position:"relative",
       overflow:"hidden",
@@ -434,18 +437,18 @@ function FeaturedHero({ bundle, onClick }: { bundle:Bundle, onClick:()=>void }) 
     onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor=C.border;}}
     >
       <div style={{position:"absolute",top:-100,right:-100,width:400,height:400,background:`radial-gradient(circle, ${color}1a 0%, transparent 65%)`,pointerEvents:"none"}} />
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1.3fr",gap:36,position:"relative",zIndex:1,alignItems:"center"}}>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1.3fr",gap:isMobile?16:36,position:"relative",zIndex:1,alignItems:"center"}}>
         <div>
-          <div style={{display:"inline-flex",alignItems:"center",gap:7,padding:"4px 10px",borderRadius:20,background:color+"18",border:`0.5px solid ${color}40`,marginBottom:16}}>
+          <div style={{display:"inline-flex",alignItems:"center",gap:7,padding:"4px 10px",borderRadius:20,background:color+"18",border:`0.5px solid ${color}40`,marginBottom:12}}>
             <div style={{width:5,height:5,borderRadius:"50%",background:color}} />
             <span style={{fontSize:10,color,fontFamily:FS,fontWeight:500,letterSpacing:"0.1em"}}>FEATURED · {bundle.tier}% TIER</span>
           </div>
-          <div style={{fontSize:30,fontWeight:700,color:C.textPrimary,fontFamily:FD,marginBottom:6,letterSpacing:"-0.01em"}}>{bundle.id}</div>
-          <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS,marginBottom:22}}>
+          <div style={{fontSize:isMobile?22:30,fontWeight:700,color:C.textPrimary,fontFamily:FD,marginBottom:6,letterSpacing:"-0.01em"}}>{bundle.id}</div>
+          <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS,marginBottom:16}}>
             {bundle.resolved}/{bundle.totalLegs} legs resolved · Resolves {bundle.date}
           </div>
-          <div style={{display:"flex",alignItems:"baseline",gap:12,marginBottom:18}}>
-            <div style={{fontSize:48,fontWeight:700,color,fontFamily:FD,lineHeight:1,letterSpacing:"-0.02em"}}>{(bundle.nav*100).toFixed(1)}%</div>
+          <div style={{display:"flex",alignItems:"baseline",gap:12,marginBottom:12}}>
+            <div style={{fontSize:isMobile?36:48,fontWeight:700,color,fontFamily:FD,lineHeight:1,letterSpacing:"-0.02em"}}>{(bundle.nav*100).toFixed(1)}%</div>
             <div>
               <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>${bundle.nav.toFixed(3)}</div>
               <div style={{fontSize:12,fontWeight:500,color:bundle.change>=0?C.green:C.red,fontFamily:FS,marginTop:2}}>
@@ -457,9 +460,11 @@ function FeaturedHero({ bundle, onClick }: { bundle:Bundle, onClick:()=>void }) 
             View basket →
           </div>
         </div>
-        <div style={{height:160}}>
-          <Sparkline data={bundle.history} color={color} height={160} width={500} />
-        </div>
+        {!isMobile && (
+          <div style={{height:160}}>
+            <Sparkline data={bundle.history} color={color} height={160} width={500} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -485,6 +490,7 @@ function PulseGauge({ prob, color, size=56 }: { prob:number, color:string, size?
 }
 
 function MarketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
+  const isMobile = useMobile();
   const sorted=[...BUNDLES].sort((a,b)=>b.change-a.change);
   const gainers=sorted.slice(0,3); const losers=[...sorted].reverse().slice(0,3);
   const featured = sorted[0];
@@ -497,7 +503,7 @@ function MarketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
       </div>
       <Ticker />
       <FeaturedHero bundle={featured} onClick={()=>onSelect(featured,"markets")} />
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:36}}>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20,marginBottom:36}}>
         <div>
           <div style={{fontSize:11,color:C.green,fontFamily:FS,fontWeight:500,letterSpacing:"0.08em",marginBottom:10}}>TOP GAINERS</div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
@@ -505,7 +511,7 @@ function MarketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
           </div>
         </div>
         <div>
-          <div style={{fontSize:11,color:C.red,fontFamily:FS,fontWeight:500,letterSpacing:"0.08em",marginBottom:10}}>TOP LOSERS</div>
+          <div style={{fontSize:11,color:C.red,fontFamily:FS,fontWeight:500,letterSpacing:"0.08em",marginBottom:10,marginTop:isMobile?16:0}}>TOP LOSERS</div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {losers.map((b,i)=><MoverRow key={b.id} bundle={b} rank={i+1} isPositive={false} onClick={()=>onSelect(b,"markets")} />)}
           </div>
@@ -514,21 +520,21 @@ function MarketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
       <div style={{marginBottom:24}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
           <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,fontWeight:500,letterSpacing:"0.08em"}}>PREDICTION MARKET PULSE</div>
-          <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.06em"}}>UNDERLYING MARKETS · LIVE</div>
+          {!isMobile && <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.06em"}}>UNDERLYING MARKETS · LIVE</div>}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(3, 1fr)",gap:10}}>
           {HOT_PREDICTIONS.map((p,i)=>{
             const color = p.prob>70?C.teal:p.prob>50?C.amber:C.coral;
             return (
-              <div key={i} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:12,padding:"16px 18px",display:"flex",alignItems:"center",gap:14,transition:`all 0.2s ${EASE}`}}
+              <div key={i} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:12,padding:isMobile?"12px 14px":"16px 18px",display:"flex",alignItems:"center",gap:isMobile?10:14,transition:`all 0.2s ${EASE}`}}
                 onMouseEnter={e=>{e.currentTarget.style.background=C.cardHover;e.currentTarget.style.borderColor=C.borderHover;}}
                 onMouseLeave={e=>{e.currentTarget.style.background=C.card;e.currentTarget.style.borderColor=C.border;}}
               >
-                <PulseGauge prob={p.prob} color={color} />
+                <PulseGauge prob={p.prob} color={color} size={isMobile?44:56} />
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:12,color:C.textPrimary,fontFamily:FS,marginBottom:4,lineHeight:1.3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.label}</div>
+                  <div style={{fontSize:isMobile?11:12,color:C.textPrimary,fontFamily:FS,marginBottom:4,lineHeight:1.3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.label}</div>
                   <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                    <span style={{fontSize:18,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"-0.01em"}}>{p.prob}%</span>
+                    <span style={{fontSize:isMobile?15:18,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"-0.01em"}}>{p.prob}%</span>
                     <span style={{fontSize:11,color:p.change>=0?C.green:C.red,fontFamily:FS,fontWeight:500}}>
                       {p.change>=0?"+":""}{p.change.toFixed(1)}
                     </span>
@@ -541,8 +547,8 @@ function MarketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
       </div>
       <div>
         <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,fontWeight:500,letterSpacing:"0.08em",marginBottom:12}}>LATEST NEWS</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:10}}>
-          {NEWS.slice(0,6).map((n,i)=>(
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(3, 1fr)",gap:10}}>
+          {NEWS.slice(0,isMobile?4:6).map((n,i)=>(
             <div key={i} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",borderLeft:`2px solid ${n.impact==="positive"?C.green:n.impact==="negative"?C.red:C.textMuted}`,transition:`all 0.2s ${EASE}`}}
               onMouseEnter={e=>e.currentTarget.style.background=C.cardHover}
               onMouseLeave={e=>e.currentTarget.style.background=C.card}
@@ -805,6 +811,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
   usdcBalance:number,
   demoMode:boolean,
 }) {
+  const isMobile = useMobile();
   const [activeId,setActiveId]=useState<string|null>(null);
 
   const lkrsPositions=portfolio.map(p=>{
@@ -975,125 +982,204 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
 
       {!hasNoPositions && (
         <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:16,overflow:"hidden"}}>
-          {/* NEW COLUMN LAYOUT: Position | Qty | NAV | Value | Max payout | 30d | P&L */}
-          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1.2fr 90px 80px",padding:"10px 24px",borderBottom:`0.5px solid ${C.border}`}}>
-            {["Position","Qty","NAV","Value","Max payout","30d","P&L"].map(h=>(
-              <div key={h} style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.06em"}}>{h.toUpperCase()}</div>
-            ))}
-          </div>
-
-          {[90,70,50].map(tier=>{
-            const tp=lkrsPositions.filter(p=>p.bundle.tier===tier).sort((a,b)=>b.currentVal-a.currentVal);
-            if(!tp.length) return null;
-            return (
-              <div key={tier}>
-                <div style={{padding:"7px 24px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
-                  <div style={{width:5,height:5,borderRadius:"50%",background:tc(tier)}} />
-                  <span style={{fontSize:10,color:tc(tier),fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>{tier}% TIER</span>
-                </div>
-                {tp.map(p=>(
-                  <div key={p.id}
-                    onClick={()=>onSelect(p.bundle,"portfolio")}
-                    onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=C.cardHover;setActiveId(p.id);}}
-                    onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";setActiveId(null);}}
-                    style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1.2fr 90px 80px",padding:"13px 24px",borderBottom:`0.5px solid ${C.border}`,cursor:"pointer",transition:`background 0.2s ${EASE}`,alignItems:"center"}}>
-                    <div style={{display:"flex",alignItems:"center",gap:10}}>
-                      <div style={{width:3,height:30,borderRadius:2,background:p.color,flexShrink:0}} />
-                      <div>
-                        <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>{p.id}</div>
-                        <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>{p.bundle.daysLeft}d · {p.bundle.resolved}/{p.bundle.totalLegs} resolved</div>
-                      </div>
-                    </div>
-                    <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>{p.qty.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
-                    <div style={{fontSize:13,fontWeight:600,color:p.color,fontFamily:FD}}>${p.bundle.nav.toFixed(3)}</div>
-                    <div style={{fontSize:13,fontWeight:500,color:C.textPrimary,fontFamily:FS}}>${p.currentVal.toFixed(0)}</div>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:500,color:C.green,fontFamily:FD}}>${p.maxPayout.toFixed(0)}</div>
-                      <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginTop:1}}>{p.unresolved} leg{p.unresolved!==1?"s":""} to resolve</div>
-                    </div>
-                    <div><Sparkline data={p.bundle.history} color={p.color} height={26} width={80} /></div>
-                    <div style={{textAlign:"right"}}>
-                      <div style={{fontSize:13,fontWeight:600,color:p.pnl>=0?C.green:C.red,fontFamily:FD}}>{p.pnl>=0?"+":""}{p.pnlPct.toFixed(1)}%</div>
-                      <div style={{fontSize:10,color:C.textMuted,fontFamily:FS}}>{p.pnl>=0?"+":""}${p.pnl.toFixed(0)}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-
-          {vaultDerived.length>0&&(
+          {isMobile ? (
+            // MOBILE: compact card rows, no horizontal scroll
             <div>
-              <div style={{padding:"7px 24px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
-                <div style={{width:5,height:5,borderRadius:"50%",background:C.teal}} />
-                <span style={{fontSize:10,color:C.teal,fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>METEORA VAULT</span>
-              </div>
-              {vaultDerived.map(v=>(
-                <div key={v.id}
-                  onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=C.cardHover;setActiveId(v.id);}}
-                  onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";setActiveId(null);}}
-                  style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1.2fr 90px 80px",padding:"13px 24px",borderBottom:`0.5px solid ${C.border}`,cursor:"default",transition:`background 0.2s ${EASE}`,alignItems:"center"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{width:3,height:30,borderRadius:2,background:C.teal,flexShrink:0}} />
-                    <div>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <span style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>{v.label}</span>
-                        <span style={{fontSize:9,padding:"2px 6px",borderRadius:10,background:C.tealBg,color:C.teal,border:`0.5px solid ${C.teal}44`,fontWeight:500,fontFamily:FS}}>PROTECTED</span>
+              {[90,70,50].map(tier=>{
+                const tp=lkrsPositions.filter(p=>p.bundle.tier===tier).sort((a,b)=>b.currentVal-a.currentVal);
+                if(!tp.length) return null;
+                return (
+                  <div key={tier}>
+                    <div style={{padding:"7px 16px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:5,height:5,borderRadius:"50%",background:tc(tier)}} />
+                      <span style={{fontSize:10,color:tc(tier),fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>{tier}% TIER</span>
+                    </div>
+                    {tp.map(p=>(
+                      <div key={p.id} onClick={()=>onSelect(p.bundle,"portfolio")}
+                        style={{padding:"12px 16px",borderBottom:`0.5px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+                          <div style={{width:3,height:32,borderRadius:2,background:p.color,flexShrink:0}} />
+                          <div style={{minWidth:0}}>
+                            <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>{p.id}</div>
+                            <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>{p.bundle.resolved}/{p.bundle.totalLegs} resolved · {p.bundle.daysLeft}d</div>
+                          </div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontSize:13,fontWeight:500,color:C.textPrimary,fontFamily:FS}}>${p.currentVal.toFixed(0)}</div>
+                          <div style={{fontSize:11,fontWeight:600,color:p.pnl>=0?C.green:C.red,fontFamily:FD}}>{p.pnl>=0?"+":""}{p.pnlPct.toFixed(1)}%</div>
+                          <div style={{fontSize:10,color:C.textMuted,fontFamily:FS}}>max ${p.maxPayout.toFixed(0)}</div>
+                        </div>
                       </div>
-                      <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>{v.daysLeft}d remaining · redeemable anytime</div>
-                    </div>
+                    ))}
                   </div>
-                  <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>${v.principal.toFixed(0)}</div>
-                  <div style={{fontSize:13,color:C.teal,fontFamily:FS}}>{v.apy}% APY</div>
-                  <div style={{fontSize:13,fontWeight:500,color:C.textPrimary,fontFamily:FS}}>${v.currentVal.toFixed(0)}</div>
-                  <div>
-                    <div style={{fontSize:13,fontWeight:500,color:C.teal,fontFamily:FD}}>${v.principal.toFixed(0)}</div>
-                    <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginTop:1}}>guaranteed floor</div>
+                );
+              })}
+              {vaultDerived.length>0&&(
+                <div>
+                  <div style={{padding:"7px 16px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{width:5,height:5,borderRadius:"50%",background:C.teal}} />
+                    <span style={{fontSize:10,color:C.teal,fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>METEORA VAULT</span>
                   </div>
-                  <div>
-                    <div style={{height:3,background:C.border,borderRadius:2,overflow:"hidden",marginBottom:3,maxWidth:80}}>
-                      <div style={{width:`${(1-v.daysLeft/v.daysTotal)*100}%`,height:"100%",background:C.teal,borderRadius:2}} />
+                  {vaultDerived.map(v=>(
+                    <div key={v.id} style={{padding:"12px 16px",borderBottom:`0.5px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{width:3,height:32,borderRadius:2,background:C.teal,flexShrink:0}} />
+                        <div>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <span style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>{v.label}</span>
+                            <span style={{fontSize:9,padding:"2px 5px",borderRadius:8,background:C.tealBg,color:C.teal,border:`0.5px solid ${C.teal}44`,fontFamily:FS}}>PROTECTED</span>
+                          </div>
+                          <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>{v.apy}% APY · {v.daysLeft}d left</div>
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        <div style={{fontSize:13,fontWeight:500,color:C.textPrimary,fontFamily:FS}}>${v.currentVal.toFixed(0)}</div>
+                        <div style={{fontSize:11,color:C.green,fontFamily:FS}}>+${v.yieldEarned.toFixed(2)}</div>
+                      </div>
                     </div>
-                    <div style={{fontSize:10,color:C.textMuted,fontFamily:FS}}>earning</div>
+                  ))}
+                </div>
+              )}
+              <div>
+                <div style={{padding:"7px 16px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:5,height:5,borderRadius:"50%",background:"#4a5a6a"}} />
+                  <span style={{fontSize:10,color:"#6b8099",fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>CASH</span>
+                </div>
+                <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:3,height:32,borderRadius:2,background:"#4a5a6a",flexShrink:0}} />
+                    <div>
+                      <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>USDC</div>
+                      <div style={{fontSize:11,color:C.textMuted,fontFamily:FS}}>Available</div>
+                    </div>
                   </div>
                   <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:13,fontWeight:600,color:C.green,fontFamily:FD}}>+{v.pnlPct.toFixed(1)}%</div>
-                    <div style={{fontSize:10,color:C.textMuted,fontFamily:FS}}>+${v.pnl.toFixed(0)}</div>
+                    <div style={{fontSize:13,fontWeight:500,color:C.textPrimary,fontFamily:FS}}>${usdcBalance.toFixed(0)}</div>
+                    <div style={{fontSize:11,color:C.textMuted,fontFamily:FS}}>0.0%</div>
                   </div>
                 </div>
-              ))}
+              </div>
             </div>
-          )}
-
-          <div>
-            <div style={{padding:"7px 24px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
-              <div style={{width:5,height:5,borderRadius:"50%",background:"#4a5a6a"}} />
-              <span style={{fontSize:10,color:"#6b8099",fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>CASH</span>
-            </div>
-            <div
-              onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=C.cardHover;setActiveId("USDC");}}
-              onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";setActiveId(null);}}
-              style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1.2fr 90px 80px",padding:"13px 24px",cursor:"default",transition:`background 0.2s ${EASE}`,alignItems:"center"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:3,height:30,borderRadius:2,background:"#4a5a6a",flexShrink:0}} />
+          ) : (
+            // DESKTOP: full table unchanged
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1.2fr 90px 80px",padding:"10px 24px",borderBottom:`0.5px solid ${C.border}`}}>
+                {["Position","Qty","NAV","Value","Max payout","30d","P&L"].map(h=>(
+                  <div key={h} style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.06em"}}>{h.toUpperCase()}</div>
+                ))}
+              </div>
+              {[90,70,50].map(tier=>{
+                const tp=lkrsPositions.filter(p=>p.bundle.tier===tier).sort((a,b)=>b.currentVal-a.currentVal);
+                if(!tp.length) return null;
+                return (
+                  <div key={tier}>
+                    <div style={{padding:"7px 24px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:5,height:5,borderRadius:"50%",background:tc(tier)}} />
+                      <span style={{fontSize:10,color:tc(tier),fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>{tier}% TIER</span>
+                    </div>
+                    {tp.map(p=>(
+                      <div key={p.id}
+                        onClick={()=>onSelect(p.bundle,"portfolio")}
+                        onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=C.cardHover;setActiveId(p.id);}}
+                        onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";setActiveId(null);}}
+                        style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1.2fr 90px 80px",padding:"13px 24px",borderBottom:`0.5px solid ${C.border}`,cursor:"pointer",transition:`background 0.2s ${EASE}`,alignItems:"center"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <div style={{width:3,height:30,borderRadius:2,background:p.color,flexShrink:0}} />
+                          <div>
+                            <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>{p.id}</div>
+                            <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>{p.bundle.daysLeft}d · {p.bundle.resolved}/{p.bundle.totalLegs} resolved</div>
+                          </div>
+                        </div>
+                        <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>{p.qty.toLocaleString(undefined,{maximumFractionDigits:2})}</div>
+                        <div style={{fontSize:13,fontWeight:600,color:p.color,fontFamily:FD}}>${p.bundle.nav.toFixed(3)}</div>
+                        <div style={{fontSize:13,fontWeight:500,color:C.textPrimary,fontFamily:FS}}>${p.currentVal.toFixed(0)}</div>
+                        <div>
+                          <div style={{fontSize:13,fontWeight:500,color:C.green,fontFamily:FD}}>${p.maxPayout.toFixed(0)}</div>
+                          <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginTop:1}}>{p.unresolved} leg{p.unresolved!==1?"s":""} to resolve</div>
+                        </div>
+                        <div><Sparkline data={p.bundle.history} color={p.color} height={26} width={80} /></div>
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontSize:13,fontWeight:600,color:p.pnl>=0?C.green:C.red,fontFamily:FD}}>{p.pnl>=0?"+":""}{p.pnlPct.toFixed(1)}%</div>
+                          <div style={{fontSize:10,color:C.textMuted,fontFamily:FS}}>{p.pnl>=0?"+":""}${p.pnl.toFixed(0)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+              {vaultDerived.length>0&&(
                 <div>
-                  <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>USDC</div>
-                  <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>Solana · available</div>
+                  <div style={{padding:"7px 24px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{width:5,height:5,borderRadius:"50%",background:C.teal}} />
+                    <span style={{fontSize:10,color:C.teal,fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>METEORA VAULT</span>
+                  </div>
+                  {vaultDerived.map(v=>(
+                    <div key={v.id}
+                      onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=C.cardHover;setActiveId(v.id);}}
+                      onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";setActiveId(null);}}
+                      style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1.2fr 90px 80px",padding:"13px 24px",borderBottom:`0.5px solid ${C.border}`,cursor:"default",transition:`background 0.2s ${EASE}`,alignItems:"center"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{width:3,height:30,borderRadius:2,background:C.teal,flexShrink:0}} />
+                        <div>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>{v.label}</span>
+                            <span style={{fontSize:9,padding:"2px 6px",borderRadius:10,background:C.tealBg,color:C.teal,border:`0.5px solid ${C.teal}44`,fontWeight:500,fontFamily:FS}}>PROTECTED</span>
+                          </div>
+                          <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>{v.daysLeft}d remaining · redeemable anytime</div>
+                        </div>
+                      </div>
+                      <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>${v.principal.toFixed(0)}</div>
+                      <div style={{fontSize:13,color:C.teal,fontFamily:FS}}>{v.apy}% APY</div>
+                      <div style={{fontSize:13,fontWeight:500,color:C.textPrimary,fontFamily:FS}}>${v.currentVal.toFixed(0)}</div>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:500,color:C.teal,fontFamily:FD}}>${v.principal.toFixed(0)}</div>
+                        <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginTop:1}}>guaranteed floor</div>
+                      </div>
+                      <div>
+                        <div style={{height:3,background:C.border,borderRadius:2,overflow:"hidden",marginBottom:3,maxWidth:80}}>
+                          <div style={{width:`${(1-v.daysLeft/v.daysTotal)*100}%`,height:"100%",background:C.teal,borderRadius:2}} />
+                        </div>
+                        <div style={{fontSize:10,color:C.textMuted,fontFamily:FS}}>earning</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:13,fontWeight:600,color:C.green,fontFamily:FD}}>+{v.pnlPct.toFixed(1)}%</div>
+                        <div style={{fontSize:10,color:C.textMuted,fontFamily:FS}}>+${v.pnl.toFixed(0)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div>
+                <div style={{padding:"7px 24px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:5,height:5,borderRadius:"50%",background:"#4a5a6a"}} />
+                  <span style={{fontSize:10,color:"#6b8099",fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>CASH</span>
+                </div>
+                <div
+                  onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=C.cardHover;setActiveId("USDC");}}
+                  onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";setActiveId(null);}}
+                  style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1.2fr 90px 80px",padding:"13px 24px",cursor:"default",transition:`background 0.2s ${EASE}`,alignItems:"center"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:3,height:30,borderRadius:2,background:"#4a5a6a",flexShrink:0}} />
+                    <div>
+                      <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>USDC</div>
+                      <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>Solana · available</div>
+                    </div>
+                  </div>
+                  <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>${usdcBalance.toFixed(0)}</div>
+                  <div style={{fontSize:13,color:C.textMuted,fontFamily:FS}}>$1.000</div>
+                  <div style={{fontSize:13,fontWeight:500,color:C.textPrimary,fontFamily:FS}}>${usdcBalance.toFixed(0)}</div>
+                  <div>
+                    <div style={{fontSize:13,color:C.textSecondary,fontFamily:FD}}>${usdcBalance.toFixed(0)}</div>
+                    <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginTop:1}}>stable</div>
+                  </div>
+                  <div><Sparkline data={USDC_HISTORY} color="#4a5a6a" height={26} width={80} /></div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:13,color:C.textMuted,fontFamily:FD}}>0.0%</div>
+                  </div>
                 </div>
               </div>
-              <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>${usdcBalance.toFixed(0)}</div>
-              <div style={{fontSize:13,color:C.textMuted,fontFamily:FS}}>$1.000</div>
-              <div style={{fontSize:13,fontWeight:500,color:C.textPrimary,fontFamily:FS}}>${usdcBalance.toFixed(0)}</div>
-              <div>
-                <div style={{fontSize:13,color:C.textSecondary,fontFamily:FD}}>${usdcBalance.toFixed(0)}</div>
-                <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginTop:1}}>stable</div>
-              </div>
-              <div><Sparkline data={USDC_HISTORY} color="#4a5a6a" height={26} width={80} /></div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:13,color:C.textMuted,fontFamily:FD}}>0.0%</div>
-              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>
@@ -1101,19 +1187,20 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
 }
 
 function AboutPage() {
+  const isMobile = useMobile();
   return (
     <div>
       <div style={{marginBottom:48}}>
-        <div style={{fontSize:34,fontWeight:700,color:C.textPrimary,fontFamily:FD,lineHeight:1.2,marginBottom:16,letterSpacing:"-0.02em"}}>
+        <div style={{fontSize:isMobile?26:34,fontWeight:700,color:C.textPrimary,fontFamily:FD,lineHeight:1.2,marginBottom:16,letterSpacing:"-0.02em"}}>
           One deposit.<br/>Diversified prediction market exposure.
         </div>
-        <div style={{fontSize:15,color:C.textSecondary,fontFamily:FS,lineHeight:1.75,maxWidth:640}}>
+        <div style={{fontSize:isMobile?14:15,color:C.textSecondary,fontFamily:FS,lineHeight:1.75,maxWidth:640}}>
           Lukres bundles 10 or more high-liquidity prediction market positions into a single token. Pick your risk level, deposit USDC, and receive a basket token that trades freely and auto-redeems when markets settle.
         </div>
       </div>
       <div style={{marginBottom:48}}>
         <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,letterSpacing:"0.08em",fontWeight:500,marginBottom:16}}>HOW IT WORKS</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(3,1fr)",gap:12}}>
           {[
             {n:"01",title:"Pick a tier and deposit",body:"Choose your risk level and deposit USDC. Your funds buy the underlying prediction market positions. A 0.5% structuring fee is taken at issuance.",color:C.teal},
             {n:"02",title:"Receive a basket token",body:"An LKRS token lands in your wallet. It tracks the live net asset value of the basket and trades freely. You can exit at any time.",color:C.amber},
@@ -1129,7 +1216,7 @@ function AboutPage() {
       </div>
       <div style={{marginBottom:48}}>
         <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,letterSpacing:"0.08em",fontWeight:500,marginBottom:16}}>RISK TIERS</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(3,1fr)",gap:12}}>
           {[
             {tier:90,label:"Conservative",desc:"High-probability basket averaging around 90% implied probability. Built for users who want exposure with minimal downside.",color:C.teal},
             {tier:70,label:"Balanced",desc:"Medium conviction basket averaging around 70% probability. Broader range of outcomes with meaningful upside.",color:C.amber},
@@ -1257,6 +1344,7 @@ export default function App() {
   };
 
   return (
+    <MobileCtx.Provider value={isMobile}>
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
@@ -1286,7 +1374,7 @@ export default function App() {
           <div>
             <div style={{fontSize:18,fontWeight:800,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.08em"}}>LUKRES</div>
           </div>
-          <button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{background:"none",border:`0.5px solid ${C.border}`,borderRadius:8,padding:"7px 10px",cursor:"pointer",color:C.textSecondary,fontSize:16,lineHeight:1,display:"flex",alignItems:"center",gap:6}}>
+          <button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{background:"none",border:`0.5px solid ${C.border}`,borderRadius:8,padding:"9px 14px",cursor:"pointer",color:C.textSecondary,fontSize:20,lineHeight:1,display:"flex",alignItems:"center",gap:6}}>
             {sidebarOpen ? "✕" : "☰"}
           </button>
         </div>
@@ -1437,5 +1525,6 @@ export default function App() {
         </div>
       )}
     </>
+    </MobileCtx.Provider>
   );
 }
