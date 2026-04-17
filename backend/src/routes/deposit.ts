@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { PublicKey } from '@solana/web3.js';
 import {
   getBundleById,
   createPosition,
@@ -12,175 +13,295 @@ import {
 import { getIssuePriceForBundle, getLiveNAV } from '../services/pricing';
 import { calculateNAV, isFullyResolved } from '../services/nav';
 import { config } from '../config';
+import { supabase } from '../db/supabase';
+import {
+  buildDepositTx,
+  buildRedeemTx,
+  confirmTransaction,
+  getVaultState,
+} from '../services/solana';
 import { DepositRequest, DepositResponse } from '../types';
 import { validate, depositSchema, redeemSchema } from '../utils/validation';
 
 const router = Router();
 
-/**
- * POST /api/deposit
- * Record a deposit: calculate fees, mint tokens, create position + transaction.
- *
- * Body: { bundle_id, wallet_address, amount_usdc }
- */
-router.post('/', validate(depositSchema), async (req: Request, res: Response) => {
+// ---------------------------------------------------------------------------
+// POST /api/deposit  and  /api/deposit/prepare
+//
+// Non-custodial prepare step: builds a Solana transaction the caller's wallet
+// will sign in Phantom. Does NOT write to the DB — that happens when the
+// frontend calls /api/deposit/confirm with the confirmed signature.
+//
+// The legacy POST /api/deposit continues to accept the same body and returns
+// a DepositResponse augmented with `transaction_base64` and `expected_tokens`.
+// ---------------------------------------------------------------------------
+
+async function prepareDepositHandler(req: Request, res: Response) {
   try {
     const { bundle_id, wallet_address, amount_usdc } = req.body as DepositRequest;
 
-    // Fetch bundle
     const bundle = await getBundleById(bundle_id);
-    if (!bundle) {
-      return res.status(404).json({ error: `Bundle not found: ${bundle_id}` });
-    }
-
-    if (bundle.status !== 'active') {
+    if (!bundle) return res.status(404).json({ error: `Bundle not found: ${bundle_id}` });
+    if (bundle.status !== 'active')
       return res.status(400).json({ error: `Bundle is not active (status: ${bundle.status})` });
-    }
 
-    // Get current issue price (live NAV)
+    // Derive issue price (used only for the client-side display — the on-chain
+    // math uses the vault's stored issue_price_bps, not this value).
     const issuePrice = await getIssuePriceForBundle(bundle_id);
     if (!issuePrice || issuePrice <= 0) {
       return res.status(500).json({ error: 'Unable to determine issue price' });
     }
 
-    // Calculate fees and tokens
-    const feeUsdc = amount_usdc * config.structuringFee;
-    const netUsdc = amount_usdc - feeUsdc;
-    const tokensMinted = netUsdc / issuePrice;
+    // Convert amount_usdc (UI number) → 6-dec base units for on-chain.
+    const amountBaseUnits = BigInt(Math.round(amount_usdc * 1_000_000));
 
-    // Create position record
+    let built;
+    try {
+      built = await buildDepositTx(
+        new PublicKey(wallet_address),
+        bundle_id,
+        amountBaseUnits,
+      );
+    } catch (err: any) {
+      // Common case: onchain vault hasn't been initialized yet for this bundle.
+      if (String(err).includes('Account does not exist') || String(err).includes('not found')) {
+        return res.status(409).json({
+          error: 'Onchain vault has not been initialized for this bundle. Run /api/admin/bundles/:id/init-onchain first.',
+        });
+      }
+      throw err;
+    }
+
+    // Client-friendly preview numbers.
+    const feeUsdcUi = Number(built.feeUsdc) / 1_000_000;
+    const netUsdcUi = amount_usdc - feeUsdcUi;
+    const tokensMintedUi = Number(built.expectedTokens) / 1_000_000;
+
+    res.status(200).json({
+      kind: 'prepared',
+      bundle_id,
+      wallet_address,
+      amount_usdc,
+      fee_usdc: feeUsdcUi,
+      net_usdc: netUsdcUi,
+      issue_price: issuePrice,
+      tokens_minted: tokensMintedUi, // legacy key for compatibility
+      expected_tokens: tokensMintedUi,
+      transaction_base64: built.transactionBase64,
+      vault_pda: built.vaultPda,
+      trax_mint: built.traxMint,
+      recent_blockhash: built.recentBlockhash,
+      last_valid_block_height: built.lastValidBlockHeight,
+    });
+  } catch (err) {
+    console.error('POST /api/deposit/prepare error:', err);
+    res.status(500).json({ error: 'Failed to prepare deposit' });
+  }
+}
+
+router.post('/prepare', validate(depositSchema), prepareDepositHandler);
+router.post('/', validate(depositSchema), prepareDepositHandler);
+
+// ---------------------------------------------------------------------------
+// POST /api/deposit/confirm
+//
+// Called after the user's wallet signs + submits the transaction and the RPC
+// confirms. Verifies the signature landed on-chain and writes the DB rows
+// (position + transaction) with the real tx_signature.
+//
+// Body: { bundle_id, wallet_address, amount_usdc, signature, tokens_minted,
+//         issue_price, fee_usdc }
+// Frontend should pass `tokens_minted` / `fee_usdc` from the prepare response
+// so we don't double-compute.
+// ---------------------------------------------------------------------------
+router.post('/confirm', async (req: Request, res: Response) => {
+  try {
+    const {
+      bundle_id,
+      wallet_address,
+      amount_usdc,
+      signature,
+      tokens_minted,
+      issue_price,
+      fee_usdc,
+    } = req.body as {
+      bundle_id: string;
+      wallet_address: string;
+      amount_usdc: number;
+      signature: string;
+      tokens_minted: number;
+      issue_price: number;
+      fee_usdc: number;
+    };
+
+    if (!signature) return res.status(400).json({ error: 'signature required' });
+
+    const confirmed = await confirmTransaction(signature);
+    if (!confirmed) {
+      return res.status(400).json({ error: 'Transaction has not confirmed yet' });
+    }
+
     const position = await createPosition({
       bundle_id,
       wallet_address,
-      tokens_held: tokensMinted,
-      entry_price: issuePrice,
+      tokens_held: tokens_minted,
+      entry_price: issue_price,
       deposited_usdc: amount_usdc,
     });
+    if (!position) return res.status(500).json({ error: 'Failed to create position' });
 
-    if (!position) {
-      return res.status(500).json({ error: 'Failed to create position' });
-    }
-
-    // Create transaction record
     const transaction = await createTransaction({
       bundle_id,
       wallet_address,
       type: 'deposit',
       amount_usdc,
-      tokens: tokensMinted,
-      fee_usdc: feeUsdc,
+      tokens: tokens_minted,
+      fee_usdc,
+      tx_signature: signature,
     });
+    if (!transaction) return res.status(500).json({ error: 'Failed to create transaction' });
 
-    if (!transaction) {
-      return res.status(500).json({ error: 'Failed to create transaction' });
-    }
+    // Mirror signature onto the new onchain column if the migration is applied.
+    await supabase
+      .from('transactions')
+      .update({ onchain_tx_signature: signature })
+      .eq('id', transaction.id);
 
     const result: DepositResponse = {
       transaction_id: transaction.id,
       bundle_id,
-      tokens_minted: tokensMinted,
-      issue_price: issuePrice,
-      fee_usdc: feeUsdc,
-      net_usdc: netUsdc,
+      tokens_minted,
+      issue_price,
+      fee_usdc,
+      net_usdc: amount_usdc - fee_usdc,
     };
-
     res.status(201).json(result);
   } catch (err) {
-    console.error('POST /api/deposit error:', err);
-    res.status(500).json({ error: 'Failed to process deposit' });
+    console.error('POST /api/deposit/confirm error:', err);
+    res.status(500).json({ error: 'Failed to confirm deposit' });
   }
 });
 
-/**
- * POST /api/deposit/redeem
- * Redeem tokens from a fully resolved bundle. Calculates payout based on final NAV.
- *
- * Body: { bundle_id, wallet_address }
- */
-router.post('/redeem', validate(redeemSchema), async (req: Request, res: Response) => {
+// ---------------------------------------------------------------------------
+// Redeem — same two-step pattern.
+// ---------------------------------------------------------------------------
+
+router.post('/redeem/prepare', validate(redeemSchema), async (req: Request, res: Response) => {
   try {
-    const { bundle_id, wallet_address } = req.body;
-
-    // Fetch bundle
+    const { bundle_id, wallet_address } = req.body as {
+      bundle_id: string;
+      wallet_address: string;
+    };
     const bundle = await getBundleById(bundle_id);
-    if (!bundle) {
-      return res.status(404).json({ error: `Bundle not found: ${bundle_id}` });
-    }
+    if (!bundle) return res.status(404).json({ error: `Bundle not found: ${bundle_id}` });
 
-    if (bundle.status !== 'resolved') {
+    // Prefer on-chain finalization check if available; fall back to DB status.
+    const onchain = await getVaultState(bundle_id);
+    if (onchain && onchain.state !== 'finalized') {
       return res.status(400).json({
-        error: `Bundle is not resolved yet (status: ${bundle.status}). All legs must resolve before redemption.`,
+        error: `Onchain vault is not finalized (state: ${onchain.state}). All legs must resolve first.`,
+      });
+    }
+    if (!onchain && bundle.status !== 'resolved') {
+      return res.status(400).json({
+        error: `Bundle is not resolved (status: ${bundle.status}).`,
       });
     }
 
-    // Fetch positions for this wallet + bundle
     const positions = await getPositionsByWalletAndBundle(wallet_address, bundle_id);
     if (positions.length === 0) {
       return res.status(404).json({
         error: `No positions found for wallet ${wallet_address} in bundle ${bundle_id}`,
       });
     }
+    const totalTokens = positions.reduce((s, p) => s + p.tokens_held, 0);
+    if (totalTokens <= 0) return res.status(400).json({ error: 'No tokens to redeem' });
 
-    // Fetch legs and verify full resolution
-    const legs = await getLegsByBundleId(bundle_id);
-    if (!isFullyResolved(legs)) {
-      return res.status(400).json({
-        error: 'Not all legs are resolved. Redemption requires every leg to have a final outcome.',
-      });
-    }
-
-    // Calculate final NAV
-    const navResult = calculateNAV(legs, bundle_id);
-    const finalNav = navResult.nav;
-
-    // Sum total tokens across all positions for this wallet + bundle
-    const totalTokens = positions.reduce((sum, pos) => sum + pos.tokens_held, 0);
-
-    if (totalTokens <= 0) {
-      return res.status(400).json({ error: 'No tokens available for redemption (already redeemed?)' });
-    }
-
-    // Payout = total tokens * final NAV
-    const payoutUsdc = Math.round(totalTokens * finalNav * 1_000_000) / 1_000_000;
-
-    // Burn tokens: set each position's tokens_held to 0
-    await Promise.all(
-      positions.map((pos) => updatePositionTokens(pos.id, 0))
+    const amountBaseUnits = BigInt(Math.round(totalTokens * 1_000_000));
+    const built = await buildRedeemTx(
+      new PublicKey(wallet_address),
+      bundle_id,
+      amountBaseUnits,
     );
 
-    // Create redemption transaction
-    const transaction = await createTransaction({
+    const expectedUsdcUi = Number(built.expectedUsdc) / 1_000_000;
+
+    res.status(200).json({
+      kind: 'prepared',
+      bundle_id,
+      wallet_address,
+      total_tokens: totalTokens,
+      expected_usdc: expectedUsdcUi,
+      transaction_base64: built.transactionBase64,
+      vault_pda: built.vaultPda,
+      trax_mint: built.traxMint,
+      recent_blockhash: built.recentBlockhash,
+      last_valid_block_height: built.lastValidBlockHeight,
+    });
+  } catch (err) {
+    console.error('POST /api/deposit/redeem/prepare error:', err);
+    res.status(500).json({ error: 'Failed to prepare redeem' });
+  }
+});
+
+router.post('/redeem/confirm', async (req: Request, res: Response) => {
+  try {
+    const { bundle_id, wallet_address, signature, expected_usdc } = req.body as {
+      bundle_id: string;
+      wallet_address: string;
+      signature: string;
+      expected_usdc: number;
+    };
+
+    const confirmed = await confirmTransaction(signature);
+    if (!confirmed) return res.status(400).json({ error: 'Transaction has not confirmed yet' });
+
+    const positions = await getPositionsByWalletAndBundle(wallet_address, bundle_id);
+    const totalTokens = positions.reduce((s, p) => s + p.tokens_held, 0);
+
+    await Promise.all(positions.map((p) => updatePositionTokens(p.id, 0)));
+    const tx = await createTransaction({
       bundle_id,
       wallet_address,
       type: 'redemption',
-      amount_usdc: payoutUsdc,
+      amount_usdc: expected_usdc,
       tokens: totalTokens,
       fee_usdc: 0,
+      tx_signature: signature,
     });
 
-    if (!transaction) {
-      return res.status(500).json({ error: 'Failed to create redemption transaction' });
+    if (tx) {
+      await supabase
+        .from('transactions')
+        .update({ onchain_tx_signature: signature })
+        .eq('id', tx.id);
     }
 
     res.status(200).json({
       wallet_address,
       bundle_id,
-      bundle_name: bundle.name,
       total_tokens: totalTokens,
-      final_nav: finalNav,
-      payout_usdc: payoutUsdc,
-      transaction_id: transaction.id,
+      payout_usdc: expected_usdc,
+      transaction_id: tx?.id,
     });
   } catch (err) {
-    console.error('POST /api/deposit/redeem error:', err);
-    res.status(500).json({ error: 'Failed to process redemption' });
+    console.error('POST /api/deposit/redeem/confirm error:', err);
+    res.status(500).json({ error: 'Failed to confirm redeem' });
   }
 });
 
-/**
- * GET /api/deposit/portfolio/:walletAddress
- * Get all positions for a wallet with current NAV values and PnL.
- */
+// Legacy /redeem endpoint — kept as an alias to /redeem/prepare for clients that
+// haven't migrated. Returns the prepared tx instead of doing a DB-only redeem.
+router.post('/redeem', validate(redeemSchema), (req: Request, res: Response) => {
+  req.url = '/redeem/prepare';
+  (router as any).handle(req, res);
+});
+
+// ---------------------------------------------------------------------------
+// Portfolio + transaction history — unchanged from the original stub-backed
+// implementation; the DB rows are authoritative for historical PnL queries.
+// ---------------------------------------------------------------------------
+
 router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
   try {
     const { walletAddress } = req.params;
@@ -190,13 +311,9 @@ router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
       return res.json({ wallet_address: walletAddress, positions: [], total_value: 0, total_pnl: 0 });
     }
 
-    // Enrich each position with bundle info and current NAV
     const enriched = await Promise.all(
       positions.map(async (pos) => {
         const bundle = await getBundleById(pos.bundle_id);
-
-        // For resolved/cancelled bundles, use stored legs (final NAV is fixed).
-        // Only hit Polymarket for active bundles.
         let currentNav: number;
         if (bundle?.status === 'active') {
           const navResult = await getLiveNAV(pos.bundle_id);
@@ -220,17 +337,16 @@ router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
           current_nav: currentNav,
           current_value: currentValue,
           unrealized_pnl: unrealizedPnl,
-          pnl_percent: pos.deposited_usdc > 0
-            ? (unrealizedPnl / pos.deposited_usdc) * 100
-            : 0,
+          pnl_percent:
+            pos.deposited_usdc > 0 ? (unrealizedPnl / pos.deposited_usdc) * 100 : 0,
           created_at: pos.created_at,
         };
       })
     );
 
-    const totalValue = enriched.reduce((sum, p) => sum + p.current_value, 0);
-    const totalPnl = enriched.reduce((sum, p) => sum + p.unrealized_pnl, 0);
-    const totalDeposited = enriched.reduce((sum, p) => sum + p.deposited_usdc, 0);
+    const totalValue = enriched.reduce((s, p) => s + p.current_value, 0);
+    const totalPnl = enriched.reduce((s, p) => s + p.unrealized_pnl, 0);
+    const totalDeposited = enriched.reduce((s, p) => s + p.deposited_usdc, 0);
 
     res.json({
       wallet_address: walletAddress,
@@ -246,16 +362,11 @@ router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/deposit/transactions/:walletAddress
- * Get transaction history for a wallet, enriched with bundle names.
- */
 router.get('/transactions/:walletAddress', async (req: Request, res: Response) => {
   try {
     const { walletAddress } = req.params;
     const transactions = await getTransactionsByWallet(walletAddress);
 
-    // Enrich each transaction with bundle name
     const enriched = await Promise.all(
       transactions.map(async (tx) => {
         const bundle = await getBundleById(tx.bundle_id);
