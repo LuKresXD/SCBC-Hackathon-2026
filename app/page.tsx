@@ -1354,6 +1354,314 @@ function StarfieldBG() {
 // =========================================================================
 // LANDING PAGE — CENTERED orbital hero
 // =========================================================================
+// FlybyCanvas — asteroids, planets, comet streaks sweeping past camera.
+// Pure canvas for perf. Objects depth-sorted, spawn behind camera (z large),
+// accelerate toward camera (z → 0), culled when offscreen.
+function FlybyCanvas({ scrollProgress }: { scrollProgress: { current: number } }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d"); if (!ctx) return;
+
+    let w = window.innerWidth, h = window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const resize = () => {
+      w = window.innerWidth; h = window.innerHeight;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      canvas.style.width = w + "px"; canvas.style.height = h + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+
+    // Object pools
+    type Asteroid = { x:number; y:number; z:number; vx:number; vy:number; vz:number; r:number; rot:number; rotV:number; shape:number[]; };
+    type Planet = { x:number; y:number; z:number; vx:number; vy:number; vz:number; r:number; color:string; ring:boolean; rot:number; };
+    type Comet = { x:number; y:number; vx:number; vy:number; life:number; maxLife:number; color:string; };
+
+    const asteroids: Asteroid[] = [];
+    const planets: Planet[] = [];
+    const comets: Comet[] = [];
+
+    const MAX_ASTEROIDS = 14;
+    const MAX_PLANETS = 2;
+
+    const rand = (a:number, b:number) => a + Math.random()*(b-a);
+
+    const spawnAsteroid = () => {
+      // Spawn far away, with lateral drift so they streak past camera
+      const angle = rand(0, Math.PI*2);
+      const dist = rand(200, 400);
+      const shape = Array.from({length: 8}, () => rand(0.7, 1.15)); // irregular blob
+      asteroids.push({
+        x: Math.cos(angle)*dist, y: Math.sin(angle)*dist,
+        z: rand(800, 1400),
+        vx: rand(-0.3, 0.3), vy: rand(-0.3, 0.3),
+        vz: rand(-6, -3), // coming toward camera
+        r: rand(8, 28),
+        rot: rand(0, Math.PI*2),
+        rotV: rand(-0.02, 0.02),
+        shape,
+      });
+    };
+    const spawnPlanet = () => {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const colors = ["#2dd4bf", "#fbbf24", "#fb923c", "#a78bfa", "#60a5fa", "#f472b6"];
+      planets.push({
+        x: side * rand(400, 700), y: rand(-300, 300),
+        z: rand(1600, 2200),
+        vx: -side * rand(0.8, 1.5), vy: rand(-0.2, 0.2),
+        vz: rand(-4, -2),
+        r: rand(40, 90),
+        color: colors[Math.floor(Math.random()*colors.length)],
+        ring: Math.random() < 0.5,
+        rot: rand(0, Math.PI),
+      });
+    };
+    const spawnComet = () => {
+      // Fast diagonal streak across viewport
+      const fromLeft = Math.random() < 0.5;
+      const y0 = rand(0, h);
+      const speed = rand(14, 22);
+      const angle = rand(-0.3, 0.3) + (fromLeft ? 0 : Math.PI);
+      const tealComet = Math.random() < 0.6;
+      comets.push({
+        x: fromLeft ? -50 : w+50, y: y0,
+        vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed + rand(-2,2),
+        life: 0, maxLife: rand(50, 90),
+        color: tealComet ? "#2dd4bf" : "#fb923c",
+      });
+    };
+
+    // Seed initial asteroids
+    for (let i=0; i<MAX_ASTEROIDS; i++) spawnAsteroid();
+
+    let raf = 0;
+    let frame = 0;
+    const render = () => {
+      frame++;
+      const cx = w/2, cy = h/2;
+      const FOCAL = 500;
+
+      ctx.clearRect(0, 0, w, h);
+
+      // scroll-driven camera shake/roll
+      const prog = scrollProgress.current;
+      const rollRad = Math.sin(prog * Math.PI * 2) * 0.04; // subtle camera roll
+
+      // Maintain asteroid population
+      while (asteroids.length < MAX_ASTEROIDS) spawnAsteroid();
+
+      // Spawn planets rarely
+      if (planets.length < MAX_PLANETS && Math.random() < 0.002) spawnPlanet();
+      // Spawn comets occasionally
+      if (comets.length < 5 && Math.random() < 0.008) spawnComet();
+
+      // Depth-sorted render array
+      const drawables: Array<{type:"ast"|"pla"; z:number; obj:Asteroid|Planet}> = [];
+
+      // Update asteroids
+      for (let i = asteroids.length - 1; i >= 0; i--) {
+        const a = asteroids[i];
+        a.x += a.vx; a.y += a.vy; a.z += a.vz;
+        a.rot += a.rotV;
+        if (a.z < 60 || Math.abs(a.x) > 1500 || Math.abs(a.y) > 1500) {
+          asteroids.splice(i, 1);
+          continue;
+        }
+        drawables.push({type:"ast", z:a.z, obj:a});
+      }
+      // Update planets
+      for (let i = planets.length - 1; i >= 0; i--) {
+        const p = planets[i];
+        p.x += p.vx; p.y += p.vy; p.z += p.vz;
+        p.rot += 0.003;
+        if (p.z < 100 || Math.abs(p.x) > 2000) {
+          planets.splice(i, 1);
+          continue;
+        }
+        drawables.push({type:"pla", z:p.z, obj:p});
+      }
+      // Sort far-to-near
+      drawables.sort((A,B) => B.z - A.z);
+
+      // Apply camera roll by rotating whole ctx for space objects
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(rollRad);
+
+      for (const d of drawables) {
+        if (d.type === "ast") {
+          const a = d.obj as Asteroid;
+          const scale = FOCAL / (FOCAL + a.z);
+          const sx = a.x * scale;
+          const sy = a.y * scale;
+          const sr = a.r * scale;
+          if (sr < 0.4) continue;
+
+          // motion blur streak when near camera
+          if (a.z < 400 && sr > 2) {
+            const blurLen = (1 - a.z/400) * 30 * scale;
+            const grd = ctx.createLinearGradient(sx - a.vx*blurLen, sy - a.vy*blurLen, sx, sy);
+            grd.addColorStop(0, "rgba(120,120,130,0)");
+            grd.addColorStop(1, "rgba(160,160,170,0.25)");
+            ctx.strokeStyle = grd;
+            ctx.lineWidth = sr * 0.8;
+            ctx.lineCap = "round";
+            ctx.beginPath();
+            ctx.moveTo(sx - a.vx*blurLen*3, sy - a.vy*blurLen*3);
+            ctx.lineTo(sx, sy);
+            ctx.stroke();
+          }
+
+          // Draw irregular asteroid
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.rotate(a.rot);
+          const shadeBase = Math.max(40, Math.min(180, 160 - a.z*0.08));
+          const rim = Math.min(255, shadeBase + 40);
+          const grad = ctx.createRadialGradient(-sr*0.3, -sr*0.3, sr*0.1, 0, 0, sr);
+          grad.addColorStop(0, `rgba(${rim},${rim-10},${rim-20},1)`);
+          grad.addColorStop(1, `rgba(${shadeBase*0.4|0},${shadeBase*0.4|0},${shadeBase*0.45|0},1)`);
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          for (let k=0; k<a.shape.length; k++) {
+            const ang = (k / a.shape.length) * Math.PI * 2;
+            const rr = sr * a.shape[k];
+            const px = Math.cos(ang)*rr, py = Math.sin(ang)*rr;
+            if (k===0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        } else {
+          const p = d.obj as Planet;
+          const scale = FOCAL / (FOCAL + p.z);
+          const sx = p.x * scale;
+          const sy = p.y * scale;
+          const sr = p.r * scale;
+          if (sr < 0.5) continue;
+
+          // Atmospheric glow
+          const glow = ctx.createRadialGradient(sx, sy, sr*0.7, sx, sy, sr*2.2);
+          glow.addColorStop(0, p.color + "80");
+          glow.addColorStop(1, p.color + "00");
+          ctx.fillStyle = glow;
+          ctx.beginPath(); ctx.arc(sx, sy, sr*2.2, 0, Math.PI*2); ctx.fill();
+
+          // Planet body with shadow
+          const bodyGrad = ctx.createRadialGradient(sx - sr*0.3, sy - sr*0.3, sr*0.1, sx, sy, sr);
+          bodyGrad.addColorStop(0, "#ffffff");
+          bodyGrad.addColorStop(0.15, p.color);
+          bodyGrad.addColorStop(1, "#06101a");
+          ctx.fillStyle = bodyGrad;
+          ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI*2); ctx.fill();
+
+          // Rings
+          if (p.ring) {
+            ctx.save();
+            ctx.translate(sx, sy);
+            ctx.rotate(p.rot);
+            ctx.scale(1, 0.25);
+            ctx.strokeStyle = p.color + "cc";
+            ctx.lineWidth = Math.max(1, sr*0.08);
+            ctx.beginPath(); ctx.arc(0, 0, sr*1.6, 0, Math.PI*2); ctx.stroke();
+            ctx.strokeStyle = p.color + "66";
+            ctx.lineWidth = Math.max(0.5, sr*0.04);
+            ctx.beginPath(); ctx.arc(0, 0, sr*1.9, 0, Math.PI*2); ctx.stroke();
+            ctx.restore();
+          }
+        }
+      }
+      ctx.restore();
+
+      // Comets (screen-space, above everything)
+      for (let i = comets.length - 1; i >= 0; i--) {
+        const c = comets[i];
+        c.x += c.vx; c.y += c.vy; c.life++;
+        if (c.life > c.maxLife || c.x < -200 || c.x > w+200) {
+          comets.splice(i, 1);
+          continue;
+        }
+        const alpha = 1 - c.life/c.maxLife;
+        // Long streak tail
+        const tailLen = 180;
+        const tx = c.x - c.vx * 8;
+        const ty = c.y - c.vy * 8;
+        const trail = ctx.createLinearGradient(tx, ty, c.x, c.y);
+        trail.addColorStop(0, c.color + "00");
+        trail.addColorStop(0.6, c.color + "80");
+        trail.addColorStop(1, "#ffffff" + (alpha > 0.5 ? "ff" : Math.floor(alpha*2*255).toString(16).padStart(2,"0")));
+        ctx.strokeStyle = trail;
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(c.x - c.vx*tailLen/10, c.y - c.vy*tailLen/10);
+        ctx.lineTo(c.x, c.y);
+        ctx.stroke();
+        // Bright head
+        const headGrad = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, 8);
+        headGrad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+        headGrad.addColorStop(0.4, c.color);
+        headGrad.addColorStop(1, c.color + "00");
+        ctx.fillStyle = headGrad;
+        ctx.beginPath(); ctx.arc(c.x, c.y, 8, 0, Math.PI*2); ctx.fill();
+      }
+
+      raf = requestAnimationFrame(render);
+    };
+    raf = requestAnimationFrame(render);
+
+    return () => {
+      window.removeEventListener("resize", resize);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} style={{position:"fixed",inset:0,width:"100vw",height:"100vh",zIndex:4,pointerEvents:"none"}} />;
+}
+
+// Camera orbit — maps scroll progress to 3D-ish star position.
+// Uses keyframed path: 5 sections, star moves L→behind→R→above→center
+// with zoom punches at key beats.
+function cameraPath(progress: number) {
+  // Clamp 0..4 (5 sections)
+  const p = Math.max(0, Math.min(4, progress));
+
+  // Keyframes: x (vw from center, -0.5..0.5 = within viewport), scale, rotZ, blur, opacity
+  // Using CSS translate and scale for cinematic feel
+  const keys = [
+    // Section 0 — Arrival: star dead center, medium scale
+    { x: 0,    y: 0,    scale: 1.0,  rotZ: 0,     blur: 0,  opacity: 1,  z: 0   },
+    // Section 1 — Constellations: star swings LEFT, slight zoom in
+    { x: -0.45,y: 0.05, scale: 1.25, rotZ: -4,    blur: 0,  opacity: 0.95, z: -50 },
+    // Section 2 — Tiers: star BEHIND us (zoom through), giant scale, fade
+    { x: 0,    y: -0.15,scale: 2.6,  rotZ: 6,     blur: 3,  opacity: 0.35, z: 100 },
+    // Section 3 — Mechanics: re-emerge on RIGHT, distant
+    { x: 0.45, y: 0.02, scale: 0.7,  rotZ: 8,     blur: 1,  opacity: 0.9,  z: -30 },
+    // Section 4 — Launch: dramatic center zoom, final approach
+    { x: 0,    y: 0,    scale: 1.8,  rotZ: 0,     blur: 0,  opacity: 1,   z: 0   },
+  ];
+
+  const i0 = Math.floor(p);
+  const i1 = Math.min(i0 + 1, keys.length - 1);
+  const f = p - i0;
+  // Ease in-out cubic for cinematic motion
+  const ease = f < 0.5 ? 4*f*f*f : 1 - Math.pow(-2*f + 2, 3)/2;
+
+  const a = keys[i0], b = keys[i1];
+  return {
+    x:       a.x      + (b.x      - a.x)      * ease,
+    y:       a.y      + (b.y      - a.y)      * ease,
+    scale:   a.scale  + (b.scale  - a.scale)  * ease,
+    rotZ:    a.rotZ   + (b.rotZ   - a.rotZ)   * ease,
+    blur:    a.blur   + (b.blur   - a.blur)   * ease,
+    opacity: a.opacity+ (b.opacity- a.opacity)* ease,
+    z:       a.z      + (b.z      - a.z)      * ease,
+  };
+}
+
 function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:string)=>void }) {
   const isMobile = useMobile();
   const systemRef = useRef<HTMLDivElement>(null);
@@ -1364,8 +1672,9 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
   const pc2Ref = useRef<HTMLDivElement>(null);
   const pc3Ref = useRef<HTMLDivElement>(null);
   const chapterRefs = useRef<(HTMLElement|null)[]>([]);
+  const scrollProgressRef = useRef(0);
 
-  // Scroll-driven orbit rotation
+  // Scroll-driven 3D camera orbit + ring rotation
   useEffect(() => {
     let raf = 0;
     let t = 0;
@@ -1373,10 +1682,26 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
       t += 0.3;
       const y = window.scrollY;
       const vh = window.innerHeight;
-      const progress = y / vh;
-      if (orbit1Ref.current) orbit1Ref.current.style.transform = `translate(-50%, -50%) rotate(${progress*360*0.8}deg)`;
-      if (orbit2Ref.current) orbit2Ref.current.style.transform = `translate(-50%, -50%) rotate(${-progress*360*0.5}deg)`;
-      if (orbit3Ref.current) orbit3Ref.current.style.transform = `translate(-50%, -50%) rotate(${progress*360*0.3}deg)`;
+      const progress = y / vh; // 0..4 across 5 sections
+      scrollProgressRef.current = progress;
+
+      const cam = cameraPath(progress);
+
+      // Apply 3D camera transform to the whole star system
+      if (systemRef.current) {
+        const translateX = cam.x * 100; // vw
+        const translateY = cam.y * 100; // vh
+        systemRef.current.style.transform =
+          `translate(-50%, -50%) translate(${translateX}vw, ${translateY}vh) scale(${cam.scale}) rotate(${cam.rotZ}deg)`;
+        systemRef.current.style.filter = cam.blur > 0.1 ? `blur(${cam.blur}px)` : "none";
+        systemRef.current.style.opacity = String(cam.opacity);
+      }
+
+      // Ring rotations (faster spinning as we orbit past)
+      const orbitBoost = 1 + Math.abs(cam.rotZ) * 0.1;
+      if (orbit1Ref.current) orbit1Ref.current.style.transform = `translate(-50%, -50%) rotate(${progress*360*0.8*orbitBoost}deg)`;
+      if (orbit2Ref.current) orbit2Ref.current.style.transform = `translate(-50%, -50%) rotate(${-progress*360*0.5*orbitBoost}deg)`;
+      if (orbit3Ref.current) orbit3Ref.current.style.transform = `translate(-50%, -50%) rotate(${progress*360*0.3*orbitBoost}deg)`;
       if (pc1Ref.current) pc1Ref.current.style.transform = `rotate(${progress*360*1.2 + 30 + t*0.8}deg)`;
       if (pc2Ref.current) pc2Ref.current.style.transform = `rotate(${progress*360*0.7 + 120 + t*0.5}deg)`;
       if (pc3Ref.current) pc3Ref.current.style.transform = `rotate(${progress*360*0.4 + 210 + t*0.3}deg)`;
@@ -1387,7 +1712,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // CENTERED orbital sizing — smaller so text reads clearly on top
+  // Orbital sizing
   const orbitalSize = isMobile ? 360 : 560;
   const starSize = isMobile ? 120 : 150;
   const r1 = isMobile ? 200 : 250;
@@ -1414,7 +1739,10 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         }
       `}</style>
 
-      {/* Fixed CENTERED orbital system */}
+      {/* Flyby canvas — asteroids, planets, comets */}
+      {!isMobile && <FlybyCanvas scrollProgress={scrollProgressRef} />}
+
+      {/* Fixed orbital system — now driven by camera path */}
       <div ref={systemRef} style={{
         position:"fixed",
         top:"50%",
@@ -1425,6 +1753,8 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         zIndex:1,
         pointerEvents:"none",
         opacity: 1,
+        willChange: "transform, opacity, filter",
+        transition: "none",
       }}>
         {/* Rings */}
         <div ref={orbit3Ref} style={{
