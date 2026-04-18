@@ -1,9 +1,8 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::errors::TraxisError;
 use crate::events::VaultInitialized;
-use crate::state::{Leg, LegStatus, Vault, VaultState, BPS, MAX_LEGS, TOKEN_DECIMALS};
+use crate::state::{Leg, LegStatus, Vault, VaultState, BPS, MAX_LEGS};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct LegInit {
@@ -23,6 +22,10 @@ pub struct InitializeVaultArgs {
     pub legs: Vec<LegInit>,
 }
 
+/// Step 1/2 of vault creation. Just the Vault PDA + legs metadata.
+/// The TRAX mint and USDC vault PDA are created by `initialize_vault_tokens`,
+/// which must be called immediately after. Splitting keeps each instruction's
+/// try_accounts stack usage under BPF's 4 KB-per-frame budget.
 #[derive(Accounts)]
 #[instruction(args: InitializeVaultArgs)]
 pub struct InitializeVault<'info> {
@@ -36,39 +39,13 @@ pub struct InitializeVault<'info> {
         seeds = [Vault::SEED, args.bundle_seed.as_ref()],
         bump,
     )]
-    pub vault: Account<'info, Vault>,
-
-    /// TRAX SPL mint for this bundle. Lives at a PDA address so the backend
-    /// can re-derive it from the bundle seed alone.
-    #[account(
-        init,
-        payer = authority,
-        seeds = [b"mint", args.bundle_seed.as_ref()],
-        bump,
-        mint::decimals = TOKEN_DECIMALS,
-        mint::authority = vault,
-    )]
-    pub trax_mint: Account<'info, Mint>,
-
-    pub usdc_mint: Account<'info, Mint>,
-
-    /// USDC vault: PDA-owned token account holding deposited USDC.
-    #[account(
-        init,
-        payer = authority,
-        seeds = [b"usdc_vault", args.bundle_seed.as_ref()],
-        bump,
-        token::mint = usdc_mint,
-        token::authority = vault,
-    )]
-    pub usdc_vault: Account<'info, TokenAccount>,
+    pub vault: Box<Account<'info, Vault>>,
 
     /// CHECK: Stored on the vault and used later to validate fee ATAs.
     /// No constraints checked here — it's just a pubkey the authority picked.
     pub fee_recipient: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
     pub rent: Sysvar<'info, Rent>,
 }
 
@@ -115,9 +92,10 @@ pub fn handler(ctx: Context<InitializeVault>, args: InitializeVaultArgs) -> Resu
     let vault = &mut ctx.accounts.vault;
     vault.bundle_seed = args.bundle_seed;
     vault.authority = ctx.accounts.authority.key();
-    vault.trax_mint = ctx.accounts.trax_mint.key();
-    vault.usdc_mint = ctx.accounts.usdc_mint.key();
-    vault.usdc_vault = ctx.accounts.usdc_vault.key();
+    // trax_mint, usdc_mint, usdc_vault are set by initialize_vault_tokens (step 2).
+    vault.trax_mint = Pubkey::default();
+    vault.usdc_mint = Pubkey::default();
+    vault.usdc_vault = Pubkey::default();
     vault.fee_recipient = ctx.accounts.fee_recipient.key();
     vault.issue_price_bps = args.issue_price_bps;
     vault.fee_bps = args.fee_bps;

@@ -1,5 +1,5 @@
 {
-  "address": "DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat",
+  "address": "E77R7yqUEAWz9jUk92kSnrpvUBEwGpPT3iZaThbKQcJb",
   "metadata": {
     "name": "traxis_vault",
     "version": "0.1.0",
@@ -31,6 +31,58 @@
           "signer": false
         },
         {
+          "name": "fee_recipient",
+          "writable": false,
+          "signer": false
+        },
+        {
+          "name": "system_program",
+          "writable": false,
+          "signer": false,
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "writable": false,
+          "signer": false,
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "InitializeVaultArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "initialize_vault_tokens",
+      "discriminator": [
+        52,
+        32,
+        213,
+        175,
+        173,
+        209,
+        191,
+        101
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "signer": false
+        },
+        {
           "name": "trax_mint",
           "writable": true,
           "signer": false
@@ -43,11 +95,6 @@
         {
           "name": "usdc_vault",
           "writable": true,
-          "signer": false
-        },
-        {
-          "name": "fee_recipient",
-          "writable": false,
           "signer": false
         },
         {
@@ -69,16 +116,7 @@
           "address": "SysvarRent111111111111111111111111111111111"
         }
       ],
-      "args": [
-        {
-          "name": "args",
-          "type": {
-            "defined": {
-              "name": "InitializeVaultArgs"
-            }
-          }
-        }
-      ]
+      "args": []
     },
     {
       "name": "deposit",

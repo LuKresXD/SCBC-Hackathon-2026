@@ -53,6 +53,12 @@ Cargo.lock
 # Command-script logs (may contain secrets, e.g. 22-railway-env.txt)
 .logs/
 
+# Root-level build/deploy transient logs (tee'd from .command scripts)
+/docker-build-both.log
+/docker-image-build.log
+/deploy-vault.log
+/deploy-ppn.log
+
 # Transient toolchain-fix command files (2026-04-17 build session)
 02b-fix-anchor.command
 03b-fix-rust-version.command

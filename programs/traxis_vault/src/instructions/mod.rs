@@ -1,4 +1,5 @@
 pub mod initialize_vault;
+pub mod initialize_vault_tokens;
 pub mod deposit;
 pub mod resolve_leg;
 pub mod finalize_vault;
@@ -6,6 +7,7 @@ pub mod redeem;
 pub mod admin_withdraw_fees;
 
 pub use initialize_vault::*;
+pub use initialize_vault_tokens::*;
 pub use deposit::*;
 pub use resolve_leg::*;
 pub use finalize_vault::*;

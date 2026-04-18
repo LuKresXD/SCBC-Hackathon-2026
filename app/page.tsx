@@ -757,7 +757,7 @@ export default async function LandingPage() {
           <div style={{ display: 'flex', gap: 24, fontSize: 13, color: C.textSecondary }}>
             <Link href="/app" style={{ textDecoration: 'none' }}>App</Link>
             <a
-              href="https://explorer.solana.com/address/DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat?cluster=devnet"
+              href="https://explorer.solana.com/address/E77R7yqUEAWz9jUk92kSnrpvUBEwGpPT3iZaThbKQcJb?cluster=devnet"
               target="_blank"
               rel="noreferrer"
               style={{ textDecoration: 'none' }}

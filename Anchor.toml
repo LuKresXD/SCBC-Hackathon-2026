@@ -7,13 +7,13 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-traxis_vault = "DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat"
-traxis_ppn   = "3wDHsr9EnWkF968zYmSsj4hShNkAyFV6r7zxPrjqWNsp"
+traxis_vault = "E77R7yqUEAWz9jUk92kSnrpvUBEwGpPT3iZaThbKQcJb"
+traxis_ppn   = "4NnrpeWgdmVymcdGqbrmQUunHHvyVSevUXCKFGJYwbtE"
 
 [programs.devnet]
 # IDs match the keypairs in target/deploy/ as of phase-14 deploy.
-traxis_vault = "DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat"
-traxis_ppn   = "3wDHsr9EnWkF968zYmSsj4hShNkAyFV6r7zxPrjqWNsp"
+traxis_vault = "E77R7yqUEAWz9jUk92kSnrpvUBEwGpPT3iZaThbKQcJb"
+traxis_ppn   = "4NnrpeWgdmVymcdGqbrmQUunHHvyVSevUXCKFGJYwbtE"
 
 [registry]
 url = "https://api.apr.dev"
