@@ -20,7 +20,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("B8zgsrtE6qT6q2Nk48zp9qwKmPA4wbN46KsNMykXa7UC");
+declare_id!("DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat");
 
 #[program]
 pub mod traxis_vault {

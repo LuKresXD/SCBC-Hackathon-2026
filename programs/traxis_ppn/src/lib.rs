@@ -21,7 +21,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("7WUMSv86bvjH8VJS4WQ6CuFomsBFvg1wUhtZ85zoWF3g");
+declare_id!("3wDHsr9EnWkF968zYmSsj4hShNkAyFV6r7zxPrjqWNsp");
 
 #[program]
 pub mod traxis_ppn {

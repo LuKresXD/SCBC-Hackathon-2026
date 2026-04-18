@@ -1,5 +1,5 @@
 [toolchain]
-anchor_version = "0.31.1"
+anchor_version = "0.30.1"
 solana_version = "1.18.26"
 
 [features]
@@ -7,15 +7,13 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-traxis_vault = "B8zgsrtE6qT6q2Nk48zp9qwKmPA4wbN46KsNMykXa7UC"
-traxis_ppn   = "7WUMSv86bvjH8VJS4WQ6CuFomsBFvg1wUhtZ85zoWF3g"
+traxis_vault = "DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat"
+traxis_ppn   = "3wDHsr9EnWkF968zYmSsj4hShNkAyFV6r7zxPrjqWNsp"
 
 [programs.devnet]
-# These are placeholder program IDs. Run `anchor keys sync` after
-# `solana-keygen new -o target/deploy/traxis_vault-keypair.json` and
-# `solana-keygen new -o target/deploy/traxis_ppn-keypair.json`, then redeploy.
-traxis_vault = "B8zgsrtE6qT6q2Nk48zp9qwKmPA4wbN46KsNMykXa7UC"
-traxis_ppn   = "7WUMSv86bvjH8VJS4WQ6CuFomsBFvg1wUhtZ85zoWF3g"
+# IDs match the keypairs in target/deploy/ as of phase-14 deploy.
+traxis_vault = "DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat"
+traxis_ppn   = "3wDHsr9EnWkF968zYmSsj4hShNkAyFV6r7zxPrjqWNsp"
 
 [registry]
 url = "https://api.apr.dev"
