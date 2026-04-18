@@ -14,6 +14,8 @@ function useIsMobile() {
 const MobileCtx = createContext(false);
 const useMobile = () => useContext(MobileCtx);
 
+
+
 const C = {
   bg: "#0a0e13", surface: "#0f1520", card: "#131c28", cardHover: "#172030",
   border: "#1a2a3a", borderHover: "#243a50", teal: "#0d9488", tealBg: "#042420",
@@ -45,32 +47,32 @@ function genFlatHistory(days: number) {
 const USDC_HISTORY = genFlatHistory(29);
 
 const BUNDLES = [
-  { id:"LKRS-90-0430", tier:90, date:"Apr 30, 2025", daysLeft:15, nav:0.913, issue:0.90, change:+1.4, hot:true,  resolved:3, totalLegs:10, history:genHistory(90,29,0.913) },
-  { id:"LKRS-90-0515", tier:90, date:"May 15, 2025", daysLeft:30, nav:0.908, issue:0.90, change:+0.9, hot:true,  resolved:1, totalLegs:12, history:genHistory(90,29,0.908) },
-  { id:"LKRS-90-0601", tier:90, date:"Jun 1, 2025",  daysLeft:47, nav:0.895, issue:0.90, change:-0.6, hot:false, resolved:0, totalLegs:10, history:genHistory(90,29,0.895) },
-  { id:"LKRS-90-0701", tier:90, date:"Jul 1, 2025",  daysLeft:77, nav:0.901, issue:0.90, change:+0.1, hot:false, resolved:0, totalLegs:11, history:genHistory(90,29,0.901) },
-  { id:"LKRS-90-1001", tier:90, date:"Oct 1, 2025",  daysLeft:169,nav:0.888, issue:0.90, change:-0.3, hot:false, resolved:0, totalLegs:10, history:genHistory(90,29,0.888) },
-  { id:"LKRS-70-0430", tier:70, date:"Apr 30, 2025", daysLeft:15, nav:0.724, issue:0.70, change:+3.4, hot:true,  resolved:4, totalLegs:10, history:genHistory(70,29,0.724) },
-  { id:"LKRS-70-0515", tier:70, date:"May 15, 2025", daysLeft:30, nav:0.698, issue:0.70, change:-1.2, hot:false, resolved:2, totalLegs:11, history:genHistory(70,29,0.698) },
-  { id:"LKRS-70-0601", tier:70, date:"Jun 1, 2025",  daysLeft:47, nav:0.712, issue:0.70, change:+1.7, hot:false, resolved:1, totalLegs:10, history:genHistory(70,29,0.712) },
-  { id:"LKRS-70-0701", tier:70, date:"Jul 1, 2025",  daysLeft:77, nav:0.685, issue:0.70, change:-2.1, hot:false, resolved:0, totalLegs:12, history:genHistory(70,29,0.685) },
-  { id:"LKRS-70-1001", tier:70, date:"Oct 1, 2025",  daysLeft:169,nav:0.703, issue:0.70, change:+0.4, hot:false, resolved:0, totalLegs:10, history:genHistory(70,29,0.703) },
-  { id:"LKRS-50-0430", tier:50, date:"Apr 30, 2025", daysLeft:15, nav:0.531, issue:0.50, change:+6.2, hot:true,  resolved:5, totalLegs:10, history:genHistory(50,29,0.531) },
-  { id:"LKRS-50-0515", tier:50, date:"May 15, 2025", daysLeft:30, nav:0.488, issue:0.50, change:-2.4, hot:false, resolved:1, totalLegs:10, history:genHistory(50,29,0.488) },
-  { id:"LKRS-50-0601", tier:50, date:"Jun 1, 2025",  daysLeft:47, nav:0.502, issue:0.50, change:+0.4, hot:false, resolved:0, totalLegs:11, history:genHistory(50,29,0.502) },
-  { id:"LKRS-50-0701", tier:50, date:"Jul 1, 2025",  daysLeft:77, nav:0.478, issue:0.50, change:-4.4, hot:false, resolved:0, totalLegs:10, history:genHistory(50,29,0.478) },
-  { id:"LKRS-50-1001", tier:50, date:"Oct 1, 2025",  daysLeft:169,nav:0.515, issue:0.50, change:+3.0, hot:false, resolved:0, totalLegs:10, history:genHistory(50,29,0.515) },
+  { id:"STHS-90-0430", tier:90, date:"Apr 30, 2025", daysLeft:15, nav:0.913, issue:0.90, change:+1.4, hot:true,  resolved:3, totalLegs:10, history:genHistory(90,29,0.913) },
+  { id:"STHS-90-0515", tier:90, date:"May 15, 2025", daysLeft:30, nav:0.908, issue:0.90, change:+0.9, hot:true,  resolved:1, totalLegs:12, history:genHistory(90,29,0.908) },
+  { id:"STHS-90-0601", tier:90, date:"Jun 1, 2025",  daysLeft:47, nav:0.895, issue:0.90, change:-0.6, hot:false, resolved:0, totalLegs:10, history:genHistory(90,29,0.895) },
+  { id:"STHS-90-0701", tier:90, date:"Jul 1, 2025",  daysLeft:77, nav:0.901, issue:0.90, change:+0.1, hot:false, resolved:0, totalLegs:11, history:genHistory(90,29,0.901) },
+  { id:"STHS-90-1001", tier:90, date:"Oct 1, 2025",  daysLeft:169,nav:0.888, issue:0.90, change:-0.3, hot:false, resolved:0, totalLegs:10, history:genHistory(90,29,0.888) },
+  { id:"STHS-70-0430", tier:70, date:"Apr 30, 2025", daysLeft:15, nav:0.724, issue:0.70, change:+3.4, hot:true,  resolved:4, totalLegs:10, history:genHistory(70,29,0.724) },
+  { id:"STHS-70-0515", tier:70, date:"May 15, 2025", daysLeft:30, nav:0.698, issue:0.70, change:-1.2, hot:false, resolved:2, totalLegs:11, history:genHistory(70,29,0.698) },
+  { id:"STHS-70-0601", tier:70, date:"Jun 1, 2025",  daysLeft:47, nav:0.712, issue:0.70, change:+1.7, hot:false, resolved:1, totalLegs:10, history:genHistory(70,29,0.712) },
+  { id:"STHS-70-0701", tier:70, date:"Jul 1, 2025",  daysLeft:77, nav:0.685, issue:0.70, change:-2.1, hot:false, resolved:0, totalLegs:12, history:genHistory(70,29,0.685) },
+  { id:"STHS-70-1001", tier:70, date:"Oct 1, 2025",  daysLeft:169,nav:0.703, issue:0.70, change:+0.4, hot:false, resolved:0, totalLegs:10, history:genHistory(70,29,0.703) },
+  { id:"STHS-50-0430", tier:50, date:"Apr 30, 2025", daysLeft:15, nav:0.531, issue:0.50, change:+6.2, hot:true,  resolved:5, totalLegs:10, history:genHistory(50,29,0.531) },
+  { id:"STHS-50-0515", tier:50, date:"May 15, 2025", daysLeft:30, nav:0.488, issue:0.50, change:-2.4, hot:false, resolved:1, totalLegs:10, history:genHistory(50,29,0.488) },
+  { id:"STHS-50-0601", tier:50, date:"Jun 1, 2025",  daysLeft:47, nav:0.502, issue:0.50, change:+0.4, hot:false, resolved:0, totalLegs:11, history:genHistory(50,29,0.502) },
+  { id:"STHS-50-0701", tier:50, date:"Jul 1, 2025",  daysLeft:77, nav:0.478, issue:0.50, change:-4.4, hot:false, resolved:0, totalLegs:10, history:genHistory(50,29,0.478) },
+  { id:"STHS-50-1001", tier:50, date:"Oct 1, 2025",  daysLeft:169,nav:0.515, issue:0.50, change:+3.0, hot:false, resolved:0, totalLegs:10, history:genHistory(50,29,0.515) },
 ];
 type Bundle = typeof BUNDLES[0];
 
 // Non-demo fallback (only used if someone explicitly flips demo OFF)
 const STATIC_PORTFOLIO = [
-  { id:"LKRS-90-0430", qty:1200, avgCost:0.887 },
-  { id:"LKRS-70-0430", qty:800,  avgCost:0.682 },
-  { id:"LKRS-50-0430", qty:600,  avgCost:0.501 },
-  { id:"LKRS-90-0515", qty:500,  avgCost:0.899 },
-  { id:"LKRS-70-0515", qty:400,  avgCost:0.708 },
-  { id:"LKRS-70-0601", qty:98,   avgCost:0.714 },
+  { id:"STHS-90-0430", qty:1200, avgCost:0.887 },
+  { id:"STHS-70-0430", qty:800,  avgCost:0.682 },
+  { id:"STHS-50-0430", qty:600,  avgCost:0.501 },
+  { id:"STHS-90-0515", qty:500,  avgCost:0.899 },
+  { id:"STHS-70-0515", qty:400,  avgCost:0.708 },
+  { id:"STHS-70-0601", qty:98,   avgCost:0.714 },
 ];
 const STATIC_VAULT_POSITIONS = [
   { id:"VAULT-0601", label:"Meteora vault", principal:930, yieldEarned:9.64, apy:8.4, daysLeft:47, daysTotal:90, resolveDate:"Jun 1, 2025" },
@@ -101,6 +103,14 @@ const HOT_PREDICTIONS = [
 
 function tc(tier: number) { return tier===90?'#0d9488':tier===70?'#d97706':'#ea580c'; }
 function tl(d: number) { return d<=20?"This week":d<=50?"This month":"Long term"; }
+
+// Logo asset paths — swap here if you rename files
+const LOGO_SRC = {
+  full:  "/senthos_full.png",
+  teal:  "/senthos_teal.png",
+  amber: "/senthos_amber.png",
+  coral: "/senthos_coral.png",
+};
 
 // Lighter shade of a color for gradient
 function lightenColor(hex: string, amount: number = 0.25): string {
@@ -1196,7 +1206,7 @@ function AboutPage() {
           One deposit.<br/>Diversified prediction market exposure.
         </div>
         <div style={{fontSize:isMobile?14:15,color:C.textSecondary,fontFamily:FS,lineHeight:1.75,maxWidth:640}}>
-          Lukres bundles 10 or more high-liquidity prediction market positions into a single token. Pick your risk level, deposit USDC, and receive a basket token that trades freely and auto-redeems when markets settle.
+          Senthos bundles 10 or more high-liquidity prediction market positions into a single token. Pick your risk level, deposit USDC, and receive a basket token that trades freely and auto-redeems when markets settle.
         </div>
       </div>
       <div style={{marginBottom:48}}>
@@ -1204,7 +1214,7 @@ function AboutPage() {
         <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(3,1fr)",gap:12}}>
           {[
             {n:"01",title:"Pick a tier and deposit",body:"Choose your risk level and deposit USDC. Your funds buy the underlying prediction market positions. A 0.5% structuring fee is taken at issuance.",color:C.teal},
-            {n:"02",title:"Receive a basket token",body:"An LKRS token lands in your wallet. It tracks the live net asset value of the basket and trades freely. You can exit at any time.",color:C.amber},
+            {n:"02",title:"Receive a basket token",body:"An STHS token lands in your wallet. It tracks the live net asset value of the basket and trades freely. You can exit at any time.",color:C.amber},
             {n:"03",title:"Collect at resolution",body:"When the final position resolves, USDC is sent directly to your wallet. No claiming, no manual steps, nothing to do.",color:C.coral},
           ].map(s=>(
             <div key={s.n} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:14,padding:"22px 20px"}}>
@@ -1245,7 +1255,7 @@ function AboutPage() {
         <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,letterSpacing:"0.08em",fontWeight:500,marginBottom:16}}>FAQ</div>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {[
-            ["Can I exit before resolution?","Yes. LKRS tokens trade on Jupiter. You can sell your position at the current market price at any time before the basket resolves."],
+            ["Can I exit before resolution?","Yes. STHS tokens trade on Jupiter. You can sell your position at the current market price at any time before the basket resolves."],
             ["How is the issue price set?","Issue price is set within 1 cent of the basket's average implied probability across all legs. NAV updates in real time as markets move."],
             ["What is Principal Protection?","Your deposit is split by our model based on current yield rates and the basket timeline. The majority goes into a Meteora yield vault, always redeemable. The rest is deployed directly into your chosen basket."],
             ["What happens when a basket resolves?","USDC is sent directly to every token holder's wallet. Tokens are burned. Nothing to claim."],
@@ -1372,8 +1382,9 @@ export default function App() {
       {/* Mobile top bar */}
       {isMobile && (
         <div style={{position:"fixed",top:0,left:0,right:0,height:56,background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",zIndex:30}}>
-          <div>
-            <div style={{fontSize:18,fontWeight:800,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.08em"}}>LUKRES</div>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <img src="/senthos_appicon_256_full.png" alt="Senthos" style={{width:28,height:28,display:"block",borderRadius:6}} />
+            <div style={{fontSize:17,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.1em"}}>SENTHOS</div>
           </div>
           <button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{background:"none",border:`0.5px solid ${C.border}`,borderRadius:8,padding:"9px 14px",cursor:"pointer",color:C.textSecondary,fontSize:20,lineHeight:1,display:"flex",alignItems:"center",gap:6}}>
             {sidebarOpen ? "✕" : "☰"}
@@ -1407,9 +1418,12 @@ export default function App() {
             overflowY:"auto",
           })
         }}>
-          <div style={{padding:"0 10px",marginBottom:32}}>
-            <div style={{fontSize:22,fontWeight:800,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.08em"}}>LUKRES</div>
-            <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginTop:3,letterSpacing:"0.06em"}}>STRUCTURED PREDICTIONS</div>
+          <div style={{padding:"0 10px",marginBottom:32,display:"flex",alignItems:"center",gap:10}}>
+            <img src="/senthos_full.png" alt="Senthos" style={{width:38,height:38,display:"block",flexShrink:0}} />
+            <div>
+              <div style={{fontSize:18,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.08em",lineHeight:1}}>SENTHOS</div>
+              <div style={{fontSize:9,color:C.textMuted,fontFamily:FS,marginTop:4,letterSpacing:"0.06em"}}>STRUCTURED PREDICTIONS</div>
+            </div>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:2,flex:1}}>
             {[{id:"markets",label:"Markets"},{id:"baskets",label:"Baskets"},{id:"portfolio",label:"Portfolio"},{id:"about",label:"About"}].map(n=>(
@@ -1507,7 +1521,7 @@ export default function App() {
               ))}
             </div>
             <div style={{padding:"12px 24px",borderTop:`0.5px solid ${C.border}`}}>
-              <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,textAlign:"center"}}>By connecting you agree to Lukres terms of use</div>
+              <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,textAlign:"center"}}>By connecting you agree to Senthos terms of use</div>
             </div>
           </div>
         </div>
