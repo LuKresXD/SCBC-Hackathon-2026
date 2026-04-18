@@ -817,6 +817,15 @@ function DetailPage({ bundle, fromTab, onBack, demoMode, demoUsdc, onDemoDeposit
   );
 }
 
+// =========================================================================
+// PORTFOLIO — orbital-themed redesign
+// Keeps donut mechanics 100% untouched. Adds:
+//  - Slow-rotating concentric orbital rings around the donut (decorative)
+//  - Soft corona glow behind the donut to echo the landing's central star
+//  - Planet/satellite dots on the rings
+//  - Orbital-styled stat cards with top accent bar
+//  - Bottom orbital horizon line beneath the positions table
+// =========================================================================
 function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoMode }: {
   onSelect:(b:Bundle,from:string)=>void,
   portfolio:Position[],
@@ -832,7 +841,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
     const currentVal=p.qty*bundle.nav;
     const pnl=currentVal-p.qty*p.avgCost;
     const pnlPct=((bundle.nav-p.avgCost)/p.avgCost)*100;
-    const maxPayout = p.qty * 1.00; // each token pays $1 max if all legs hit
+    const maxPayout = p.qty * 1.00;
     const unresolved = bundle.totalLegs - bundle.resolved;
     return {id:p.id,bundle,currentVal,pnl,pnlPct,color:tc(bundle.tier),qty:p.qty,avgCost:p.avgCost,maxPayout,unresolved};
   });
@@ -858,7 +867,6 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
     + usdcPos.currentVal
   )/totalValue*100 : 0;
 
-  // Total max payout if everything resolves favorably
   const totalMaxPayout = lkrsPositions.reduce((s,p)=>s+p.maxPayout, 0) +
                         vaultDerived.reduce((s,v)=>s+v.principal, 0) +
                         usdcPos.currentVal;
@@ -872,6 +880,10 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
 
   const hasNoPositions = lkrsPositions.length === 0 && vaultDerived.length === 0;
   const isFullyEmpty = hasNoPositions && usdcBalance === 0;
+
+  // Size the donut + orbital system
+  const donutSize = isMobile ? 280 : 340;
+  const systemSize = isMobile ? 520 : 680; // orbital frame around donut
 
   return (
     <div>
@@ -889,20 +901,31 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
           </div>
         )}
       </div>
+
+      {/* Orbital stat cards — top accent bar mirrors tier colors */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:isMobile?8:12,marginBottom:24}}>
         {[
-          ["TOTAL VALUE",`$${totalValue.toFixed(2)}`,C.green],
-          ["UNREALIZED P&L",`${totalPnl>=0?"+":""}$${totalPnl.toFixed(2)}`,totalPnl>=0?C.green:C.red],
-          ["WEIGHTED PROB",`${weightedProb.toFixed(1)}%`,C.teal]
-        ].map(([label,val,color])=>(
-          <div key={label as string} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:12,padding:isMobile?"12px 10px":"18px 20px"}}>
-            <div style={{fontSize:isMobile?8:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.07em",marginBottom:isMobile?6:10,lineHeight:1.3}}>{label as string}</div>
-            <div style={{fontSize:isMobile?16:26,fontWeight:500,color:color as string,fontFamily:FS,letterSpacing:"-0.01em"}}>{val as string}</div>
+          ["TOTAL VALUE",`$${totalValue.toFixed(2)}`,C.green,C.tealLight],
+          ["UNREALIZED P&L",`${totalPnl>=0?"+":""}$${totalPnl.toFixed(2)}`,totalPnl>=0?C.green:C.red,"#fbbf24"],
+          ["WEIGHTED PROB",`${weightedProb.toFixed(1)}%`,C.teal,"#fb923c"]
+        ].map(([label,val,color,accent])=>(
+          <div key={label as string} style={{
+            background:`linear-gradient(180deg, ${C.card} 0%, ${darkenColor(C.card, 0.15)} 100%)`,
+            border:`0.5px solid ${C.border}`,
+            borderRadius:14,
+            padding:isMobile?"14px 12px":"20px 22px",
+            position:"relative",
+            overflow:"hidden",
+          }}>
+            <div style={{position:"absolute",top:0,left:0,right:0,height:1.5,background:`linear-gradient(90deg, transparent 0%, ${accent as string}99 50%, transparent 100%)`,opacity:0.7}} />
+            <div style={{position:"absolute",top:-40,right:-40,width:120,height:120,borderRadius:"50%",background:`radial-gradient(circle, ${accent as string}18 0%, transparent 65%)`,pointerEvents:"none"}} />
+            <div style={{fontSize:isMobile?8:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.12em",marginBottom:isMobile?6:10,lineHeight:1.3,position:"relative"}}>{label as string}</div>
+            <div style={{fontSize:isMobile?16:26,fontWeight:500,color:color as string,fontFamily:FS,letterSpacing:"-0.01em",position:"relative"}}>{val as string}</div>
           </div>
         ))}
       </div>
 
-      {/* PREMIUM DONUT CARD */}
+      {/* ORBITAL DONUT CARD — full space-theme treatment */}
       <div style={{
         background:`linear-gradient(180deg, ${C.card} 0%, ${darkenColor(C.card, 0.15)} 100%)`,
         border:`0.5px solid ${C.border}`,
@@ -912,70 +935,137 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
         position:"relative",
         boxShadow: "0 1px 0 rgba(255,255,255,0.03) inset, 0 20px 60px rgba(0,0,0,0.2)",
       }}>
-        {/* Subtle grain texture via radial gradient */}
-        <div style={{position:"absolute",inset:0,background:`radial-gradient(circle at 50% 0%, rgba(255,255,255,0.02) 0%, transparent 50%)`,pointerEvents:"none"}} />
-        {/* Active color wash */}
-        <div style={{position:"absolute",inset:0,background:activeId&&activeColor?`radial-gradient(ellipse 60% 50% at 50% 45%, ${activeColor}18 0%, transparent 70%)`:"transparent",transition:`background 0.6s ${EASE}`,pointerEvents:"none"}} />
+        {/* Deep space gradient wash */}
+        <div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse 80% 60% at 50% 50%, rgba(45, 212, 191, 0.04) 0%, transparent 70%)`,pointerEvents:"none"}} />
 
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"64px 0 52px",position:"relative"}}>
-          <div style={{position:"relative",marginBottom:40}}>
-            <SvgDonut data={allForDonut} size={340} activeId={activeId} onHover={setActiveId} isEmpty={allForDonut.length===0} />
-            <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",width:200}}>
-              {isFullyEmpty ? (
-                <div>
-                  <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,letterSpacing:"0.14em",marginBottom:12}}>NO POSITIONS</div>
-                  <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS,lineHeight:1.5}}>
-                    Your portfolio is empty
-                  </div>
-                </div>
-              ) : activeId && activePos ? (
-                <div key={activeId} style={{animation:`fadeIn 0.35s ${EASE}`}}>
-                  <div style={{display:"inline-block",padding:"3px 10px",borderRadius:20,background:(activeColor||C.teal)+"22",border:`0.5px solid ${activeColor||C.teal}55`,marginBottom:12}}>
-                    <span style={{fontSize:9,color:activeColor||C.teal,fontFamily:FS,letterSpacing:"0.12em",fontWeight:600}}>{activeId}</span>
-                  </div>
-                  <div style={{fontSize:38,fontWeight:600,color:C.textPrimary,fontFamily:FS,lineHeight:1,marginBottom:8,letterSpacing:"-0.03em"}}>{activeShare?.toFixed(1)}%</div>
-                  <div style={{fontSize:14,color:C.textSecondary,fontFamily:FS,marginBottom:4}}>${activePos.currentVal.toFixed(0)}</div>
-                  {activePos.pnl !== 0 && (
-                    <div style={{fontSize:12,color:activePos.pnl>=0?C.green:C.red,fontFamily:FS,fontWeight:500}}>
-                      {activePos.pnl>=0?"+":""}{activePos.pnlPct.toFixed(1)}%
+        {/* Top accent ribbon — mirrors the landing tier cards */}
+        <div style={{position:"absolute",top:0,left:0,right:0,height:1.5,background:`linear-gradient(90deg, transparent 0%, ${C.tealLight}66 20%, ${C.tealLight} 50%, ${C.tealLight}66 80%, transparent 100%)`,opacity:0.6}} />
+
+        {/* Active color wash */}
+        <div style={{position:"absolute",inset:0,background:activeId&&activeColor?`radial-gradient(ellipse 60% 50% at 50% 45%, ${activeColor}22 0%, transparent 70%)`:"transparent",transition:`background 0.6s ${EASE}`,pointerEvents:"none"}} />
+
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:isMobile?"48px 0 36px":"64px 0 52px",position:"relative"}}>
+
+          {/* Header strip */}
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:isMobile?28:36,position:"relative",zIndex:5}}>
+            <span style={{width:24,height:1,background:C.textMuted}} />
+            <span style={{fontFamily:FM,fontSize:isMobile?9:10,letterSpacing:"0.22em",color:C.textMuted}}>YOUR ORBIT</span>
+            <span style={{width:24,height:1,background:C.textMuted}} />
+          </div>
+
+          {/* Orbital system wrapper — rings + corona behind the donut */}
+          <div style={{position:"relative",width:systemSize,height:systemSize,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:isMobile?28:40}}>
+
+            {/* Corona glow — echoes central star from landing */}
+            <div style={{
+              position:"absolute",
+              width:donutSize*1.15,height:donutSize*1.15,
+              borderRadius:"50%",
+              background:`radial-gradient(circle, ${activeColor || C.tealLight}18 0%, ${activeColor || C.tealLight}08 40%, transparent 70%)`,
+              filter:"blur(20px)",
+              transition:`background 0.6s ${EASE}`,
+              pointerEvents:"none",
+            }} />
+
+            {/* Ring 1 — innermost, teal — slow spin */}
+            <div className="senthos-orbit-slow" style={{
+              position:"absolute",
+              width: donutSize * 1.28,
+              height: donutSize * 1.28,
+              borderRadius:"50%",
+              border:`1px solid rgba(45, 212, 191, 0.18)`,
+              boxShadow:"0 0 30px rgba(45, 212, 191, 0.08) inset",
+              pointerEvents:"none",
+            }}>
+              <div style={{position:"absolute",top:"50%",left:0,transform:"translate(-50%, -50%)",width:6,height:6,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 10px ${C.tealLight}`}} />
+            </div>
+
+            {/* Ring 2 — middle, amber — counter spin */}
+            <div className="senthos-orbit-med" style={{
+              position:"absolute",
+              width: donutSize * 1.55,
+              height: donutSize * 1.55,
+              borderRadius:"50%",
+              border:`1px solid rgba(217, 119, 6, 0.14)`,
+              pointerEvents:"none",
+            }}>
+              <div style={{position:"absolute",top:0,left:"50%",transform:"translate(-50%, -50%)",width:5,height:5,borderRadius:"50%",background:"#fbbf24",boxShadow:"0 0 10px #fbbf24"}} />
+            </div>
+
+            {/* Ring 3 — outermost, coral — slow spin */}
+            <div className="senthos-orbit-fast" style={{
+              position:"absolute",
+              width: donutSize * 1.82,
+              height: donutSize * 1.82,
+              borderRadius:"50%",
+              border:`1px solid rgba(234, 88, 12, 0.1)`,
+              pointerEvents:"none",
+            }}>
+              <div style={{position:"absolute",top:"50%",right:0,transform:"translate(50%, -50%)",width:4,height:4,borderRadius:"50%",background:"#fb923c",boxShadow:"0 0 8px #fb923c"}} />
+            </div>
+
+            {/* The donut itself — mechanics untouched */}
+            <div style={{position:"relative",zIndex:3}}>
+              <SvgDonut data={allForDonut} size={donutSize} activeId={activeId} onHover={setActiveId} isEmpty={allForDonut.length===0} />
+              <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",width:200}}>
+                {isFullyEmpty ? (
+                  <div>
+                    <div style={{fontSize:11,color:C.textMuted,fontFamily:FM,letterSpacing:"0.14em",marginBottom:12}}>NO POSITIONS</div>
+                    <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS,lineHeight:1.5}}>
+                      Your orbit is empty
                     </div>
-                  )}
-                </div>
-              ) : (
-                <div key="total" style={{animation:`fadeIn 0.35s ${EASE}`}}>
-                  <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.14em",marginBottom:12}}>TOTAL VALUE</div>
-                  <div style={{fontSize:38,fontWeight:600,color:C.textPrimary,fontFamily:FS,lineHeight:1,marginBottom:10,letterSpacing:"-0.03em"}}>${totalValue.toFixed(0)}</div>
-                  <div style={{fontSize:11,color:C.textMuted,fontFamily:FS}}>{allForDonut.length} position{allForDonut.length!==1?"s":""}</div>
-                </div>
-              )}
+                  </div>
+                ) : activeId && activePos ? (
+                  <div key={activeId} style={{animation:`fadeIn 0.35s ${EASE}`}}>
+                    <div style={{display:"inline-block",padding:"3px 10px",borderRadius:20,background:(activeColor||C.teal)+"22",border:`0.5px solid ${activeColor||C.teal}55`,marginBottom:12}}>
+                      <span style={{fontSize:9,color:activeColor||C.teal,fontFamily:FM,letterSpacing:"0.12em",fontWeight:600}}>{activeId}</span>
+                    </div>
+                    <div style={{fontSize:38,fontWeight:600,color:C.textPrimary,fontFamily:FS,lineHeight:1,marginBottom:8,letterSpacing:"-0.03em"}}>{activeShare?.toFixed(1)}%</div>
+                    <div style={{fontSize:14,color:C.textSecondary,fontFamily:FS,marginBottom:4}}>${activePos.currentVal.toFixed(0)}</div>
+                    {activePos.pnl !== 0 && (
+                      <div style={{fontSize:12,color:activePos.pnl>=0?C.green:C.red,fontFamily:FS,fontWeight:500}}>
+                        {activePos.pnl>=0?"+":""}{activePos.pnlPct.toFixed(1)}%
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div key="total" style={{animation:`fadeIn 0.35s ${EASE}`}}>
+                    <div style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.14em",marginBottom:12}}>TOTAL VALUE</div>
+                    <div style={{fontSize:38,fontWeight:600,color:C.textPrimary,fontFamily:FS,lineHeight:1,marginBottom:10,letterSpacing:"-0.03em"}}>${totalValue.toFixed(0)}</div>
+                    <div style={{fontSize:11,color:C.textMuted,fontFamily:FM,letterSpacing:"0.08em"}}>{allForDonut.length} POSITION{allForDonut.length!==1?"S":""}</div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
+
+          {/* Tier legend chips */}
           {!isFullyEmpty && (
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center",maxWidth:500}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center",maxWidth:500,position:"relative",zIndex:5}}>
               {[90,70,50].map(tier=>{
                 const tp=lkrsPositions.filter(p=>p.bundle.tier===tier);
                 if(!tp.length) return null;
                 const tv=tp.reduce((s,p)=>s+p.currentVal,0);
                 const isAct=activeId&&activeLkrs?.bundle.tier===tier;
                 return (
-                  <div key={tier} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 13px",borderRadius:100,background:isAct?tc(tier)+"22":C.surface,border:`0.5px solid ${isAct?tc(tier)+"66":C.border}`,transition:`all 0.3s ${EASE}`}}>
-                    <div style={{width:6,height:6,borderRadius:"50%",background:tc(tier)}} />
-                    <span style={{fontSize:11,color:C.textSecondary,fontFamily:FS}}>{tier}%</span>
+                  <div key={tier} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 13px",borderRadius:100,background:isAct?tc(tier)+"22":"rgba(15, 21, 32, 0.6)",border:`0.5px solid ${isAct?tc(tier)+"66":C.border}`,transition:`all 0.3s ${EASE}`,backdropFilter:"blur(8px)"}}>
+                    <div style={{width:6,height:6,borderRadius:"50%",background:tc(tier),boxShadow:isAct?`0 0 8px ${tc(tier)}`:"none"}} />
+                    <span style={{fontSize:11,color:C.textSecondary,fontFamily:FM,letterSpacing:"0.06em"}}>{tier}%</span>
                     <span style={{fontSize:11,fontWeight:500,color:isAct?tc(tier):C.textPrimary,fontFamily:FS,transition:`color 0.3s ${EASE}`}}>${tv.toFixed(0)}</span>
                   </div>
                 );
               })}
               {vaultDerived.map(v=>(
-                <div key={v.id} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 13px",borderRadius:100,background:activeId===v.id?C.tealBg:C.surface,border:`0.5px solid ${activeId===v.id?C.teal+"66":C.border}`,transition:`all 0.3s ${EASE}`}}>
-                  <div style={{width:6,height:6,borderRadius:"50%",background:C.teal}} />
-                  <span style={{fontSize:11,color:C.textSecondary,fontFamily:FS}}>Vault</span>
+                <div key={v.id} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 13px",borderRadius:100,background:activeId===v.id?C.tealBg:"rgba(15, 21, 32, 0.6)",border:`0.5px solid ${activeId===v.id?C.teal+"66":C.border}`,transition:`all 0.3s ${EASE}`,backdropFilter:"blur(8px)"}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:C.teal,boxShadow:activeId===v.id?`0 0 8px ${C.teal}`:"none"}} />
+                  <span style={{fontSize:11,color:C.textSecondary,fontFamily:FM,letterSpacing:"0.06em"}}>Vault</span>
                   <span style={{fontSize:11,fontWeight:500,color:activeId===v.id?C.teal:C.textPrimary,fontFamily:FS,transition:`color 0.3s ${EASE}`}}>${v.currentVal.toFixed(0)}</span>
                 </div>
               ))}
               {usdcBalance>0 && (
-                <div style={{display:"flex",alignItems:"center",gap:7,padding:"6px 13px",borderRadius:100,background:activeId==="USDC"?"#4a5a6a22":C.surface,border:`0.5px solid ${activeId==="USDC"?"#4a5a6a66":C.border}`,transition:`all 0.3s ${EASE}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:7,padding:"6px 13px",borderRadius:100,background:activeId==="USDC"?"#4a5a6a22":"rgba(15, 21, 32, 0.6)",border:`0.5px solid ${activeId==="USDC"?"#4a5a6a66":C.border}`,transition:`all 0.3s ${EASE}`,backdropFilter:"blur(8px)"}}>
                   <div style={{width:6,height:6,borderRadius:"50%",background:"#4a5a6a"}} />
-                  <span style={{fontSize:11,color:C.textSecondary,fontFamily:FS}}>USDC</span>
+                  <span style={{fontSize:11,color:C.textSecondary,fontFamily:FM,letterSpacing:"0.06em"}}>USDC</span>
                   <span style={{fontSize:11,fontWeight:500,color:activeId==="USDC"?"#8a9aaa":C.textPrimary,fontFamily:FS,transition:`color 0.3s ${EASE}`}}>${usdcBalance.toFixed(0)}</span>
                 </div>
               )}
@@ -985,7 +1075,8 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
       </div>
 
       {hasNoPositions && (
-        <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:16,padding:"40px 24px",textAlign:"center"}}>
+        <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:16,padding:"40px 24px",textAlign:"center",position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",top:0,left:0,right:0,height:1.5,background:`linear-gradient(90deg, transparent 0%, ${C.tealLight}66 50%, transparent 100%)`,opacity:0.4}} />
           <div style={{fontSize:14,color:C.textSecondary,fontFamily:FS,marginBottom:6}}>No constellation positions yet</div>
           <div style={{fontSize:12,color:C.textMuted,fontFamily:FS}}>
             {demoMode ? "Head to Constellations or Markets to make your first demo purchase" : "Connect a wallet and deposit to get started"}
@@ -994,9 +1085,20 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
       )}
 
       {!hasNoPositions && (
-        <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:16,overflow:"hidden"}}>
+        <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:16,overflow:"hidden",position:"relative"}}>
+          {/* subtle top accent */}
+          <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:`linear-gradient(90deg, transparent 0%, ${C.border} 50%, transparent 100%)`,opacity:0.8,zIndex:1}} />
+
+          {/* Section header */}
+          <div style={{padding:isMobile?"14px 16px 10px":"16px 24px 12px",borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
+            <span style={{width:20,height:1,background:C.textMuted}} />
+            <span style={{fontFamily:FM,fontSize:10,letterSpacing:"0.2em",color:C.textMuted}}>HOLDINGS</span>
+            <span style={{flex:1,height:1,background:`linear-gradient(90deg, ${C.textMuted}33 0%, transparent 100%)`}} />
+            <span style={{fontFamily:FM,fontSize:10,letterSpacing:"0.08em",color:C.textMuted}}>{lkrsPositions.length + vaultDerived.length + (usdcBalance>0?1:0)} POSITIONS</span>
+          </div>
+
           {isMobile ? (
-            // MOBILE: compact card rows, no horizontal scroll
+            // MOBILE: compact card rows
             <div>
               {[90,70,50].map(tier=>{
                 const tp=lkrsPositions.filter(p=>p.bundle.tier===tier).sort((a,b)=>b.currentVal-a.currentVal);
@@ -1004,14 +1106,17 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
                 return (
                   <div key={tier}>
                     <div style={{padding:"7px 16px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
-                      <div style={{width:5,height:5,borderRadius:"50%",background:tc(tier)}} />
-                      <span style={{fontSize:10,color:tc(tier),fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>{tier}% TIER</span>
+                      <div style={{width:5,height:5,borderRadius:"50%",background:tc(tier),boxShadow:`0 0 6px ${tc(tier)}66`}} />
+                      <span style={{fontSize:10,color:tc(tier),fontFamily:FM,fontWeight:500,letterSpacing:"0.1em"}}>{tier}% TIER</span>
                     </div>
                     {tp.map(p=>(
                       <div key={p.id} onClick={()=>onSelect(p.bundle,"portfolio")}
-                        style={{padding:"12px 16px",borderBottom:`0.5px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                        style={{padding:"12px 16px",borderBottom:`0.5px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,transition:`background 0.2s ${EASE}`}}
+                        onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=C.cardHover;}}
+                        onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";}}
+                      >
                         <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
-                          <div style={{width:3,height:32,borderRadius:2,background:p.color,flexShrink:0}} />
+                          <div style={{width:3,height:32,borderRadius:2,background:p.color,flexShrink:0,boxShadow:`0 0 6px ${p.color}66`}} />
                           <div style={{minWidth:0}}>
                             <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>{p.id}</div>
                             <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>{p.bundle.resolved}/{p.bundle.totalLegs} resolved · {p.bundle.daysLeft}d</div>
@@ -1030,17 +1135,17 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
               {vaultDerived.length>0&&(
                 <div>
                   <div style={{padding:"7px 16px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
-                    <div style={{width:5,height:5,borderRadius:"50%",background:C.teal}} />
-                    <span style={{fontSize:10,color:C.teal,fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>METEORA VAULT</span>
+                    <div style={{width:5,height:5,borderRadius:"50%",background:C.teal,boxShadow:`0 0 6px ${C.teal}66`}} />
+                    <span style={{fontSize:10,color:C.teal,fontFamily:FM,fontWeight:500,letterSpacing:"0.1em"}}>METEORA VAULT</span>
                   </div>
                   {vaultDerived.map(v=>(
                     <div key={v.id} style={{padding:"12px 16px",borderBottom:`0.5px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
                       <div style={{display:"flex",alignItems:"center",gap:10}}>
-                        <div style={{width:3,height:32,borderRadius:2,background:C.teal,flexShrink:0}} />
+                        <div style={{width:3,height:32,borderRadius:2,background:C.teal,flexShrink:0,boxShadow:`0 0 6px ${C.teal}66`}} />
                         <div>
                           <div style={{display:"flex",alignItems:"center",gap:6}}>
                             <span style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>{v.label}</span>
-                            <span style={{fontSize:9,padding:"2px 5px",borderRadius:8,background:C.tealBg,color:C.teal,border:`0.5px solid ${C.teal}44`,fontFamily:FS}}>PROTECTED</span>
+                            <span style={{fontSize:9,padding:"2px 5px",borderRadius:8,background:C.tealBg,color:C.teal,border:`0.5px solid ${C.teal}44`,fontFamily:FM,letterSpacing:"0.08em"}}>PROTECTED</span>
                           </div>
                           <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>{v.apy}% APY · {v.daysLeft}d left</div>
                         </div>
@@ -1056,7 +1161,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
               <div>
                 <div style={{padding:"7px 16px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
                   <div style={{width:5,height:5,borderRadius:"50%",background:"#4a5a6a"}} />
-                  <span style={{fontSize:10,color:"#6b8099",fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>CASH</span>
+                  <span style={{fontSize:10,color:"#6b8099",fontFamily:FM,fontWeight:500,letterSpacing:"0.1em"}}>CASH</span>
                 </div>
                 <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -1074,11 +1179,11 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
               </div>
             </div>
           ) : (
-            // DESKTOP: full table unchanged
+            // DESKTOP: full table
             <div>
               <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1.2fr 90px 80px",padding:"10px 24px",borderBottom:`0.5px solid ${C.border}`}}>
                 {["Position","Qty","NAV","Value","Max payout","30d","P&L"].map(h=>(
-                  <div key={h} style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.06em"}}>{h.toUpperCase()}</div>
+                  <div key={h} style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.1em"}}>{h.toUpperCase()}</div>
                 ))}
               </div>
               {[90,70,50].map(tier=>{
@@ -1087,8 +1192,8 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
                 return (
                   <div key={tier}>
                     <div style={{padding:"7px 24px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
-                      <div style={{width:5,height:5,borderRadius:"50%",background:tc(tier)}} />
-                      <span style={{fontSize:10,color:tc(tier),fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>{tier}% TIER</span>
+                      <div style={{width:5,height:5,borderRadius:"50%",background:tc(tier),boxShadow:`0 0 6px ${tc(tier)}66`}} />
+                      <span style={{fontSize:10,color:tc(tier),fontFamily:FM,fontWeight:500,letterSpacing:"0.1em"}}>{tier}% TIER</span>
                     </div>
                     {tp.map(p=>(
                       <div key={p.id}
@@ -1097,7 +1202,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
                         onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";setActiveId(null);}}
                         style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1.2fr 90px 80px",padding:"13px 24px",borderBottom:`0.5px solid ${C.border}`,cursor:"pointer",transition:`background 0.2s ${EASE}`,alignItems:"center"}}>
                         <div style={{display:"flex",alignItems:"center",gap:10}}>
-                          <div style={{width:3,height:30,borderRadius:2,background:p.color,flexShrink:0}} />
+                          <div style={{width:3,height:30,borderRadius:2,background:p.color,flexShrink:0,boxShadow:`0 0 6px ${p.color}66`}} />
                           <div>
                             <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>{p.id}</div>
                             <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>{p.bundle.daysLeft}d · {p.bundle.resolved}/{p.bundle.totalLegs} resolved</div>
@@ -1123,8 +1228,8 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
               {vaultDerived.length>0&&(
                 <div>
                   <div style={{padding:"7px 24px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
-                    <div style={{width:5,height:5,borderRadius:"50%",background:C.teal}} />
-                    <span style={{fontSize:10,color:C.teal,fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>METEORA VAULT</span>
+                    <div style={{width:5,height:5,borderRadius:"50%",background:C.teal,boxShadow:`0 0 6px ${C.teal}66`}} />
+                    <span style={{fontSize:10,color:C.teal,fontFamily:FM,fontWeight:500,letterSpacing:"0.1em"}}>METEORA VAULT</span>
                   </div>
                   {vaultDerived.map(v=>(
                     <div key={v.id}
@@ -1132,11 +1237,11 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
                       onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="transparent";setActiveId(null);}}
                       style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1.2fr 90px 80px",padding:"13px 24px",borderBottom:`0.5px solid ${C.border}`,cursor:"default",transition:`background 0.2s ${EASE}`,alignItems:"center"}}>
                       <div style={{display:"flex",alignItems:"center",gap:10}}>
-                        <div style={{width:3,height:30,borderRadius:2,background:C.teal,flexShrink:0}} />
+                        <div style={{width:3,height:30,borderRadius:2,background:C.teal,flexShrink:0,boxShadow:`0 0 6px ${C.teal}66`}} />
                         <div>
                           <div style={{display:"flex",alignItems:"center",gap:8}}>
                             <span style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>{v.label}</span>
-                            <span style={{fontSize:9,padding:"2px 6px",borderRadius:10,background:C.tealBg,color:C.teal,border:`0.5px solid ${C.teal}44`,fontWeight:500,fontFamily:FS}}>PROTECTED</span>
+                            <span style={{fontSize:9,padding:"2px 6px",borderRadius:10,background:C.tealBg,color:C.teal,border:`0.5px solid ${C.teal}44`,fontWeight:500,fontFamily:FM,letterSpacing:"0.08em"}}>PROTECTED</span>
                           </div>
                           <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:1}}>{v.daysLeft}d remaining · redeemable anytime</div>
                         </div>
@@ -1165,7 +1270,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
               <div>
                 <div style={{padding:"7px 24px",background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
                   <div style={{width:5,height:5,borderRadius:"50%",background:"#4a5a6a"}} />
-                  <span style={{fontSize:10,color:"#6b8099",fontFamily:FS,fontWeight:500,letterSpacing:"0.06em"}}>CASH</span>
+                  <span style={{fontSize:10,color:"#6b8099",fontFamily:FM,fontWeight:500,letterSpacing:"0.1em"}}>CASH</span>
                 </div>
                 <div
                   onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=C.cardHover;setActiveId("USDC");}}
@@ -1215,7 +1320,7 @@ function StarfieldBG() {
       c.width = window.innerWidth;
       c.height = window.innerHeight;
       stars = [];
-      const count = Math.floor((c.width * c.height) / 9000); // sparse
+      const count = Math.floor((c.width * c.height) / 9000);
       for (let i=0;i<count;i++) {
         stars.push({
           x: Math.random()*c.width,
@@ -1247,7 +1352,7 @@ function StarfieldBG() {
 }
 
 // =========================================================================
-// LANDING PAGE — orbital hero, ported from prototype
+// LANDING PAGE — CENTERED orbital hero
 // =========================================================================
 function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:string)=>void }) {
   const isMobile = useMobile();
@@ -1258,7 +1363,6 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
   const pc1Ref = useRef<HTMLDivElement>(null);
   const pc2Ref = useRef<HTMLDivElement>(null);
   const pc3Ref = useRef<HTMLDivElement>(null);
-  const [activeChapter, setActiveChapter] = useState(0);
   const chapterRefs = useRef<(HTMLElement|null)[]>([]);
 
   // Scroll-driven orbit rotation
@@ -1277,32 +1381,21 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
       if (pc2Ref.current) pc2Ref.current.style.transform = `rotate(${progress*360*0.7 + 120 + t*0.5}deg)`;
       if (pc3Ref.current) pc3Ref.current.style.transform = `rotate(${progress*360*0.4 + 210 + t*0.3}deg)`;
 
-      // progress dots — which chapter is most visible
-      const scrollMid = y + vh/2;
-      let active = 0;
-      chapterRefs.current.forEach((el, i) => {
-        if (el && scrollMid >= el.offsetTop) active = i;
-      });
-      setActiveChapter(active);
-
       raf = requestAnimationFrame(update);
     };
     raf = requestAnimationFrame(update);
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const scrollToChapter = (i:number) => {
-    const el = chapterRefs.current[i];
-    if (el) el.scrollIntoView({ behavior:"smooth" });
-  };
-
-  const chapters = [
-    {id:"arrival",label:"ARRIVAL"},
-    {id:"constellations",label:"CONSTELLATIONS"},
-    {id:"tiers",label:"ORBITAL TIERS"},
-    {id:"mechanics",label:"MECHANICS"},
-    {id:"launch",label:"LAUNCH"},
-  ];
+  // CENTERED orbital sizing — smaller so text reads clearly on top
+  const orbitalSize = isMobile ? 360 : 560;
+  const starSize = isMobile ? 120 : 150;
+  const r1 = isMobile ? 200 : 250;
+  const r2 = isMobile ? 300 : 400;
+  const r3 = isMobile ? 420 : 560;
+  const p1Dist = isMobile ? 100 : 125;
+  const p2Dist = isMobile ? 150 : 200;
+  const p3Dist = isMobile ? 210 : 280;
 
   return (
     <div style={{position:"relative",overflow:"hidden",background:"transparent"}}>
@@ -1321,62 +1414,62 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         }
       `}</style>
 
-      {/* Fixed orbital system */}
+      {/* Fixed CENTERED orbital system */}
       <div ref={systemRef} style={{
         position:"fixed",
         top:"50%",
-        left: isMobile ? "50%" : "25%",
+        left:"50%",
         transform:"translate(-50%, -50%)",
-        width: isMobile ? 360 : 640,
-        height: isMobile ? 360 : 640,
+        width: orbitalSize,
+        height: orbitalSize,
         zIndex:1,
         pointerEvents:"none",
-        opacity: isMobile ? 0.45 : 1,
+        opacity: 1,
       }}>
         {/* Rings */}
         <div ref={orbit3Ref} style={{
           position:"absolute",top:"50%",left:"50%",borderRadius:"50%",
           border:`1px solid rgba(234, 88, 12, 0.22)`,
-          width:isMobile?480:620,height:isMobile?480:620,
-          marginTop:isMobile?-240:-310,marginLeft:isMobile?-240:-310,
+          width:r3,height:r3,
+          marginTop:-r3/2,marginLeft:-r3/2,
         }} />
         <div ref={orbit2Ref} style={{
           position:"absolute",top:"50%",left:"50%",borderRadius:"50%",
           border:`1px solid rgba(217, 119, 6, 0.3)`,
           boxShadow:"0 0 50px rgba(217, 119, 6, 0.1)",
-          width:isMobile?340:440,height:isMobile?340:440,
-          marginTop:isMobile?-170:-220,marginLeft:isMobile?-170:-220,
+          width:r2,height:r2,
+          marginTop:-r2/2,marginLeft:-r2/2,
         }} />
         <div ref={orbit1Ref} style={{
           position:"absolute",top:"50%",left:"50%",borderRadius:"50%",
           border:`1px solid rgba(13, 148, 136, 0.4)`,
           boxShadow:"0 0 40px rgba(13, 148, 136, 0.15), inset 0 0 40px rgba(13, 148, 136, 0.05)",
-          width:isMobile?220:280,height:isMobile?220:280,
-          marginTop:isMobile?-110:-140,marginLeft:isMobile?-110:-140,
+          width:r1,height:r1,
+          marginTop:-r1/2,marginLeft:-r1/2,
         }} />
 
         {/* Planets */}
         <div ref={pc1Ref} style={{position:"absolute",top:"50%",left:"50%",transformOrigin:"0 0"}}>
           <div style={{position:"absolute",width:14,height:14,borderRadius:"50%",top:"50%",left:"50%",marginTop:-7,marginLeft:-7,
-            transform:`translate(${isMobile?110:140}px, 0)`,
+            transform:`translate(${p1Dist}px, 0)`,
             background:C.tealLight,boxShadow:`0 0 20px ${C.tealLight}`,
           }} />
         </div>
         <div ref={pc2Ref} style={{position:"absolute",top:"50%",left:"50%",transformOrigin:"0 0"}}>
           <div style={{position:"absolute",width:14,height:14,borderRadius:"50%",top:"50%",left:"50%",marginTop:-7,marginLeft:-7,
-            transform:`translate(${isMobile?170:220}px, 0)`,
+            transform:`translate(${p2Dist}px, 0)`,
             background:"#fbbf24",boxShadow:"0 0 20px #fbbf24",
           }} />
         </div>
         <div ref={pc3Ref} style={{position:"absolute",top:"50%",left:"50%",transformOrigin:"0 0"}}>
           <div style={{position:"absolute",width:14,height:14,borderRadius:"50%",top:"50%",left:"50%",marginTop:-7,marginLeft:-7,
-            transform:`translate(${isMobile?240:310}px, 0)`,
+            transform:`translate(${p3Dist}px, 0)`,
             background:"#fb923c",boxShadow:"0 0 20px #fb923c",
           }} />
         </div>
 
         {/* Central Star */}
-        <div style={{position:"absolute",top:"50%",left:"50%",width:isMobile?130:160,height:isMobile?130:160,marginTop:isMobile?-65:-80,marginLeft:isMobile?-65:-80}}>
+        <div style={{position:"absolute",top:"50%",left:"50%",width:starSize,height:starSize,marginTop:-starSize/2,marginLeft:-starSize/2}}>
           <div style={{position:"absolute",inset:-100,borderRadius:"50%",
             background:"radial-gradient(circle, rgba(45, 212, 191, 0.4) 0%, rgba(13, 148, 136, 0.2) 30%, transparent 70%)",
             animation:"starPulse 4s ease-in-out infinite",
@@ -1390,61 +1483,38 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
             background:"radial-gradient(circle at 40% 40%, #ffffff 0%, #a5f3fc 15%, #2dd4bf 35%, #0d9488 60%, #0a3a3a 100%)",
             boxShadow:"inset -15px -15px 30px rgba(0, 0, 0, 0.4), inset 10px 10px 25px rgba(255, 255, 255, 0.2), 0 0 60px rgba(45, 212, 191, 0.5)",
           }} />
-          <div style={{position:"absolute",top:"50%",left:"50%",width:3,height:isMobile?220:280,marginTop:isMobile?-110:-140,marginLeft:-1.5,
+          <div style={{position:"absolute",top:"50%",left:"50%",width:3,height:starSize*1.8,marginTop:-starSize*0.9,marginLeft:-1.5,
             background:"linear-gradient(to bottom, transparent 0%, rgba(255, 255, 255, 0.9) 50%, transparent 100%)",
             filter:"blur(1px)",animation:"flarePulse 3s ease-in-out infinite",
           }} />
-          <div style={{position:"absolute",top:"50%",left:"50%",width:isMobile?220:280,height:3,marginTop:-1.5,marginLeft:isMobile?-110:-140,
+          <div style={{position:"absolute",top:"50%",left:"50%",width:starSize*1.8,height:3,marginTop:-1.5,marginLeft:-starSize*0.9,
             background:"linear-gradient(to right, transparent 0%, rgba(255, 255, 255, 0.9) 50%, transparent 100%)",
             filter:"blur(1px)",animation:"flarePulse 3s ease-in-out infinite 0.8s",
           }} />
         </div>
       </div>
 
-      {/* Progress dots (desktop) */}
-      {!isMobile && (
-        <div style={{position:"fixed",right:36,top:"50%",transform:"translateY(-50%)",zIndex:50,display:"flex",flexDirection:"column",gap:18}}>
-          {chapters.map((ch, i) => (
-            <div key={ch.id} onClick={()=>scrollToChapter(i)} style={{
-              position:"relative",width:10,height:10,borderRadius:"50%",
-              border:`1px solid ${activeChapter===i?C.tealLight:C.textMuted}`,
-              background:activeChapter===i?C.tealLight:"transparent",
-              boxShadow:activeChapter===i?`0 0 14px ${C.tealLight}`:"none",
-              transform:activeChapter===i?"scale(1.15)":"scale(1)",
-              transition:`all 0.3s ${EASE}`,cursor:"pointer",
-            }}>
-              <span style={{
-                position:"absolute",right:22,top:"50%",transform:"translateY(-50%)",
-                fontFamily:FM,fontSize:10,letterSpacing:"0.1em",
-                color:activeChapter===i?C.tealLight:C.textMuted,
-                whiteSpace:"nowrap",opacity:activeChapter===i?1:0,
-                transition:"opacity 0.3s",pointerEvents:"none",
-              }}>{ch.label}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Content sections */}
+      {/* Content sections — ALL CENTERED */}
       <main style={{position:"relative",zIndex:10,pointerEvents:"none"}}>
 
         {/* SECTION 1 — Arrival */}
-        <section ref={el=>{chapterRefs.current[0]=el;}} style={{minHeight:"100vh",padding:isMobile?"120px 24px 80px":"140px 64px 80px",display:"flex",alignItems:"center",position:"relative",pointerEvents:"auto"}}>
-          {isMobile && <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(5, 8, 12, 0.75) 60%, rgba(5, 8, 12, 0.95) 100%)",pointerEvents:"none",zIndex:2}} />}
-          <div style={{marginLeft:isMobile?0:"50%",maxWidth:580,position:"relative",zIndex:5}}>
-            <div style={{display:"inline-flex",alignItems:"center",gap:10,fontFamily:FM,fontSize:isMobile?10:11,fontWeight:500,color:C.tealLight,letterSpacing:"0.2em",marginBottom:32,padding:"6px 12px",border:"1px solid rgba(45, 212, 191, 0.3)",borderRadius:100,background:"rgba(45, 212, 191, 0.05)"}}>
+        <section ref={el=>{chapterRefs.current[0]=el;}} style={{minHeight:"100vh",padding:isMobile?"120px 24px 80px":"140px 40px 80px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+          {/* Readability vignette — darker center so text reads on top of star */}
+          <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 55% 50% at 50% 50%, rgba(5, 8, 12, 0.78) 0%, rgba(5, 8, 12, 0.45) 45%, transparent 80%)",pointerEvents:"none",zIndex:2}} />
+          <div style={{margin:"0 auto",maxWidth:760,position:"relative",zIndex:5,textAlign:"center"}}>
+            <div style={{display:"inline-flex",alignItems:"center",gap:10,fontFamily:FM,fontSize:isMobile?10:11,fontWeight:500,color:C.tealLight,letterSpacing:"0.2em",marginBottom:32,padding:"6px 12px",border:"1px solid rgba(45, 212, 191, 0.3)",borderRadius:100,background:"rgba(45, 212, 191, 0.08)",backdropFilter:"blur(8px)"}}>
               <span style={{width:6,height:6,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 10px ${C.tealLight}`,animation:"starPulse 2s ease-in-out infinite"}} />
               LIVE ON SOLANA
             </div>
-            <h1 style={{fontFamily:FD,fontSize:isMobile?"clamp(44px, 10vw, 60px)":"clamp(56px, 7vw, 92px)",fontWeight:200,lineHeight:1.02,letterSpacing:"-0.035em",marginBottom:32,color:C.textPrimary}}>
+            <h1 style={{fontFamily:FD,fontSize:isMobile?"clamp(44px, 10vw, 60px)":"clamp(56px, 7vw, 96px)",fontWeight:200,lineHeight:1.02,letterSpacing:"-0.035em",marginBottom:32,color:C.textPrimary}}>
               Prediction markets, <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>structured</span>.
             </h1>
-            <p style={{fontSize:isMobile?16:18,lineHeight:1.65,color:C.textSecondary,fontWeight:300,maxWidth:480,fontFamily:FS}}>
+            <p style={{fontSize:isMobile?16:19,lineHeight:1.65,color:C.textSecondary,fontWeight:300,maxWidth:560,margin:"0 auto",fontFamily:FS}}>
               One deposit. Ten curated positions. A single token that tracks the whole constellation — and pays out when markets settle.
             </p>
           </div>
           {!isMobile && (
-            <div style={{position:"absolute",bottom:40,left:"50%",transform:"translateX(-50%)",fontFamily:FM,fontSize:10,letterSpacing:"0.22em",color:C.textMuted,display:"flex",flexDirection:"column",alignItems:"center",gap:10,animation:"landingBob 2s ease-in-out infinite"}}>
+            <div style={{position:"absolute",bottom:40,left:"50%",transform:"translateX(-50%)",fontFamily:FM,fontSize:10,letterSpacing:"0.22em",color:C.textMuted,display:"flex",flexDirection:"column",alignItems:"center",gap:10,animation:"landingBob 2s ease-in-out infinite",zIndex:5}}>
               <span>SCROLL</span>
               <div style={{width:1,height:30,background:`linear-gradient(to bottom, ${C.textMuted}, transparent)`}} />
             </div>
@@ -1452,23 +1522,24 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
 
         {/* SECTION 2 — Constellations */}
-        <section ref={el=>{chapterRefs.current[1]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 64px",display:"flex",alignItems:"center",position:"relative",pointerEvents:"auto"}}>
-          {isMobile && <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(5, 8, 12, 0.75) 60%, rgba(5, 8, 12, 0.95) 100%)",pointerEvents:"none",zIndex:2}} />}
-          <div style={{marginLeft:isMobile?0:"50%",maxWidth:580,position:"relative",zIndex:5}}>
-            <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+        <section ref={el=>{chapterRefs.current[1]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+          <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
+          <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
+            <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
               <span style={{width:28,height:1,background:"currentColor"}} />
               Chapter 01 · Constellations
+              <span style={{width:28,height:1,background:"currentColor"}} />
             </div>
-            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(32px, 8vw, 44px)":"clamp(40px, 5vw, 58px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary}}>
+            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(32px, 8vw, 44px)":"clamp(40px, 5vw, 62px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary}}>
               Not a single bet. A <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>constellation</span> of them.
             </h2>
-            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS}}>
+            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS,maxWidth:560,margin:"0 auto 18px"}}>
               Betting on one prediction market is a coin flip. A Senthos Constellation bundles 10 or more high-liquidity positions into a single basket token — spreading exposure across uncorrelated outcomes.
             </p>
-            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS}}>
+            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS,maxWidth:560,margin:"0 auto 40px"}}>
               You don't pick the positions. Our structurers do. You pick the risk profile — and buy the whole sky at once.
             </p>
-            <div style={{marginTop:40,padding:isMobile?18:24,background:"rgba(15, 21, 32, 0.5)",border:"1px solid rgba(45, 212, 191, 0.1)",borderRadius:14,backdropFilter:"blur(12px)"}}>
+            <div style={{marginTop:40,padding:isMobile?18:24,background:"rgba(15, 21, 32, 0.7)",border:"1px solid rgba(45, 212, 191, 0.12)",borderRadius:14,backdropFilter:"blur(16px)",textAlign:"left",maxWidth:520,margin:"40px auto 0"}}>
               <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.18em",color:C.textMuted,marginBottom:14}}>EXAMPLE · STHS-90-0515</div>
               <div style={{fontFamily:FM,fontSize:isMobile?13:15,fontWeight:500,color:C.tealLight,marginBottom:14}}>10 positions · Conservative tier · Resolves May 15</div>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -1491,28 +1562,29 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
 
         {/* SECTION 3 — Tiers */}
-        <section ref={el=>{chapterRefs.current[2]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 64px",display:"flex",alignItems:"center",position:"relative",pointerEvents:"auto"}}>
-          {isMobile && <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(5, 8, 12, 0.75) 60%, rgba(5, 8, 12, 0.95) 100%)",pointerEvents:"none",zIndex:2}} />}
-          <div style={{marginLeft:isMobile?0:"50%",maxWidth:580,position:"relative",zIndex:5}}>
-            <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+        <section ref={el=>{chapterRefs.current[2]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+          <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
+          <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
+            <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
               <span style={{width:28,height:1,background:"currentColor"}} />
               Chapter 02 · Risk tiers
+              <span style={{width:28,height:1,background:"currentColor"}} />
             </div>
-            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(32px, 8vw, 44px)":"clamp(40px, 5vw, 58px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary}}>
+            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(32px, 8vw, 44px)":"clamp(40px, 5vw, 62px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary}}>
               Three orbits. Three <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>risk profiles</span>.
             </h2>
-            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS}}>
+            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:40,fontFamily:FS,maxWidth:560,margin:"0 auto 40px"}}>
               Each constellation lives on one of three rings — defined by its weighted probability. Closer to the star means safer; further means bigger payout.
             </p>
-            <div style={{display:"grid",gridTemplateColumns:"1fr",gap:14,marginTop:40}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr",gap:14,marginTop:40,textAlign:"left",maxWidth:560,margin:"40px auto 0"}}>
               {[
                 {tier:90,label:"Conservative",sub:"STHS-90",desc:"High-probability basket. Issue price around $0.90. Built for capital preservation with small upside.",color:C.tealLight},
                 {tier:70,label:"Balanced",sub:"STHS-70",desc:"Medium conviction. Issue price around $0.70. Meaningful payout with manageable downside.",color:"#fbbf24"},
                 {tier:50,label:"High conviction",sub:"STHS-50",desc:"Near even-odds. Issue price around $0.50. Maximum payout potential for directional views.",color:"#fb923c"},
               ].map(t=>(
-                <div key={t.tier} style={{padding:isMobile?"18px 20px":"22px 24px",background:"rgba(15, 21, 32, 0.55)",border:"1px solid rgba(45, 212, 191, 0.08)",borderRadius:16,backdropFilter:"blur(10px)",position:"relative",overflow:"hidden",transition:`all 0.3s ${EASE}`}}
-                  onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.transform="translateX(6px)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.2)";}}
-                  onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.transform="translateX(0)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.08)";}}
+                <div key={t.tier} style={{padding:isMobile?"18px 20px":"22px 24px",background:"rgba(15, 21, 32, 0.7)",border:"1px solid rgba(45, 212, 191, 0.1)",borderRadius:16,backdropFilter:"blur(14px)",position:"relative",overflow:"hidden",transition:`all 0.3s ${EASE}`}}
+                  onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.transform="translateY(-3px)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.25)";}}
+                  onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.transform="translateY(0)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.1)";}}
                 >
                   <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:t.color,opacity:0.7}} />
                   <div style={{display:"flex",alignItems:"baseline",gap:14,marginBottom:8}}>
@@ -1528,27 +1600,28 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
 
         {/* SECTION 4 — Mechanics */}
-        <section ref={el=>{chapterRefs.current[3]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 64px",display:"flex",alignItems:"center",position:"relative",pointerEvents:"auto"}}>
-          {isMobile && <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(5, 8, 12, 0.75) 60%, rgba(5, 8, 12, 0.95) 100%)",pointerEvents:"none",zIndex:2}} />}
-          <div style={{marginLeft:isMobile?0:"50%",maxWidth:580,position:"relative",zIndex:5}}>
-            <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+        <section ref={el=>{chapterRefs.current[3]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+          <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
+          <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
+            <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
               <span style={{width:28,height:1,background:"currentColor"}} />
               Chapter 03 · Mechanics
+              <span style={{width:28,height:1,background:"currentColor"}} />
             </div>
-            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(32px, 8vw, 44px)":"clamp(40px, 5vw, 58px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary}}>
+            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(32px, 8vw, 44px)":"clamp(40px, 5vw, 62px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary}}>
               Deposit. Hold. <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Collect</span>.
             </h2>
-            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS}}>
+            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:40,fontFamily:FS,maxWidth:560,margin:"0 auto 40px"}}>
               No claiming, no manual steps, no unwinding trades. The token is the position — and it auto-resolves.
             </p>
-            <div style={{display:"flex",flexDirection:"column",gap:isMobile?22:28,marginTop:40}}>
+            <div style={{display:"flex",flexDirection:"column",gap:isMobile?22:28,marginTop:40,textAlign:"left",maxWidth:560,margin:"40px auto 0"}}>
               {[
                 ["01","Pick a tier, deposit USDC","Choose your risk level. Your deposit buys the underlying prediction market positions at issuance. A 0.5% structuring fee is taken once."],
                 ["02","Receive an STHS token","One token lands in your wallet. It tracks the live net asset value of the constellation. You can sell it on Jupiter at any time — or hold through resolution."],
                 ["03","Collect when markets settle","When the last position resolves, USDC is sent directly to every holder's wallet. Tokens burn. Nothing to claim."],
               ].map(([n,t,d],i)=>(
                 <div key={n} style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:isMobile?18:28,alignItems:"flex-start"}}>
-                  <div style={{width:isMobile?40:48,height:isMobile?40:48,borderRadius:"50%",border:"1px solid rgba(45, 212, 191, 0.3)",background:"rgba(45, 212, 191, 0.05)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:FM,fontSize:isMobile?12:13,color:C.tealLight,fontWeight:500,flexShrink:0,position:"relative"}}>
+                  <div style={{width:isMobile?40:48,height:isMobile?40:48,borderRadius:"50%",border:"1px solid rgba(45, 212, 191, 0.3)",background:"rgba(45, 212, 191, 0.08)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:FM,fontSize:isMobile?12:13,color:C.tealLight,fontWeight:500,flexShrink:0,position:"relative"}}>
                     {n}
                     {i<2 && <div style={{position:"absolute",top:"100%",left:"50%",width:1,height:isMobile?30:40,background:`linear-gradient(to bottom, rgba(45, 212, 191, 0.3), transparent)`}} />}
                   </div>
@@ -1564,14 +1637,14 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
 
         {/* SECTION 5 — Launch */}
         <section ref={el=>{chapterRefs.current[4]=el;}} style={{minHeight:"100vh",padding:isMobile?"80px 24px":"140px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
-          {isMobile && <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(5, 8, 12, 0.75) 60%, rgba(5, 8, 12, 0.95) 100%)",pointerEvents:"none",zIndex:2}} />}
+          <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:720,textAlign:"center",position:"relative",zIndex:5}}>
             <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
               <span style={{width:28,height:1,background:"currentColor"}} />
               Final approach
               <span style={{width:28,height:1,background:"currentColor"}} />
             </div>
-            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(36px, 9vw, 52px)":"clamp(48px, 6vw, 80px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary,textAlign:"center"}}>
+            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(36px, 9vw, 52px)":"clamp(48px, 6vw, 84px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary,textAlign:"center"}}>
               Your orbit starts <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>here</span>.
             </h2>
             <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:40,maxWidth:520,margin:"0 auto 40px",textAlign:"center",fontFamily:FS}}>
@@ -1615,7 +1688,6 @@ export default function App() {
   const [walletConnected,setWalletConnected]=useState(false);
   const [showWalletModal,setShowWalletModal]=useState(false);
 
-  // DEMO MODE — now DEFAULT ON, clean $10k slate
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -1720,12 +1792,23 @@ export default function App() {
           0% { transform: translateX(-100%); }
           100% { transform: translateX(100%); }
         }
+        @keyframes senthosOrbitSlow {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes senthosOrbitRev {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(-360deg); }
+        }
+        .senthos-orbit-slow { animation: senthosOrbitSlow 80s linear infinite; }
+        .senthos-orbit-med  { animation: senthosOrbitRev 120s linear infinite; }
+        .senthos-orbit-fast { animation: senthosOrbitSlow 160s linear infinite; }
       `}</style>
 
-      {/* Persistent subtle starfield — atmospheric reminder users are "in space" */}
+      {/* Persistent subtle starfield */}
       <StarfieldBG />
 
-      {/* Top Nav — sticky, blurred, all-screens */}
+      {/* Top Nav */}
       <nav style={{
         position:"fixed",top:0,left:0,right:0,zIndex:100,
         padding: isMobile ? "14px 18px" : "16px 28px",
@@ -1734,13 +1817,11 @@ export default function App() {
         background:"rgba(5, 8, 12, 0.65)",
         borderBottom:`0.5px solid ${C.border}`,
       }}>
-        {/* Logo — clickable, returns home */}
         <div onClick={()=>{setTab("home");if(isMobile)setSidebarOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
           <img src="/senthos_full.png" alt="Senthos" style={{width:isMobile?26:30,height:isMobile?26:30,display:"block",flexShrink:0}} />
           <div style={{fontSize:isMobile?13:15,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.12em"}}>SENTHOS</div>
         </div>
 
-        {/* Center: tab pills (desktop only) */}
         {!isMobile && (
           <ul style={{display:"flex",gap:4,listStyle:"none",margin:0,padding:0}}>
             {[
@@ -1768,7 +1849,6 @@ export default function App() {
           </ul>
         )}
 
-        {/* Right: demo pill + wallet */}
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           {!isMobile && demoMode && (
             <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderRadius:100,background:"rgba(45, 212, 191, 0.08)",border:`0.5px solid rgba(45, 212, 191, 0.25)`}}>
@@ -1814,7 +1894,6 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Mobile tab sheet */}
       {isMobile && sidebarOpen && (
         <>
           <div onClick={()=>setSidebarOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:90,backdropFilter:"blur(2px)"}} />
@@ -1856,7 +1935,6 @@ export default function App() {
         </>
       )}
 
-      {/* Main content — full width, top padding for nav */}
       <div style={{
         position:"relative",zIndex:1,
         minHeight:"100vh",
