@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, createContext, useContext } from "r
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
+    const check = () => setIsMobile(window.innerWidth < 640);
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
@@ -106,7 +106,7 @@ const HOT_PREDICTIONS = [
 function tc(tier: number) { return tier===90?'#0d9488':tier===70?'#d97706':'#ea580c'; }
 function tl(d: number) { return d<=20?"This week":d<=50?"This month":"Long term"; }
 
-// Logo asset paths — swap here if you rename files
+// Logo asset paths - swap here if you rename files
 const LOGO_SRC = {
   full:  "/senthos_full.png",
   teal:  "/senthos_teal.png",
@@ -197,7 +197,7 @@ function NavChart({ data, color, tier }: { data:number[], color:string, tier:num
 }
 
 // =========================================================================
-// SVG DONUT — premium with gradients, inner shadows, frosted center
+// SVG DONUT - premium with gradients, inner shadows, frosted center
 // =========================================================================
 function polarToCartesian(cx:number, cy:number, r:number, angleRad:number) {
   return { x: cx + r * Math.cos(angleRad), y: cy + r * Math.sin(angleRad) };
@@ -338,7 +338,7 @@ function SvgDonut({ data, size, activeId, onHover, isEmpty }: {
               filter="url(#sliceShadow)"
               style={{ transition: `d 0.4s ${EASE}` }}
             />
-            {/* Specular highlight — thin bright arc on the outer edge */}
+            {/* Specular highlight - thin bright arc on the outer edge */}
             <path
               d={arcPath(cx, cy, outerR, outerR - 2, adjStart, adjEnd)}
               fill={lightenColor(s.color, 0.45)}
@@ -368,21 +368,34 @@ function NavItem({ label, active, onClick }: { label:string, active:boolean, onC
 function BundleCard({ bundle, onClick }: { bundle:Bundle, onClick:()=>void }) {
   const [hov,setHov]=useState(false); const color=tc(bundle.tier);
   return (
-    <div onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)} style={{ background:hov?C.cardHover:C.card,border:`0.5px solid ${hov?C.borderHover:C.border}`,borderRadius:14,padding:"18px 20px 14px",cursor:"pointer",transition:`all 0.2s ${EASE}`,position:"relative",overflow:"hidden" }}>
-      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:color,opacity:0.8}} />
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+    <div onClick={onClick} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)} style={{
+      background: hov
+        ? `linear-gradient(135deg, rgba(15, 21, 32, 0.9) 0%, ${color}0a 100%)`
+        : "linear-gradient(135deg, rgba(15, 21, 32, 0.7) 0%, rgba(5, 8, 12, 0.8) 100%)",
+      border:`0.5px solid ${hov ? color+"50" : "rgba(255, 255, 255, 0.06)"}`,
+      borderRadius:16,padding:"18px 20px 14px",cursor:"pointer",
+      transition:`all 0.3s ${EASE}`,position:"relative",overflow:"hidden",
+      transform: hov ? "translateY(-2px)" : "translateY(0)",
+      boxShadow: hov ? `0 12px 32px rgba(0,0,0,0.4), 0 0 24px ${color}18` : "0 4px 14px rgba(0,0,0,0.2)",
+      backdropFilter:"blur(10px)",
+    }}>
+      {/* Top accent ribbon */}
+      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:color,opacity: hov ? 1 : 0.75}} />
+      {/* Corner radial glow */}
+      <div style={{position:"absolute",top:-60,right:-60,width:180,height:180,background:`radial-gradient(circle, ${color}20 0%, transparent 65%)`,pointerEvents:"none",opacity: hov ? 1 : 0.45,transition:`opacity 0.3s ${EASE}`}} />
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12,position:"relative"}}>
         <div>
-          <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD,marginBottom:4}}>{bundle.id}</div>
-          <div style={{fontSize:11,color:C.textMuted,fontFamily:FS}}>{bundle.resolved}/{bundle.totalLegs} resolved · {bundle.daysLeft}d left</div>
+          <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD,marginBottom:4,letterSpacing:"0.01em"}}>{bundle.id}</div>
+          <div style={{fontSize:11,color:C.textMuted,fontFamily:FM,letterSpacing:"0.04em"}}>{bundle.resolved}/{bundle.totalLegs} resolved · {bundle.daysLeft}d left</div>
         </div>
         <div style={{textAlign:"right"}}>
-          <div style={{fontSize:24,fontWeight:700,color,fontFamily:FD,lineHeight:1}}>{(bundle.nav*100).toFixed(1)}%</div>
-          <div style={{fontSize:11,color:C.textSecondary,fontFamily:FS,marginTop:2}}>${bundle.nav.toFixed(3)}</div>
+          <div style={{fontSize:26,fontWeight:300,color,fontFamily:FD,lineHeight:1,letterSpacing:"-0.02em"}}>{(bundle.nav*100).toFixed(1)}%</div>
+          <div style={{fontSize:11,color:C.textSecondary,fontFamily:FM,marginTop:3}}>${bundle.nav.toFixed(3)}</div>
         </div>
       </div>
-      <div style={{marginBottom:10,height:44}}><Sparkline data={bundle.history} color={color} height={44} width={300} /></div>
-      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontFamily:FS}}>
-        <span style={{color:bundle.change>=0?C.green:C.red}}>{bundle.change>=0?"+":""}{bundle.change.toFixed(1)}% today</span>
+      <div style={{marginBottom:10,height:44,position:"relative"}}><Sparkline data={bundle.history} color={color} height={44} width={300} /></div>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontFamily:FM,letterSpacing:"0.02em",position:"relative"}}>
+        <span style={{color:bundle.change>=0?C.green:C.red,fontWeight:500}}>{bundle.change>=0?"+":""}{bundle.change.toFixed(1)}% today</span>
         <span style={{color:C.textMuted}}>Resolves {bundle.date}</span>
       </div>
     </div>
@@ -392,17 +405,26 @@ function BundleCard({ bundle, onClick }: { bundle:Bundle, onClick:()=>void }) {
 function MoverRow({ bundle, rank, onClick, isPositive }: { bundle:Bundle, rank:number, onClick:()=>void, isPositive:boolean }) {
   const color=tc(bundle.tier); const cc=isPositive?C.green:C.red;
   return (
-    <div onClick={onClick} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderRadius:10,cursor:"pointer",transition:`all 0.2s ${EASE}`,background:C.card,border:`0.5px solid ${C.border}`}}
-      onMouseEnter={e=>(e.currentTarget.style.background=C.cardHover)} onMouseLeave={e=>(e.currentTarget.style.background=C.card)}>
-      <div style={{fontSize:18,fontWeight:700,color:C.textMuted,fontFamily:FD,width:20}}>{rank}</div>
+    <div onClick={onClick} style={{
+      display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderRadius:12,cursor:"pointer",
+      transition:`all 0.3s ${EASE}`,
+      background:"linear-gradient(135deg, rgba(15, 21, 32, 0.6) 0%, rgba(5, 8, 12, 0.8) 100%)",
+      border:`0.5px solid rgba(255, 255, 255, 0.05)`,
+      borderLeft:`2px solid ${color}`,
+      position:"relative",overflow:"hidden",
+      backdropFilter:"blur(10px)",
+    }}
+      onMouseEnter={e=>{e.currentTarget.style.borderColor=cc+"40";e.currentTarget.style.borderLeftColor=color;e.currentTarget.style.transform="translateX(2px)";e.currentTarget.style.boxShadow=`0 0 16px ${cc}15`;}}
+      onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255, 255, 255, 0.05)";e.currentTarget.style.borderLeftColor=color;e.currentTarget.style.transform="translateX(0)";e.currentTarget.style.boxShadow="none";}}>
+      <div style={{fontSize:16,fontWeight:300,color:C.textMuted,fontFamily:FD,width:20}}>{rank}</div>
       <div style={{flex:1}}>
-        <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD}}>{bundle.id}</div>
-        <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,marginTop:2}}>{bundle.daysLeft}d · {bundle.resolved}/{bundle.totalLegs} resolved</div>
+        <div style={{fontSize:13,fontWeight:500,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.01em"}}>{bundle.id}</div>
+        <div style={{fontSize:11,color:C.textMuted,fontFamily:FM,marginTop:2,letterSpacing:"0.02em"}}>{bundle.daysLeft}d · {bundle.resolved}/{bundle.totalLegs} resolved</div>
       </div>
       <div style={{width:64}}><Sparkline data={bundle.history} color={cc} height={30} width={64} /></div>
       <div style={{textAlign:"right",minWidth:70}}>
-        <div style={{fontSize:15,fontWeight:700,color,fontFamily:FD}}>{(bundle.nav*100).toFixed(1)}%</div>
-        <div style={{fontSize:11,color:cc,fontFamily:FS}}>{isPositive?"+":""}{bundle.change.toFixed(1)}%</div>
+        <div style={{fontSize:15,fontWeight:500,color,fontFamily:FD,letterSpacing:"-0.01em"}}>{(bundle.nav*100).toFixed(1)}%</div>
+        <div style={{fontSize:11,color:cc,fontFamily:FM,fontWeight:500}}>{isPositive?"+":""}{bundle.change.toFixed(1)}%</div>
       </div>
     </div>
   );
@@ -411,16 +433,23 @@ function MoverRow({ bundle, rank, onClick, isPositive }: { bundle:Bundle, rank:n
 function Ticker() {
   const items = [...BUNDLES, ...BUNDLES];
   return (
-    <div style={{overflow:"hidden",position:"relative",borderRadius:12,background:C.card,border:`0.5px solid ${C.border}`,marginBottom:28}}>
-      <div style={{position:"absolute",left:0,top:0,bottom:0,width:60,background:`linear-gradient(to right, ${C.card}, transparent)`,zIndex:2,pointerEvents:"none"}} />
-      <div style={{position:"absolute",right:0,top:0,bottom:0,width:60,background:`linear-gradient(to left, ${C.card}, transparent)`,zIndex:2,pointerEvents:"none"}} />
+    <div style={{
+      overflow:"hidden",position:"relative",borderRadius:14,
+      background:"linear-gradient(135deg, rgba(15, 21, 32, 0.7) 0%, rgba(5, 8, 12, 0.8) 100%)",
+      border:`0.5px solid rgba(45, 212, 191, 0.1)`,
+      marginBottom:28,
+      backdropFilter:"blur(10px)",
+    }}>
+      <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:`linear-gradient(to right, transparent, ${C.tealLight}33, transparent)`,zIndex:3}} />
+      <div style={{position:"absolute",left:0,top:0,bottom:0,width:80,background:`linear-gradient(to right, #05080c, transparent)`,zIndex:2,pointerEvents:"none"}} />
+      <div style={{position:"absolute",right:0,top:0,bottom:0,width:80,background:`linear-gradient(to left, #05080c, transparent)`,zIndex:2,pointerEvents:"none"}} />
       <div style={{display:"flex",gap:0,whiteSpace:"nowrap",animation:"tickerScroll 60s linear infinite"}}>
         {items.map((b,i)=>(
-          <div key={`${b.id}-${i}`} style={{display:"flex",alignItems:"center",gap:10,padding:"14px 22px",borderRight:`0.5px solid ${C.border}`,flexShrink:0}}>
-            <div style={{width:4,height:4,borderRadius:"50%",background:tc(b.tier)}} />
-            <span style={{fontSize:11,fontWeight:600,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.02em"}}>{b.id}</span>
-            <span style={{fontSize:11,color:C.textSecondary,fontFamily:FS}}>${b.nav.toFixed(3)}</span>
-            <span style={{fontSize:11,fontWeight:500,color:b.change>=0?C.green:C.red,fontFamily:FS}}>
+          <div key={`${b.id}-${i}`} style={{display:"flex",alignItems:"center",gap:10,padding:"14px 22px",borderRight:`0.5px solid rgba(255, 255, 255, 0.04)`,flexShrink:0}}>
+            <div style={{width:5,height:5,borderRadius:"50%",background:tc(b.tier),boxShadow:`0 0 8px ${tc(b.tier)}`}} />
+            <span style={{fontSize:11,fontWeight:500,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.04em"}}>{b.id}</span>
+            <span style={{fontSize:11,color:C.textSecondary,fontFamily:FM}}>${b.nav.toFixed(3)}</span>
+            <span style={{fontSize:11,fontWeight:500,color:b.change>=0?C.green:C.red,fontFamily:FM}}>
               {b.change>=0?"▲":"▼"} {Math.abs(b.change).toFixed(2)}%
             </span>
           </div>
@@ -435,45 +464,56 @@ function FeaturedHero({ bundle, onClick }: { bundle:Bundle, onClick:()=>void }) 
   const color = tc(bundle.tier);
   return (
     <div onClick={onClick} style={{
-      background:`linear-gradient(135deg, ${C.card} 0%, ${C.surface} 100%)`,
-      border:`0.5px solid ${C.border}`,
-      borderRadius:18,
-      padding: isMobile ? "20px 18px" : "28px 32px",
+      background:`linear-gradient(135deg, rgba(15, 21, 32, 0.85) 0%, rgba(5, 8, 12, 0.95) 100%)`,
+      border:`0.5px solid rgba(45, 212, 191, 0.12)`,
+      borderRadius:20,
+      padding: isMobile ? "22px 20px" : "32px 36px",
       cursor:"pointer",
       position:"relative",
       overflow:"hidden",
-      transition:`transform 0.3s ${EASE}, border-color 0.3s ${EASE}`,
+      transition:`all 0.4s ${EASE}`,
       marginBottom:28,
+      backdropFilter:"blur(12px)",
     }}
-    onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.borderColor=C.borderHover;}}
-    onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor=C.border;}}
+    onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.borderColor=color+"40";e.currentTarget.style.boxShadow=`0 20px 50px rgba(0,0,0,0.4), 0 0 40px ${color}15`;}}
+    onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="rgba(45, 212, 191, 0.12)";e.currentTarget.style.boxShadow="none";}}
     >
-      <div style={{position:"absolute",top:-100,right:-100,width:400,height:400,background:`radial-gradient(circle, ${color}1a 0%, transparent 65%)`,pointerEvents:"none"}} />
+      {/* Top accent ribbon */}
+      <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(to right, transparent, ${color}, transparent)`,opacity:0.7}} />
+      {/* Corner radial glow */}
+      <div style={{position:"absolute",top:-120,right:-120,width:460,height:460,background:`radial-gradient(circle, ${color}22 0%, transparent 60%)`,pointerEvents:"none"}} />
+      {/* Decorative orbital ring */}
+      {!isMobile && (
+        <>
+          <div style={{position:"absolute",top:"50%",right:-180,width:420,height:420,marginTop:-210,borderRadius:"50%",border:`0.5px solid ${color}22`,pointerEvents:"none"}} />
+          <div style={{position:"absolute",top:"50%",right:-80,width:220,height:220,marginTop:-110,borderRadius:"50%",border:`0.5px solid ${color}44`,pointerEvents:"none",boxShadow:`0 0 40px ${color}15`}} />
+        </>
+      )}
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1.3fr",gap:isMobile?16:36,position:"relative",zIndex:1,alignItems:"center"}}>
         <div>
-          <div style={{display:"inline-flex",alignItems:"center",gap:7,padding:"4px 10px",borderRadius:20,background:color+"18",border:`0.5px solid ${color}40`,marginBottom:12}}>
-            <div style={{width:5,height:5,borderRadius:"50%",background:color}} />
-            <span style={{fontSize:10,color,fontFamily:FS,fontWeight:500,letterSpacing:"0.1em"}}>FEATURED · {bundle.tier}% TIER</span>
+          <div style={{display:"inline-flex",alignItems:"center",gap:8,padding:"5px 12px",borderRadius:100,background:color+"15",border:`0.5px solid ${color}40`,marginBottom:14,backdropFilter:"blur(8px)"}}>
+            <div style={{width:5,height:5,borderRadius:"50%",background:color,boxShadow:`0 0 8px ${color}`}} />
+            <span style={{fontSize:10,color,fontFamily:FM,fontWeight:500,letterSpacing:"0.16em"}}>FEATURED · {bundle.tier}% TIER</span>
           </div>
-          <div style={{fontSize:isMobile?22:30,fontWeight:700,color:C.textPrimary,fontFamily:FD,marginBottom:6,letterSpacing:"-0.01em"}}>{bundle.id}</div>
-          <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS,marginBottom:16}}>
+          <div style={{fontSize:isMobile?22:32,fontWeight:300,color:C.textPrimary,fontFamily:FD,marginBottom:6,letterSpacing:"-0.02em"}}>{bundle.id}</div>
+          <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS,marginBottom:18}}>
             {bundle.resolved}/{bundle.totalLegs} legs resolved · Resolves {bundle.date}
           </div>
-          <div style={{display:"flex",alignItems:"baseline",gap:12,marginBottom:12}}>
-            <div style={{fontSize:isMobile?36:48,fontWeight:700,color,fontFamily:FD,lineHeight:1,letterSpacing:"-0.02em"}}>{(bundle.nav*100).toFixed(1)}%</div>
+          <div style={{display:"flex",alignItems:"baseline",gap:14,marginBottom:14}}>
+            <div style={{fontSize:isMobile?36:54,fontWeight:200,color,fontFamily:FD,lineHeight:1,letterSpacing:"-0.03em"}}>{(bundle.nav*100).toFixed(1)}%</div>
             <div>
-              <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>${bundle.nav.toFixed(3)}</div>
-              <div style={{fontSize:12,fontWeight:500,color:bundle.change>=0?C.green:C.red,fontFamily:FS,marginTop:2}}>
+              <div style={{fontSize:13,color:C.textSecondary,fontFamily:FM,letterSpacing:"0.02em"}}>${bundle.nav.toFixed(3)}</div>
+              <div style={{fontSize:12,fontWeight:500,color:bundle.change>=0?C.green:C.red,fontFamily:FM,marginTop:3,letterSpacing:"0.02em"}}>
                 {bundle.change>=0?"+":""}{bundle.change.toFixed(2)}% today
               </div>
             </div>
           </div>
-          <div style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,color,fontFamily:FS,fontWeight:500}}>
+          <div style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,color,fontFamily:FD,fontWeight:500,letterSpacing:"0.02em"}}>
             View constellation →
           </div>
         </div>
         {!isMobile && (
-          <div style={{height:160}}>
+          <div style={{height:160,position:"relative"}}>
             <Sparkline data={bundle.history} color={color} height={160} width={500} />
           </div>
         )}
@@ -509,45 +549,70 @@ function MarketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
 
   return (
     <div>
-      <div style={{marginBottom:28}}>
-        <div style={{fontSize:28,fontWeight:700,color:C.textPrimary,fontFamily:FD,marginBottom:4,letterSpacing:"-0.01em"}}>Markets</div>
-        <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>{BUNDLES.length} active constellations · live NAV</div>
+      {/* Orbital page header */}
+      <div style={{marginBottom:28,position:"relative",padding:isMobile?"8px 0 18px":"4px 0 22px",borderBottom:`0.5px solid rgba(45, 212, 191, 0.1)`}}>
+        <div style={{position:"absolute",top:0,right:0,width:220,height:140,background:`radial-gradient(ellipse at top right, rgba(45, 212, 191, 0.12) 0%, transparent 70%)`,pointerEvents:"none"}} />
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,position:"relative"}}>
+          <span style={{width:18,height:1,background:C.tealLight,opacity:0.6}} />
+          <span style={{fontFamily:FM,fontSize:10,letterSpacing:"0.22em",color:C.tealLight,fontWeight:500}}>MARKETS</span>
+          <span style={{width:18,height:1,background:C.tealLight,opacity:0.6}} />
+        </div>
+        <div style={{fontSize:isMobile?26:32,fontWeight:200,color:C.textPrimary,fontFamily:FD,marginBottom:6,letterSpacing:"-0.02em",position:"relative"}}>The <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>live sky</span></div>
+        <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS,position:"relative"}}>{BUNDLES.length} active constellations · live NAV</div>
       </div>
       <Ticker />
       <FeaturedHero bundle={featured} onClick={()=>onSelect(featured,"markets")} />
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20,marginBottom:36}}>
         <div>
-          <div style={{fontSize:11,color:C.green,fontFamily:FS,fontWeight:500,letterSpacing:"0.08em",marginBottom:10}}>TOP GAINERS</div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+            <span style={{width:16,height:1,background:C.green,opacity:0.5}} />
+            <span style={{fontSize:10,color:C.green,fontFamily:FM,fontWeight:500,letterSpacing:"0.2em"}}>TOP GAINERS</span>
+            <span style={{flex:1,height:1,background:`linear-gradient(to right, ${C.green}22, transparent)`}} />
+          </div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {gainers.map((b,i)=><MoverRow key={b.id} bundle={b} rank={i+1} isPositive={true} onClick={()=>onSelect(b,"markets")} />)}
           </div>
         </div>
         <div>
-          <div style={{fontSize:11,color:C.red,fontFamily:FS,fontWeight:500,letterSpacing:"0.08em",marginBottom:10,marginTop:isMobile?16:0}}>TOP LOSERS</div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,marginTop:isMobile?16:0}}>
+            <span style={{width:16,height:1,background:C.red,opacity:0.5}} />
+            <span style={{fontSize:10,color:C.red,fontFamily:FM,fontWeight:500,letterSpacing:"0.2em"}}>TOP LOSERS</span>
+            <span style={{flex:1,height:1,background:`linear-gradient(to right, ${C.red}22, transparent)`}} />
+          </div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {losers.map((b,i)=><MoverRow key={b.id} bundle={b} rank={i+1} isPositive={false} onClick={()=>onSelect(b,"markets")} />)}
           </div>
         </div>
       </div>
       <div style={{marginBottom:24}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-          <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,fontWeight:500,letterSpacing:"0.08em"}}>PREDICTION MARKET PULSE</div>
-          {!isMobile && <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.06em"}}>UNDERLYING MARKETS · LIVE</div>}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{width:16,height:1,background:C.textMuted,opacity:0.6}} />
+            <span style={{fontSize:10,color:C.textMuted,fontFamily:FM,fontWeight:500,letterSpacing:"0.22em"}}>PREDICTION MARKET PULSE</span>
+          </div>
+          {!isMobile && <div style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.12em"}}>UNDERLYING · LIVE</div>}
         </div>
         <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(3, 1fr)",gap:10}}>
           {HOT_PREDICTIONS.map((p,i)=>{
             const color = p.prob>70?C.teal:p.prob>50?C.amber:C.coral;
             return (
-              <div key={i} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:12,padding:isMobile?"12px 14px":"16px 18px",display:"flex",alignItems:"center",gap:isMobile?10:14,transition:`all 0.2s ${EASE}`}}
-                onMouseEnter={e=>{e.currentTarget.style.background=C.cardHover;e.currentTarget.style.borderColor=C.borderHover;}}
-                onMouseLeave={e=>{e.currentTarget.style.background=C.card;e.currentTarget.style.borderColor=C.border;}}
+              <div key={i} style={{
+                background:"linear-gradient(135deg, rgba(15, 21, 32, 0.65) 0%, rgba(5, 8, 12, 0.8) 100%)",
+                border:`0.5px solid rgba(255, 255, 255, 0.06)`,
+                borderRadius:14,padding:isMobile?"12px 14px":"16px 18px",
+                display:"flex",alignItems:"center",gap:isMobile?10:14,
+                transition:`all 0.3s ${EASE}`,position:"relative",overflow:"hidden",
+                backdropFilter:"blur(10px)",
+              }}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=color+"40";e.currentTarget.style.boxShadow=`0 0 18px ${color}12`;}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255, 255, 255, 0.06)";e.currentTarget.style.boxShadow="none";}}
               >
                 <PulseGauge prob={p.prob} color={color} size={isMobile?44:56} />
                 <div style={{flex:1,minWidth:0,overflow:"hidden"}}>
                   <div style={{fontSize:isMobile?11:12,color:C.textPrimary,fontFamily:FS,marginBottom:4,lineHeight:1.3,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{p.label}</div>
                   <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                    <span style={{fontSize:isMobile?15:18,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"-0.01em"}}>{p.prob}%</span>
-                    <span style={{fontSize:11,color:p.change>=0?C.green:C.red,fontFamily:FS,fontWeight:500}}>
+                    <span style={{fontSize:isMobile?15:18,fontWeight:500,color:C.textPrimary,fontFamily:FD,letterSpacing:"-0.01em"}}>{p.prob}%</span>
+                    <span style={{fontSize:11,color:p.change>=0?C.green:C.red,fontFamily:FM,fontWeight:500}}>
                       {p.change>=0?"+":""}{p.change.toFixed(1)}
                     </span>
                   </div>
@@ -558,19 +623,33 @@ function MarketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
         </div>
       </div>
       <div>
-        <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,fontWeight:500,letterSpacing:"0.08em",marginBottom:12}}>LATEST NEWS</div>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+          <span style={{width:16,height:1,background:C.textMuted,opacity:0.6}} />
+          <span style={{fontSize:10,color:C.textMuted,fontFamily:FM,fontWeight:500,letterSpacing:"0.22em"}}>LATEST NEWS</span>
+          <span style={{flex:1,height:1,background:`linear-gradient(to right, ${C.textMuted}22, transparent)`}} />
+        </div>
         <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(3, 1fr)",gap:10}}>
-          {NEWS.slice(0,isMobile?4:6).map((n,i)=>(
-            <div key={i} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:10,padding:"12px 14px",borderLeft:`2px solid ${n.impact==="positive"?C.green:n.impact==="negative"?C.red:C.textMuted}`,transition:`all 0.2s ${EASE}`}}
-              onMouseEnter={e=>e.currentTarget.style.background=C.cardHover}
-              onMouseLeave={e=>e.currentTarget.style.background=C.card}
-            >
-              <div style={{fontSize:12,color:C.textPrimary,fontFamily:FS,lineHeight:1.4,marginBottom:8,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{n.headline}</div>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.textMuted,fontFamily:FS}}>
-                <span>{n.source}</span><span>{n.time}</span>
+          {NEWS.slice(0,isMobile?4:6).map((n,i)=>{
+            const impactColor = n.impact==="positive"?C.green:n.impact==="negative"?C.red:C.textMuted;
+            return (
+              <div key={i} style={{
+                background:"linear-gradient(135deg, rgba(15, 21, 32, 0.6) 0%, rgba(5, 8, 12, 0.8) 100%)",
+                border:`0.5px solid rgba(255, 255, 255, 0.05)`,
+                borderRadius:12,padding:"12px 14px",
+                borderLeft:`2px solid ${impactColor}`,
+                transition:`all 0.3s ${EASE}`,position:"relative",overflow:"hidden",
+                backdropFilter:"blur(10px)",
+              }}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=`rgba(45, 212, 191, 0.25)`;e.currentTarget.style.borderLeftColor=impactColor;e.currentTarget.style.transform="translateX(2px)";}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255, 255, 255, 0.05)";e.currentTarget.style.borderLeftColor=impactColor;e.currentTarget.style.transform="translateX(0)";}}
+              >
+                <div style={{fontSize:12,color:C.textPrimary,fontFamily:FS,lineHeight:1.4,marginBottom:8,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{n.headline}</div>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.04em"}}>
+                  <span>{n.source}</span><span>{n.time}</span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -594,30 +673,70 @@ function ConstellationsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>voi
     return a.daysLeft-b.daysLeft;
   });
   const Pill=({children,active,onClick,color}:{children:React.ReactNode,active:boolean,onClick:()=>void,color?:string})=>(
-    <button onClick={onClick} style={{padding:"7px 16px",borderRadius:8,border:`0.5px solid ${active?(color||C.teal):C.border}`,background:active?(color||C.teal)+"18":"transparent",color:active?(color||C.teal):C.textSecondary,fontSize:12,fontFamily:FS,cursor:"pointer",transition:`all 0.2s ${EASE}`,fontWeight:active?500:400}}>{children}</button>
+    <button onClick={onClick} style={{
+      padding:"7px 16px",borderRadius:100,
+      border:`0.5px solid ${active?(color||C.tealLight):"rgba(255, 255, 255, 0.08)"}`,
+      background:active?`${color||C.tealLight}15`:"rgba(15, 21, 32, 0.4)",
+      color:active?(color||C.tealLight):C.textSecondary,
+      fontSize:12,fontFamily:FD,cursor:"pointer",
+      transition:`all 0.2s ${EASE}`,
+      fontWeight:active?500:400,
+      boxShadow:active?`0 0 16px ${color||C.tealLight}20`:"none",
+      letterSpacing:"0.01em",
+    }}
+      onMouseEnter={e=>{if(!active){(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.2)";(e.currentTarget as HTMLElement).style.color=C.textPrimary;}}}
+      onMouseLeave={e=>{if(!active){(e.currentTarget as HTMLElement).style.borderColor="rgba(255, 255, 255, 0.08)";(e.currentTarget as HTMLElement).style.color=C.textSecondary;}}}
+    >{children}</button>
   );
   return (
     <div>
-      <div style={{marginBottom:24}}>
-        <div style={{fontSize:28,fontWeight:700,color:C.textPrimary,fontFamily:FD,marginBottom:4,letterSpacing:"-0.01em"}}>Constellations</div>
-        <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>Browse and filter all available structured constellations</div>
+      {/* Orbital page header */}
+      <div style={{marginBottom:24,position:"relative",padding:"4px 0 22px",borderBottom:`0.5px solid rgba(45, 212, 191, 0.1)`}}>
+        <div style={{position:"absolute",top:0,right:0,width:220,height:140,background:`radial-gradient(ellipse at top right, rgba(217, 119, 6, 0.12) 0%, transparent 70%)`,pointerEvents:"none"}} />
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,position:"relative"}}>
+          <span style={{width:18,height:1,background:C.amber,opacity:0.7}} />
+          <span style={{fontFamily:FM,fontSize:10,letterSpacing:"0.22em",color:"#fbbf24",fontWeight:500}}>CONSTELLATIONS</span>
+          <span style={{width:18,height:1,background:C.amber,opacity:0.7}} />
+        </div>
+        <div style={{fontSize:32,fontWeight:200,color:C.textPrimary,fontFamily:FD,marginBottom:6,letterSpacing:"-0.02em",position:"relative"}}>Pick your <span style={{fontWeight:500,background:`linear-gradient(90deg, #fbbf24 0%, #fb923c 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>orbit</span></div>
+        <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS,position:"relative"}}>Browse and filter all available structured constellations</div>
       </div>
-      <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:14,padding:"18px 20px",marginBottom:20}}>
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div style={{
+        background:"linear-gradient(135deg, rgba(15, 21, 32, 0.6) 0%, rgba(5, 8, 12, 0.8) 100%)",
+        border:`0.5px solid rgba(45, 212, 191, 0.1)`,
+        borderRadius:18,
+        padding:"20px 22px",
+        marginBottom:22,
+        position:"relative",
+        overflow:"hidden",
+        backdropFilter:"blur(12px)",
+      }}>
+        <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:`linear-gradient(to right, transparent, ${C.tealLight}44, transparent)`}} />
+        <div style={{position:"absolute",top:-40,left:-40,width:160,height:160,background:`radial-gradient(circle, rgba(45, 212, 191, 0.08) 0%, transparent 70%)`,pointerEvents:"none"}} />
+        <div style={{display:"flex",flexDirection:"column",gap:16,position:"relative"}}>
           <div>
-            <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.08em",marginBottom:8}}>PROBABILITY TIER</div>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+              <span style={{width:3,height:3,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 6px ${C.tealLight}`}} />
+              <span style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.18em",fontWeight:500}}>PROBABILITY TIER</span>
+            </div>
             <div style={{display:"flex",gap:8}}>
               {([90,70,50] as const).map(t=><Pill key={t} active={tier===t} onClick={()=>setTier(t)} color={tc(t)}>{t}%</Pill>)}
             </div>
           </div>
           <div>
-            <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.08em",marginBottom:8}}>RESOLUTION WINDOW</div>
-            <div style={{display:"flex",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+              <span style={{width:3,height:3,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 6px ${C.tealLight}`}} />
+              <span style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.18em",fontWeight:500}}>RESOLUTION WINDOW</span>
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               {(["week","month","long"] as TimeFilter[]).map(t=><Pill key={t} active={time===t} onClick={()=>setTime(t)}>{timeMap[t]}</Pill>)}
             </div>
           </div>
           <div>
-            <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.08em",marginBottom:8}}>SORT BY</div>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+              <span style={{width:3,height:3,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 6px ${C.tealLight}`}} />
+              <span style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.18em",fontWeight:500}}>SORT BY</span>
+            </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               {(Object.keys(sortMap) as SortOption[]).map(s=><Pill key={s} active={sort===s} onClick={()=>setSort(s)}>{sortMap[s]}</Pill>)}
             </div>
@@ -648,7 +767,7 @@ function DetailPage({ bundle, fromTab, onBack, demoMode, demoUsdc, onDemoDeposit
   const [flash,setFlash]=useState(false);
   const color=tc(bundle.tier);
   const dep=parseFloat(usdcAmt)||0;
-  const tokensOut=dep>0?((dep*0.995)/bundle.nav).toFixed(2):"—";
+  const tokensOut=dep>0?((dep*0.995)/bundle.nav).toFixed(2):"-";
   const apy=8.4;
   const vaultSplit=0.93; const basketSplit=0.07;
   const vaultAmt=dep*vaultSplit; const basketAmt=dep*basketSplit;
@@ -670,57 +789,110 @@ function DetailPage({ bundle, fromTab, onBack, demoMode, demoUsdc, onDemoDeposit
 
   return (
     <div>
-      <button onClick={onBack} style={{background:"none",border:"none",color:C.textSecondary,cursor:"pointer",fontSize:13,marginBottom:20,padding:0,fontFamily:FS,display:"flex",alignItems:"center",gap:8,transition:`color 0.2s ${EASE}`}}
-        onMouseEnter={e=>(e.currentTarget as HTMLElement).style.color=C.textPrimary}
-        onMouseLeave={e=>(e.currentTarget as HTMLElement).style.color=C.textSecondary}
+      <button onClick={onBack} style={{
+        background:"rgba(15, 21, 32, 0.5)",
+        border:`0.5px solid rgba(255, 255, 255, 0.06)`,
+        borderRadius:100,
+        color:C.textSecondary,cursor:"pointer",fontSize:12,marginBottom:22,
+        padding:"7px 14px 7px 12px",fontFamily:FD,letterSpacing:"0.02em",
+        display:"flex",alignItems:"center",gap:8,
+        transition:`all 0.25s ${EASE}`,backdropFilter:"blur(8px)",
+      }}
+        onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color=C.tealLight;(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.3)";(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.06)";}}
+        onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color=C.textSecondary;(e.currentTarget as HTMLElement).style.borderColor="rgba(255, 255, 255, 0.06)";(e.currentTarget as HTMLElement).style.background="rgba(15, 21, 32, 0.5)";}}
       >
-        <span style={{fontSize:16,lineHeight:1}}>←</span>
+        <span style={{fontSize:14,lineHeight:1}}>←</span>
         <span>Back to {fromTab==="constellations"?"Constellations":fromTab==="portfolio"?"Portfolio":"Markets"}</span>
       </button>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
-        <div>
-          <div style={{fontSize:30,fontWeight:700,color:C.textPrimary,fontFamily:FD,marginBottom:6,letterSpacing:"-0.01em"}}>{bundle.id}</div>
-          <div style={{display:"flex",gap:16,fontSize:13,color:C.textSecondary,fontFamily:FS}}>
-            <span>{bundle.resolved}/{bundle.totalLegs} legs resolved</span>
-            <span>·</span><span>{bundle.daysLeft} days remaining</span>
-            <span>·</span><span>Resolves {bundle.date}</span>
-          </div>
+
+      {/* Orbital header block */}
+      <div style={{
+        position:"relative",marginBottom:24,padding:isMobile?"18px 0 22px":"8px 0 26px",
+        borderBottom:`0.5px solid rgba(45, 212, 191, 0.1)`,
+      }}>
+        <div style={{position:"absolute",top:-40,right:-40,width:300,height:200,background:`radial-gradient(ellipse, ${color}22 0%, transparent 70%)`,pointerEvents:"none"}} />
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,position:"relative"}}>
+          <span style={{width:16,height:1,background:color,opacity:0.7}} />
+          <span style={{fontFamily:FM,fontSize:10,letterSpacing:"0.22em",color,fontWeight:500}}>{bundle.tier}% TIER · STHS-{bundle.tier}</span>
+          <span style={{flex:1,height:1,background:`linear-gradient(to right, ${color}33, transparent)`}} />
         </div>
-        <div style={{textAlign:"right"}}>
-          <div style={{fontSize:44,fontWeight:700,color,fontFamily:FD,lineHeight:1,letterSpacing:"-0.02em"}}>{(bundle.nav*100).toFixed(1)}%</div>
-          <div style={{fontSize:13,fontFamily:FS,marginTop:4}}>
-            <span style={{color:C.textSecondary}}>${bundle.nav.toFixed(3)} · </span>
-            <span style={{color:bundle.change>=0?C.green:C.red}}>{bundle.change>=0?"+":""}{bundle.change.toFixed(1)}% today</span>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:isMobile?"flex-start":"flex-end",gap:20,position:"relative",flexDirection:isMobile?"column":"row"}}>
+          <div>
+            <div style={{fontSize:isMobile?28:36,fontWeight:200,color:C.textPrimary,fontFamily:FD,marginBottom:6,letterSpacing:"-0.025em"}}>{bundle.id}</div>
+            <div style={{display:"flex",gap:12,fontSize:12,color:C.textSecondary,fontFamily:FM,letterSpacing:"0.02em",flexWrap:"wrap"}}>
+              <span>{bundle.resolved}/{bundle.totalLegs} legs resolved</span>
+              <span style={{color:C.textMuted}}>·</span><span>{bundle.daysLeft} days remaining</span>
+              <span style={{color:C.textMuted}}>·</span><span>Resolves {bundle.date}</span>
+            </div>
+          </div>
+          <div style={{textAlign:isMobile?"left":"right"}}>
+            <div style={{fontSize:isMobile?40:52,fontWeight:200,color,fontFamily:FD,lineHeight:1,letterSpacing:"-0.03em"}}>{(bundle.nav*100).toFixed(1)}%</div>
+            <div style={{fontSize:12,fontFamily:FM,marginTop:5,letterSpacing:"0.02em"}}>
+              <span style={{color:C.textSecondary}}>${bundle.nav.toFixed(3)} · </span>
+              <span style={{color:bundle.change>=0?C.green:C.red,fontWeight:500}}>{bundle.change>=0?"+":""}{bundle.change.toFixed(1)}% today</span>
+            </div>
           </div>
         </div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 300px",gap:20}}>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:14,padding:"20px 20px 16px"}}>
-            <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,letterSpacing:"0.06em",marginBottom:14}}>NAV HISTORY (30 days)</div>
+          <div style={{
+            background:"linear-gradient(135deg, rgba(15, 21, 32, 0.7) 0%, rgba(5, 8, 12, 0.85) 100%)",
+            border:`0.5px solid rgba(45, 212, 191, 0.1)`,
+            borderRadius:16,padding:"22px 22px 18px",position:"relative",overflow:"hidden",
+            backdropFilter:"blur(10px)",
+          }}>
+            <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:`linear-gradient(to right, transparent, ${color}55, transparent)`}} />
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,position:"relative"}}>
+              <span style={{width:14,height:1,background:C.textMuted,opacity:0.6}} />
+              <span style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.22em",fontWeight:500}}>NAV HISTORY · 30D</span>
+              <span style={{flex:1,height:1,background:`linear-gradient(to right, ${C.textMuted}22, transparent)`}} />
+            </div>
             <NavChart data={bundle.history} color={color} tier={bundle.tier} />
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
             {[["Issue price",`$${bundle.issue.toFixed(2)}`],["Current NAV",`$${bundle.nav.toFixed(3)}`],["Legs resolved",`${bundle.resolved}/${bundle.totalLegs}`],["Days left",`${bundle.daysLeft}d`]].map(([k,v])=>(
-              <div key={k} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:10,padding:"14px 16px"}}>
-                <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginBottom:6}}>{k}</div>
-                <div style={{fontSize:18,fontWeight:700,color:C.textPrimary,fontFamily:FD}}>{v}</div>
+              <div key={k} style={{
+                background:"linear-gradient(135deg, rgba(15, 21, 32, 0.6) 0%, rgba(5, 8, 12, 0.8) 100%)",
+                border:`0.5px solid rgba(255, 255, 255, 0.06)`,
+                borderRadius:12,padding:"14px 16px",position:"relative",overflow:"hidden",
+                backdropFilter:"blur(8px)",
+              }}>
+                <div style={{position:"absolute",top:0,left:0,right:0,height:1,background:`linear-gradient(to right, transparent, ${color}44, transparent)`,opacity:0.5}} />
+                <div style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.12em",marginBottom:6}}>{k}</div>
+                <div style={{fontSize:18,fontWeight:400,color:C.textPrimary,fontFamily:FD,letterSpacing:"-0.01em"}}>{v}</div>
               </div>
             ))}
           </div>
-          <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:12,padding:"14px 18px"}}>
-            <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,letterSpacing:"0.06em",marginBottom:10}}>RESOLUTION PROGRESS</div>
-            <div style={{height:6,background:C.border,borderRadius:3,overflow:"hidden",marginBottom:6}}>
-              <div style={{width:`${Math.max(4,100-(bundle.daysLeft/180)*100)}%`,height:"100%",background:color,borderRadius:3}} />
+          <div style={{
+            background:"linear-gradient(135deg, rgba(15, 21, 32, 0.6) 0%, rgba(5, 8, 12, 0.8) 100%)",
+            border:`0.5px solid rgba(255, 255, 255, 0.06)`,
+            borderRadius:14,padding:"16px 20px",position:"relative",overflow:"hidden",
+            backdropFilter:"blur(8px)",
+          }}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+              <span style={{width:14,height:1,background:C.textMuted,opacity:0.6}} />
+              <span style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.22em",fontWeight:500}}>RESOLUTION PROGRESS</span>
             </div>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.textMuted,fontFamily:FS}}>
+            <div style={{height:6,background:"rgba(255, 255, 255, 0.04)",borderRadius:3,overflow:"hidden",marginBottom:8,position:"relative"}}>
+              <div style={{width:`${Math.max(4,100-(bundle.daysLeft/180)*100)}%`,height:"100%",background:`linear-gradient(to right, ${color}, ${color}cc)`,borderRadius:3,boxShadow:`0 0 10px ${color}66`}} />
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.textMuted,fontFamily:FM,letterSpacing:"0.02em"}}>
               <span>Issued</span><span style={{color:C.textSecondary}}>Resolves {bundle.date}</span>
             </div>
           </div>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:14,padding:20,position:"relative",overflow:"hidden",boxShadow:flash?`0 0 0 1px ${C.green}, 0 0 30px ${C.green}40`:"none",transition:`box-shadow 0.4s ${EASE}`}}>
-            <div style={{fontSize:14,fontWeight:600,color:C.textPrimary,fontFamily:FD,marginBottom:demoMode?6:16}}>{ppnMode?"Principal Protection":"Deposit USDC"}</div>
+          <div style={{
+            background:"linear-gradient(135deg, rgba(15, 21, 32, 0.85) 0%, rgba(5, 8, 12, 0.95) 100%)",
+            border:`0.5px solid ${flash?C.green:"rgba(45, 212, 191, 0.12)"}`,
+            borderRadius:16,padding:22,position:"relative",overflow:"hidden",
+            boxShadow:flash?`0 0 0 1px ${C.green}, 0 0 40px ${C.green}40`:`0 8px 24px rgba(0,0,0,0.25)`,
+            transition:`all 0.4s ${EASE}`,backdropFilter:"blur(12px)",
+          }}>
+            <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:ppnMode?`linear-gradient(to right, ${C.teal}, ${C.tealLight})`:color,opacity:0.8}} />
+            <div style={{position:"absolute",top:-60,right:-60,width:180,height:180,background:`radial-gradient(circle, ${ppnMode?C.teal:color}18 0%, transparent 65%)`,pointerEvents:"none"}} />
+            <div style={{fontSize:14,fontWeight:500,color:C.textPrimary,fontFamily:FD,marginBottom:demoMode?6:16,letterSpacing:"-0.005em",position:"relative"}}>{ppnMode?"Principal Protection":"Deposit USDC"}</div>
             {demoMode && (
               <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginBottom:12,letterSpacing:"0.04em"}}>
                 DEMO BALANCE · <span style={{color:C.teal}}>${demoUsdc.toFixed(0)}</span> USDC
@@ -732,7 +904,7 @@ function DetailPage({ bundle, fromTab, onBack, demoMode, demoUsdc, onDemoDeposit
             {!ppnMode?(
               <>
                 <div style={{background:C.surface,borderRadius:10,padding:"12px 14px",marginBottom:14}}>
-                  {[["Tokens received",tokensOut,C.textPrimary],["Entry probability",`${(bundle.nav*100).toFixed(1)}%`,color],["Max payout",dep>0?`$${(dep*0.995/bundle.nav).toFixed(0)}`:"—",C.green]].map(([k,v,c])=>(
+                  {[["Tokens received",tokensOut,C.textPrimary],["Entry probability",`${(bundle.nav*100).toFixed(1)}%`,color],["Max payout",dep>0?`$${(dep*0.995/bundle.nav).toFixed(0)}`:"-",C.green]].map(([k,v,c])=>(
                     <div key={k as string} style={{display:"flex",justifyContent:"space-between",fontSize:12,fontFamily:FS,marginBottom:8}}>
                       <span style={{color:C.textSecondary}}>{k as string}</span>
                       <span style={{color:c as string,fontFamily:FD,fontWeight:600}}>{v as string}</span>
@@ -769,7 +941,7 @@ function DetailPage({ bundle, fromTab, onBack, demoMode, demoUsdc, onDemoDeposit
                       <span style={{color:C.textSecondary}}>Meteora vault</span>
                     </div>
                     <div style={{textAlign:"right"}}>
-                      <div style={{color:C.textPrimary,fontWeight:500,fontFamily:FS}}>{dep>0?`$${vaultAmt.toFixed(0)}`:"—"}</div>
+                      <div style={{color:C.textPrimary,fontWeight:500,fontFamily:FS}}>{dep>0?`$${vaultAmt.toFixed(0)}`:"-"}</div>
                       <div style={{fontSize:10,color:C.teal,marginTop:1}}>{apy}% APY · redeemable anytime</div>
                     </div>
                   </div>
@@ -779,20 +951,20 @@ function DetailPage({ bundle, fromTab, onBack, demoMode, demoUsdc, onDemoDeposit
                       <span style={{color:C.textSecondary}}>{bundle.id}</span>
                     </div>
                     <div style={{textAlign:"right"}}>
-                      <div style={{color:C.textPrimary,fontWeight:500,fontFamily:FS}}>{dep>0?`$${basketAmt.toFixed(0)}`:"—"}</div>
-                      <div style={{fontSize:10,color,marginTop:1}}>{dep>0?`${tokensFromBasket.toFixed(1)} tokens at $${bundle.nav.toFixed(3)}`:"—"}</div>
+                      <div style={{color:C.textPrimary,fontWeight:500,fontFamily:FS}}>{dep>0?`$${basketAmt.toFixed(0)}`:"-"}</div>
+                      <div style={{fontSize:10,color,marginTop:1}}>{dep>0?`${tokensFromBasket.toFixed(1)} tokens at $${bundle.nav.toFixed(3)}`:"-"}</div>
                     </div>
                   </div>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
                   <div style={{background:C.surface,borderRadius:10,padding:"12px 14px",border:`0.5px solid ${C.border}`}}>
                     <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.06em",marginBottom:6}}>WORST CASE</div>
-                    <div style={{fontSize:18,fontWeight:600,color:C.textPrimary,fontFamily:FS}}>{dep>0?`$${worstCase.toFixed(0)}`:"—"}</div>
+                    <div style={{fontSize:18,fontWeight:600,color:C.textPrimary,fontFamily:FS}}>{dep>0?`$${worstCase.toFixed(0)}`:"-"}</div>
                     <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginTop:4}}>Vault back · basket zero</div>
                   </div>
                   <div style={{background:C.surface,borderRadius:10,padding:"12px 14px",border:`0.5px solid ${C.border}`}}>
                     <div style={{fontSize:10,color:C.green,fontFamily:FS,letterSpacing:"0.06em",marginBottom:6}}>BEST CASE</div>
-                    <div style={{fontSize:18,fontWeight:600,color:C.textPrimary,fontFamily:FS}}>{dep>0?`$${bestCase.toFixed(0)}`:"—"}</div>
+                    <div style={{fontSize:18,fontWeight:600,color:C.textPrimary,fontFamily:FS}}>{dep>0?`$${bestCase.toFixed(0)}`:"-"}</div>
                     <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,marginTop:4}}>Vault + basket at $1.00</div>
                   </div>
                 </div>
@@ -818,7 +990,7 @@ function DetailPage({ bundle, fromTab, onBack, demoMode, demoUsdc, onDemoDeposit
 }
 
 // =========================================================================
-// PORTFOLIO — orbital-themed redesign
+// PORTFOLIO - orbital-themed redesign
 // Keeps donut mechanics 100% untouched. Adds:
 //  - Slow-rotating concentric orbital rings around the donut (decorative)
 //  - Soft corona glow behind the donut to echo the landing's central star
@@ -887,22 +1059,26 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
 
   return (
     <div>
-      <div style={{marginBottom:24,display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
-        <div>
-          <div style={{fontSize:28,fontWeight:700,color:C.textPrimary,fontFamily:FD,marginBottom:4,letterSpacing:"-0.01em"}}>Portfolio</div>
-          <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>
-            {demoMode ? "Demo wallet · $10,000 starting balance" : "Example wallet · Solana devnet"}
+      {/* Orbital page header */}
+      <div style={{marginBottom:24,position:"relative",padding:"4px 0 22px",borderBottom:`0.5px solid rgba(45, 212, 191, 0.1)`,display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:20,flexWrap:"wrap"}}>
+        <div style={{position:"absolute",top:0,right:0,width:220,height:140,background:`radial-gradient(ellipse at top right, rgba(45, 212, 191, 0.1) 0%, transparent 70%)`,pointerEvents:"none"}} />
+        <div style={{position:"relative"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <span style={{width:18,height:1,background:C.tealLight,opacity:0.6}} />
+            <span style={{fontFamily:FM,fontSize:10,letterSpacing:"0.22em",color:C.tealLight,fontWeight:500}}>PORTFOLIO</span>
+            <span style={{width:18,height:1,background:C.tealLight,opacity:0.6}} />
           </div>
+          <div style={{fontSize:isMobile?26:32,fontWeight:200,color:C.textPrimary,fontFamily:FD,letterSpacing:"-0.02em"}}>Your <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>orbit</span></div>
         </div>
         {demoMode && !hasNoPositions && (
-          <div style={{textAlign:"right"}}>
-            <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,letterSpacing:"0.08em",marginBottom:3}}>MAX POTENTIAL VALUE</div>
-            <div style={{fontSize:18,fontWeight:600,color:C.green,fontFamily:FD,letterSpacing:"-0.01em"}}>${totalMaxPayout.toFixed(0)}</div>
+          <div style={{textAlign:"right",position:"relative"}}>
+            <div style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.18em",marginBottom:4,fontWeight:500}}>MAX POTENTIAL VALUE</div>
+            <div style={{fontSize:22,fontWeight:300,color:C.green,fontFamily:FD,letterSpacing:"-0.02em"}}>${totalMaxPayout.toFixed(0)}</div>
           </div>
         )}
       </div>
 
-      {/* Orbital stat cards — top accent bar mirrors tier colors */}
+      {/* Orbital stat cards - top accent bar mirrors tier colors */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:isMobile?8:12,marginBottom:24}}>
         {[
           ["TOTAL VALUE",`$${totalValue.toFixed(2)}`,C.green,C.tealLight],
@@ -925,7 +1101,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
         ))}
       </div>
 
-      {/* ORBITAL DONUT CARD — full space-theme treatment */}
+      {/* ORBITAL DONUT CARD - full space-theme treatment */}
       <div style={{
         background:`linear-gradient(180deg, ${C.card} 0%, ${darkenColor(C.card, 0.15)} 100%)`,
         border:`0.5px solid ${C.border}`,
@@ -938,7 +1114,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
         {/* Deep space gradient wash */}
         <div style={{position:"absolute",inset:0,background:`radial-gradient(ellipse 80% 60% at 50% 50%, rgba(45, 212, 191, 0.04) 0%, transparent 70%)`,pointerEvents:"none"}} />
 
-        {/* Top accent ribbon — mirrors the landing tier cards */}
+        {/* Top accent ribbon - mirrors the landing tier cards */}
         <div style={{position:"absolute",top:0,left:0,right:0,height:1.5,background:`linear-gradient(90deg, transparent 0%, ${C.tealLight}66 20%, ${C.tealLight} 50%, ${C.tealLight}66 80%, transparent 100%)`,opacity:0.6}} />
 
         {/* Active color wash */}
@@ -953,10 +1129,10 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
             <span style={{width:24,height:1,background:C.textMuted}} />
           </div>
 
-          {/* Orbital system wrapper — rings + corona behind the donut */}
+          {/* Orbital system wrapper - rings + corona behind the donut */}
           <div style={{position:"relative",width:systemSize,height:systemSize,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:isMobile?28:40}}>
 
-            {/* Corona glow — echoes central star from landing */}
+            {/* Corona glow - echoes central star from landing */}
             <div style={{
               position:"absolute",
               width:donutSize*1.15,height:donutSize*1.15,
@@ -967,7 +1143,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
               pointerEvents:"none",
             }} />
 
-            {/* Ring 1 — innermost, teal — slow spin */}
+            {/* Ring 1 - innermost, teal - slow spin */}
             <div className="senthos-orbit-slow" style={{
               position:"absolute",
               width: donutSize * 1.28,
@@ -980,7 +1156,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
               <div style={{position:"absolute",top:"50%",left:0,transform:"translate(-50%, -50%)",width:6,height:6,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 10px ${C.tealLight}`}} />
             </div>
 
-            {/* Ring 2 — middle, amber — counter spin */}
+            {/* Ring 2 - middle, amber - counter spin */}
             <div className="senthos-orbit-med" style={{
               position:"absolute",
               width: donutSize * 1.55,
@@ -992,7 +1168,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
               <div style={{position:"absolute",top:0,left:"50%",transform:"translate(-50%, -50%)",width:5,height:5,borderRadius:"50%",background:"#fbbf24",boxShadow:"0 0 10px #fbbf24"}} />
             </div>
 
-            {/* Ring 3 — outermost, coral — slow spin */}
+            {/* Ring 3 - outermost, coral - slow spin */}
             <div className="senthos-orbit-fast" style={{
               position:"absolute",
               width: donutSize * 1.82,
@@ -1004,7 +1180,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
               <div style={{position:"absolute",top:"50%",right:0,transform:"translate(50%, -50%)",width:4,height:4,borderRadius:"50%",background:"#fb923c",boxShadow:"0 0 8px #fb923c"}} />
             </div>
 
-            {/* The donut itself — mechanics untouched */}
+            {/* The donut itself - mechanics untouched */}
             <div style={{position:"relative",zIndex:3}}>
               <SvgDonut data={allForDonut} size={donutSize} activeId={activeId} onHover={setActiveId} isEmpty={allForDonut.length===0} />
               <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",width:200}}>
@@ -1306,7 +1482,7 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
 
 
 // =========================================================================
-// STARFIELD — subtle atmospheric background for all app pages
+// STARFIELD - subtle atmospheric background for all app pages
 // =========================================================================
 function StarfieldBG() {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -1352,9 +1528,9 @@ function StarfieldBG() {
 }
 
 // =========================================================================
-// LANDING PAGE — CENTERED orbital hero
+// LANDING PAGE - CENTERED orbital hero
 // =========================================================================
-// FlybyCanvas — asteroids, planets, comet streaks sweeping past camera.
+// FlybyCanvas - distant planets + occasional comet streaks drifting past camera.
 // Pure canvas for perf. Objects depth-sorted, spawn behind camera (z large),
 // accelerate toward camera (z → 0), culled when offscreen.
 function FlybyCanvas({ scrollProgress }: { scrollProgress: { current: number } }) {
@@ -1376,43 +1552,24 @@ function FlybyCanvas({ scrollProgress }: { scrollProgress: { current: number } }
     window.addEventListener("resize", resize);
 
     // Object pools
-    type Asteroid = { x:number; y:number; z:number; vx:number; vy:number; vz:number; r:number; rot:number; rotV:number; shape:number[]; };
     type Planet = { x:number; y:number; z:number; vx:number; vy:number; vz:number; r:number; color:string; ring:boolean; rot:number; };
     type Comet = { x:number; y:number; vx:number; vy:number; life:number; maxLife:number; color:string; };
 
-    const asteroids: Asteroid[] = [];
     const planets: Planet[] = [];
     const comets: Comet[] = [];
 
-    const MAX_ASTEROIDS = 14;
-    const MAX_PLANETS = 2;
+    const MAX_PLANETS = 1;
 
     const rand = (a:number, b:number) => a + Math.random()*(b-a);
 
-    const spawnAsteroid = () => {
-      // Spawn far away, with lateral drift so they streak past camera
-      const angle = rand(0, Math.PI*2);
-      const dist = rand(200, 400);
-      const shape = Array.from({length: 8}, () => rand(0.7, 1.15)); // irregular blob
-      asteroids.push({
-        x: Math.cos(angle)*dist, y: Math.sin(angle)*dist,
-        z: rand(800, 1400),
-        vx: rand(-0.3, 0.3), vy: rand(-0.3, 0.3),
-        vz: rand(-6, -3), // coming toward camera
-        r: rand(8, 28),
-        rot: rand(0, Math.PI*2),
-        rotV: rand(-0.02, 0.02),
-        shape,
-      });
-    };
     const spawnPlanet = () => {
       const side = Math.random() < 0.5 ? -1 : 1;
       const colors = ["#2dd4bf", "#fbbf24", "#fb923c", "#a78bfa", "#60a5fa", "#f472b6"];
       planets.push({
         x: side * rand(400, 700), y: rand(-300, 300),
-        z: rand(1600, 2200),
-        vx: -side * rand(0.8, 1.5), vy: rand(-0.2, 0.2),
-        vz: rand(-4, -2),
+        z: rand(1800, 2400),
+        vx: -side * rand(0.3, 0.55), vy: rand(-0.08, 0.08),
+        vz: rand(-1.4, -0.8),
         r: rand(40, 90),
         color: colors[Math.floor(Math.random()*colors.length)],
         ring: Math.random() < 0.5,
@@ -1423,19 +1580,16 @@ function FlybyCanvas({ scrollProgress }: { scrollProgress: { current: number } }
       // Fast diagonal streak across viewport
       const fromLeft = Math.random() < 0.5;
       const y0 = rand(0, h);
-      const speed = rand(14, 22);
+      const speed = rand(8, 12); // slower, more graceful streaks
       const angle = rand(-0.3, 0.3) + (fromLeft ? 0 : Math.PI);
       const tealComet = Math.random() < 0.6;
       comets.push({
         x: fromLeft ? -50 : w+50, y: y0,
-        vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed + rand(-2,2),
-        life: 0, maxLife: rand(50, 90),
+        vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed + rand(-1,1),
+        life: 0, maxLife: rand(70, 120),
         color: tealComet ? "#2dd4bf" : "#fb923c",
       });
     };
-
-    // Seed initial asteroids
-    for (let i=0; i<MAX_ASTEROIDS; i++) spawnAsteroid();
 
     let raf = 0;
     let frame = 0;
@@ -1446,32 +1600,19 @@ function FlybyCanvas({ scrollProgress }: { scrollProgress: { current: number } }
 
       ctx.clearRect(0, 0, w, h);
 
-      // scroll-driven camera shake/roll
+      // scroll-driven camera roll (very subtle)
       const prog = scrollProgress.current;
-      const rollRad = Math.sin(prog * Math.PI * 2) * 0.04; // subtle camera roll
+      const rollRad = Math.sin(prog * Math.PI * 2) * 0.02;
 
-      // Maintain asteroid population
-      while (asteroids.length < MAX_ASTEROIDS) spawnAsteroid();
-
-      // Spawn planets rarely
-      if (planets.length < MAX_PLANETS && Math.random() < 0.002) spawnPlanet();
-      // Spawn comets occasionally
-      if (comets.length < 5 && Math.random() < 0.008) spawnComet();
+      // Spawn planets very rarely
+      if (planets.length < MAX_PLANETS && Math.random() < 0.0008) spawnPlanet();
+      // Spawn comets rarely, max 2 on screen at once
+      if (comets.length < 2 && Math.random() < 0.003) spawnComet();
 
       // Depth-sorted render array
-      const drawables: Array<{type:"ast"|"pla"; z:number; obj:Asteroid|Planet}> = [];
+      // Planet-only drawables (depth sorted)
+      const drawables: Planet[] = [];
 
-      // Update asteroids
-      for (let i = asteroids.length - 1; i >= 0; i--) {
-        const a = asteroids[i];
-        a.x += a.vx; a.y += a.vy; a.z += a.vz;
-        a.rot += a.rotV;
-        if (a.z < 60 || Math.abs(a.x) > 1500 || Math.abs(a.y) > 1500) {
-          asteroids.splice(i, 1);
-          continue;
-        }
-        drawables.push({type:"ast", z:a.z, obj:a});
-      }
       // Update planets
       for (let i = planets.length - 1; i >= 0; i--) {
         const p = planets[i];
@@ -1481,7 +1622,7 @@ function FlybyCanvas({ scrollProgress }: { scrollProgress: { current: number } }
           planets.splice(i, 1);
           continue;
         }
-        drawables.push({type:"pla", z:p.z, obj:p});
+        drawables.push(p);
       }
       // Sort far-to-near
       drawables.sort((A,B) => B.z - A.z);
@@ -1491,52 +1632,8 @@ function FlybyCanvas({ scrollProgress }: { scrollProgress: { current: number } }
       ctx.translate(cx, cy);
       ctx.rotate(rollRad);
 
-      for (const d of drawables) {
-        if (d.type === "ast") {
-          const a = d.obj as Asteroid;
-          const scale = FOCAL / (FOCAL + a.z);
-          const sx = a.x * scale;
-          const sy = a.y * scale;
-          const sr = a.r * scale;
-          if (sr < 0.4) continue;
-
-          // motion blur streak when near camera
-          if (a.z < 400 && sr > 2) {
-            const blurLen = (1 - a.z/400) * 30 * scale;
-            const grd = ctx.createLinearGradient(sx - a.vx*blurLen, sy - a.vy*blurLen, sx, sy);
-            grd.addColorStop(0, "rgba(120,120,130,0)");
-            grd.addColorStop(1, "rgba(160,160,170,0.25)");
-            ctx.strokeStyle = grd;
-            ctx.lineWidth = sr * 0.8;
-            ctx.lineCap = "round";
-            ctx.beginPath();
-            ctx.moveTo(sx - a.vx*blurLen*3, sy - a.vy*blurLen*3);
-            ctx.lineTo(sx, sy);
-            ctx.stroke();
-          }
-
-          // Draw irregular asteroid
-          ctx.save();
-          ctx.translate(sx, sy);
-          ctx.rotate(a.rot);
-          const shadeBase = Math.max(40, Math.min(180, 160 - a.z*0.08));
-          const rim = Math.min(255, shadeBase + 40);
-          const grad = ctx.createRadialGradient(-sr*0.3, -sr*0.3, sr*0.1, 0, 0, sr);
-          grad.addColorStop(0, `rgba(${rim},${rim-10},${rim-20},1)`);
-          grad.addColorStop(1, `rgba(${shadeBase*0.4|0},${shadeBase*0.4|0},${shadeBase*0.45|0},1)`);
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          for (let k=0; k<a.shape.length; k++) {
-            const ang = (k / a.shape.length) * Math.PI * 2;
-            const rr = sr * a.shape[k];
-            const px = Math.cos(ang)*rr, py = Math.sin(ang)*rr;
-            if (k===0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-          }
-          ctx.closePath();
-          ctx.fill();
-          ctx.restore();
-        } else {
-          const p = d.obj as Planet;
+      for (const p of drawables) {
+        {
           const scale = FOCAL / (FOCAL + p.z);
           const sx = p.x * scale;
           const sy = p.y * scale;
@@ -1622,43 +1719,64 @@ function FlybyCanvas({ scrollProgress }: { scrollProgress: { current: number } }
   return <canvas ref={canvasRef} style={{position:"fixed",inset:0,width:"100vw",height:"100vh",zIndex:4,pointerEvents:"none"}} />;
 }
 
-// Camera orbit — maps scroll progress to 3D-ish star position.
-// Uses keyframed path: 5 sections, star moves L→behind→R→above→center
-// with zoom punches at key beats.
+// Camera orbit - ISS-style pass around the star.
+// Physics: we're on a circular orbit, camera always pointing at the star.
+// Scroll drives orbital angle. Star enters from upper-right, arcs across,
+// exits past the left edge by the end. Ring plane rotates in 3D as we pass.
 function cameraPath(progress: number) {
-  // Clamp 0..4 (5 sections)
+  // Normalize progress 0..1 across the full scroll
   const p = Math.max(0, Math.min(4, progress));
+  const t = p / 4;
 
-  // Keyframes: x (vw from center, -0.5..0.5 = within viewport), scale, rotZ, blur, opacity
-  // Using CSS translate and scale for cinematic feel
-  const keys = [
-    // Section 0 — Arrival: star dead center, medium scale
-    { x: 0,    y: 0,    scale: 1.0,  rotZ: 0,     blur: 0,  opacity: 1,  z: 0   },
-    // Section 1 — Constellations: star swings LEFT, slight zoom in
-    { x: -0.45,y: 0.05, scale: 1.25, rotZ: -4,    blur: 0,  opacity: 0.95, z: -50 },
-    // Section 2 — Tiers: star BEHIND us (zoom through), giant scale, fade
-    { x: 0,    y: -0.15,scale: 2.6,  rotZ: 6,     blur: 3,  opacity: 0.35, z: 100 },
-    // Section 3 — Mechanics: re-emerge on RIGHT, distant
-    { x: 0.45, y: 0.02, scale: 0.7,  rotZ: 8,     blur: 1,  opacity: 0.9,  z: -30 },
-    // Section 4 — Launch: dramatic center zoom, final approach
-    { x: 0,    y: 0,    scale: 1.8,  rotZ: 0,     blur: 0,  opacity: 1,   z: 0   },
-  ];
+  // Smoother ease - quadratic so motion starts gentle and accelerates slightly mid-pass
+  const ease = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
 
-  const i0 = Math.floor(p);
-  const i1 = Math.min(i0 + 1, keys.length - 1);
-  const f = p - i0;
-  // Ease in-out cubic for cinematic motion
-  const ease = f < 0.5 ? 4*f*f*f : 1 - Math.pow(-2*f + 2, 3)/2;
+  // ORBITAL ANGLE - spans a full 200deg arc so we genuinely pass around.
+  // +80deg: star far ahead upper-right (we're approaching)
+  // 0deg: star directly to our side (closest approach, beside us)
+  // -120deg: we've passed it, star is behind-left and drifting off-screen
+  const thetaDeg = 80 - ease * 200;
+  const theta = thetaDeg * Math.PI / 180;
 
-  const a = keys[i0], b = keys[i1];
+  // Apparent star position in viewport.
+  // Wider horizontal sweep (0.75 vw range) so star truly exits past the edge.
+  // sin(80deg) = 0.98 - star starts near right edge.
+  // sin(-120deg) = -0.87 - star ends past left edge.
+  const x = Math.sin(theta) * 0.75;
+  // Vertical: star rides slightly higher at closest approach (peak of our arc)
+  const y = -Math.cos(theta) * 0.12 - 0.04;
+
+  // Proximity-based scale. Closest at theta=0.
+  // Use cos(theta) folded: bigger in the middle of pass, smaller at entry/exit.
+  const proximity = Math.max(-0.5, Math.cos(theta));
+  const scale = 0.6 + (proximity + 0.5) * 0.5; // 0.6 (entry/exit) -> 1.35 (closest)
+
+  // Camera banking - we tilt slightly into the turn.
+  const rotZ = -Math.sin(theta) * 4;
+
+  // Ring plane rotation (the big one for selling "orbit").
+  // As we arc past, the ring plane appears to rotate around the star.
+  // When star is ahead-right (+theta): rings viewed from one side, normal rotation.
+  // When we pass closest: rings compress edge-on.
+  // When star is behind-left (-theta): rings appear rotated the other way.
+  // Simulated via scaleY (vertical compression) + rotate (plane tilt).
+  const ringScaleY = 0.2 + Math.abs(Math.sin(theta * 0.8)) * 0.75;
+  // Additional plane rotation driven by viewing angle - fakes perspective
+  const ringPerspective = Math.cos(theta) * 12; // up to ±12deg additional tilt
+
+  // Opacity: star stays vivid through most of the arc.
+  // Only starts fading in the final 15% as it moves off-screen.
+  const opacity = t < 0.85 ? 1 : Math.max(0.35, 1 - (t - 0.85) * 4);
+
   return {
-    x:       a.x      + (b.x      - a.x)      * ease,
-    y:       a.y      + (b.y      - a.y)      * ease,
-    scale:   a.scale  + (b.scale  - a.scale)  * ease,
-    rotZ:    a.rotZ   + (b.rotZ   - a.rotZ)   * ease,
-    blur:    a.blur   + (b.blur   - a.blur)   * ease,
-    opacity: a.opacity+ (b.opacity- a.opacity)* ease,
-    z:       a.z      + (b.z      - a.z)      * ease,
+    x,
+    y,
+    scale,
+    rotZ,
+    blur: 0,
+    opacity,
+    ringScaleY,
+    ringPerspective,
   };
 }
 
@@ -1678,16 +1796,20 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
   useEffect(() => {
     let raf = 0;
     let t = 0;
+    let smoothProgress = 0;
     const update = () => {
-      t += 0.3;
+      t += 0.12;
       const y = window.scrollY;
       const vh = window.innerHeight;
-      const progress = y / vh; // 0..4 across 5 sections
+      const targetProgress = y / vh; // 0..4 across 5 sections
+      // Smooth progress with lerp - camera eases toward scroll position
+      smoothProgress += (targetProgress - smoothProgress) * 0.08;
+      const progress = smoothProgress;
       scrollProgressRef.current = progress;
 
       const cam = cameraPath(progress);
 
-      // Apply 3D camera transform to the whole star system
+      // Apply camera transform to the star system (position + scale + subtle roll)
       if (systemRef.current) {
         const translateX = cam.x * 100; // vw
         const translateY = cam.y * 100; // vh
@@ -1697,14 +1819,16 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         systemRef.current.style.opacity = String(cam.opacity);
       }
 
-      // Ring rotations (faster spinning as we orbit past)
-      const orbitBoost = 1 + Math.abs(cam.rotZ) * 0.1;
-      if (orbit1Ref.current) orbit1Ref.current.style.transform = `translate(-50%, -50%) rotate(${progress*360*0.8*orbitBoost}deg)`;
-      if (orbit2Ref.current) orbit2Ref.current.style.transform = `translate(-50%, -50%) rotate(${-progress*360*0.5*orbitBoost}deg)`;
-      if (orbit3Ref.current) orbit3Ref.current.style.transform = `translate(-50%, -50%) rotate(${progress*360*0.3*orbitBoost}deg)`;
-      if (pc1Ref.current) pc1Ref.current.style.transform = `rotate(${progress*360*1.2 + 30 + t*0.8}deg)`;
-      if (pc2Ref.current) pc2Ref.current.style.transform = `rotate(${progress*360*0.7 + 120 + t*0.5}deg)`;
-      if (pc3Ref.current) pc3Ref.current.style.transform = `rotate(${progress*360*0.4 + 210 + t*0.3}deg)`;
+      // Ring rotations + 3D tilt (scaleY = view angle, perspective = plane rotation)
+      const ringTilt = cam.ringScaleY;
+      const ringPers = cam.ringPerspective;
+      if (orbit1Ref.current) orbit1Ref.current.style.transform = `translate(-50%, -50%) rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${progress*360*0.35}deg)`;
+      if (orbit2Ref.current) orbit2Ref.current.style.transform = `translate(-50%, -50%) rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${-progress*360*0.22}deg)`;
+      if (orbit3Ref.current) orbit3Ref.current.style.transform = `translate(-50%, -50%) rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${progress*360*0.15}deg)`;
+      // Planets track the ring plane
+      if (pc1Ref.current) pc1Ref.current.style.transform = `rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${progress*360*0.55 + 30 + t*0.35}deg)`;
+      if (pc2Ref.current) pc2Ref.current.style.transform = `rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${progress*360*0.32 + 120 + t*0.22}deg)`;
+      if (pc3Ref.current) pc3Ref.current.style.transform = `rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${progress*360*0.18 + 210 + t*0.15}deg)`;
 
       raf = requestAnimationFrame(update);
     };
@@ -1739,10 +1863,10 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         }
       `}</style>
 
-      {/* Flyby canvas — asteroids, planets, comets */}
+      {/* Flyby canvas - planets + comets */}
       {!isMobile && <FlybyCanvas scrollProgress={scrollProgressRef} />}
 
-      {/* Fixed orbital system — now driven by camera path */}
+      {/* Fixed orbital system - now driven by camera path */}
       <div ref={systemRef} style={{
         position:"fixed",
         top:"50%",
@@ -1824,12 +1948,12 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </div>
       </div>
 
-      {/* Content sections — ALL CENTERED */}
+      {/* Content sections - ALL CENTERED */}
       <main style={{position:"relative",zIndex:10,pointerEvents:"none"}}>
 
-        {/* SECTION 1 — Arrival */}
+        {/* SECTION 1 - Arrival */}
         <section ref={el=>{chapterRefs.current[0]=el;}} style={{minHeight:"100vh",padding:isMobile?"120px 24px 80px":"140px 40px 80px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
-          {/* Readability vignette — darker center so text reads on top of star */}
+          {/* Readability vignette - darker center so text reads on top of star */}
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 55% 50% at 50% 50%, rgba(5, 8, 12, 0.78) 0%, rgba(5, 8, 12, 0.45) 45%, transparent 80%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:760,position:"relative",zIndex:5,textAlign:"center"}}>
             <div style={{display:"inline-flex",alignItems:"center",gap:10,fontFamily:FM,fontSize:isMobile?10:11,fontWeight:500,color:C.tealLight,letterSpacing:"0.2em",marginBottom:32,padding:"6px 12px",border:"1px solid rgba(45, 212, 191, 0.3)",borderRadius:100,background:"rgba(45, 212, 191, 0.08)",backdropFilter:"blur(8px)"}}>
@@ -1840,7 +1964,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
               Prediction markets, <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>structured</span>.
             </h1>
             <p style={{fontSize:isMobile?16:19,lineHeight:1.65,color:C.textSecondary,fontWeight:300,maxWidth:560,margin:"0 auto",fontFamily:FS}}>
-              One deposit. Ten curated positions. A single token that tracks the whole constellation — and pays out when markets settle.
+              One deposit. Ten curated positions. A single token that tracks the whole constellation, and pays out when markets settle.
             </p>
           </div>
           {!isMobile && (
@@ -1851,7 +1975,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
           )}
         </section>
 
-        {/* SECTION 2 — Constellations */}
+        {/* SECTION 2 - Constellations */}
         <section ref={el=>{chapterRefs.current[1]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
@@ -1864,10 +1988,10 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
               Not a single bet. A <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>constellation</span> of them.
             </h2>
             <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS,maxWidth:560,margin:"0 auto 18px"}}>
-              Betting on one prediction market is a coin flip. A Senthos Constellation bundles 10 or more high-liquidity positions into a single basket token — spreading exposure across uncorrelated outcomes.
+              Betting on one prediction market is a coin flip. A Senthos Constellation bundles 10 or more high-liquidity positions into a single basket token, spreading exposure across uncorrelated outcomes.
             </p>
             <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS,maxWidth:560,margin:"0 auto 40px"}}>
-              You don't pick the positions. Our structurers do. You pick the risk profile — and buy the whole sky at once.
+              You don't pick the positions. Our structurers do. You pick the risk profile, and buy the whole sky at once.
             </p>
             <div style={{marginTop:40,padding:isMobile?18:24,background:"rgba(15, 21, 32, 0.7)",border:"1px solid rgba(45, 212, 191, 0.12)",borderRadius:14,backdropFilter:"blur(16px)",textAlign:"left",maxWidth:520,margin:"40px auto 0"}}>
               <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.18em",color:C.textMuted,marginBottom:14}}>EXAMPLE · STHS-90-0515</div>
@@ -1891,7 +2015,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
           </div>
         </section>
 
-        {/* SECTION 3 — Tiers */}
+        {/* SECTION 3 - Tiers */}
         <section ref={el=>{chapterRefs.current[2]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
@@ -1904,7 +2028,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
               Three orbits. Three <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>risk profiles</span>.
             </h2>
             <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:40,fontFamily:FS,maxWidth:560,margin:"0 auto 40px"}}>
-              Each constellation lives on one of three rings — defined by its weighted probability. Closer to the star means safer; further means bigger payout.
+              Each constellation lives on one of three rings, defined by its weighted probability. Closer to the star means safer; further means bigger payout.
             </p>
             <div style={{display:"grid",gridTemplateColumns:"1fr",gap:14,marginTop:40,textAlign:"left",maxWidth:560,margin:"40px auto 0"}}>
               {[
@@ -1929,7 +2053,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
           </div>
         </section>
 
-        {/* SECTION 4 — Mechanics */}
+        {/* SECTION 4 - Mechanics */}
         <section ref={el=>{chapterRefs.current[3]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
@@ -1942,12 +2066,12 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
               Deposit. Hold. <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Collect</span>.
             </h2>
             <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:40,fontFamily:FS,maxWidth:560,margin:"0 auto 40px"}}>
-              No claiming, no manual steps, no unwinding trades. The token is the position — and it auto-resolves.
+              No claiming, no manual steps, no unwinding trades. The token is the position, and it auto-resolves.
             </p>
             <div style={{display:"flex",flexDirection:"column",gap:isMobile?22:28,marginTop:40,textAlign:"left",maxWidth:560,margin:"40px auto 0"}}>
               {[
                 ["01","Pick a tier, deposit USDC","Choose your risk level. Your deposit buys the underlying prediction market positions at issuance. A 0.5% structuring fee is taken once."],
-                ["02","Receive an STHS token","One token lands in your wallet. It tracks the live net asset value of the constellation. You can sell it on Jupiter at any time — or hold through resolution."],
+                ["02","Receive an STHS token","One token lands in your wallet. It tracks the live net asset value of the constellation. You can sell it on Jupiter at any time, or hold through resolution."],
                 ["03","Collect when markets settle","When the last position resolves, USDC is sent directly to every holder's wallet. Tokens burn. Nothing to claim."],
               ].map(([n,t,d],i)=>(
                 <div key={n} style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:isMobile?18:28,alignItems:"flex-start"}}>
@@ -1965,7 +2089,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
           </div>
         </section>
 
-        {/* SECTION 5 — Launch */}
+        {/* SECTION 5 - Launch */}
         <section ref={el=>{chapterRefs.current[4]=el;}} style={{minHeight:"100vh",padding:isMobile?"80px 24px":"140px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:720,textAlign:"center",position:"relative",zIndex:5}}>
@@ -2147,39 +2271,71 @@ export default function App() {
         background:"rgba(5, 8, 12, 0.65)",
         borderBottom:`0.5px solid ${C.border}`,
       }}>
-        <div onClick={()=>{setTab("home");if(isMobile)setSidebarOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
-          <img src="/senthos_full.png" alt="Senthos" style={{width:isMobile?26:30,height:isMobile?26:30,display:"block",flexShrink:0}} />
-          <div style={{fontSize:isMobile?13:15,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.12em"}}>SENTHOS</div>
+        {/* LEFT: logo + nav tabs (desktop) */}
+        <div style={{display:"flex",alignItems:"center",gap:isMobile?0:28}}>
+          <div onClick={()=>{setTab("home");if(isMobile)setSidebarOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
+            <img src="/senthos_full.png" alt="Senthos" style={{width:isMobile?26:30,height:isMobile?26:30,display:"block",flexShrink:0}} />
+            <div style={{fontSize:isMobile?13:15,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.12em"}}>SENTHOS</div>
+          </div>
+
+          {!isMobile && (
+            <ul style={{display:"flex",gap:4,listStyle:"none",margin:0,padding:0}}>
+              {[
+                {id:"home",label:"Home"},
+                {id:"markets",label:"Markets"},
+                {id:"constellations",label:"Constellations"},
+              ].map(n=>{
+                const isActive = tab===n.id || (tab==="detail" && fromTab===n.id);
+                return (
+                  <li key={n.id}>
+                    <button onClick={()=>setTab(n.id as TabId)} style={{
+                      background: isActive ? "rgba(45, 212, 191, 0.1)" : "transparent",
+                      color: isActive ? C.tealLight : C.textSecondary,
+                      border: isActive ? "0.5px solid rgba(45, 212, 191, 0.25)" : "0.5px solid transparent",
+                      padding:"8px 16px",borderRadius:100,
+                      fontSize:13,fontWeight:500,fontFamily:FD,letterSpacing:"0.01em",
+                      cursor:"pointer",transition:`all 0.3s ${EASE}`,
+                      boxShadow: isActive ? "0 0 20px rgba(45, 212, 191, 0.12)" : "none",
+                    }}
+                      onMouseEnter={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.color=C.textPrimary;(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.06)";}}}
+                      onMouseLeave={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.color=C.textSecondary;(e.currentTarget as HTMLElement).style.background="transparent";}}}
+                    >{n.label}</button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
 
-        {!isMobile && (
-          <ul style={{display:"flex",gap:4,listStyle:"none",margin:0,padding:0}}>
-            {[
-              {id:"home",label:"Home"},
-              {id:"markets",label:"Markets"},
-              {id:"constellations",label:"Constellations"},
-              {id:"portfolio",label:"Portfolio"},
-            ].map(n=>{
-              const isActive = tab===n.id || (tab==="detail" && fromTab===n.id);
-              return (
-                <li key={n.id}>
-                  <button onClick={()=>setTab(n.id as TabId)} style={{
-                    background: isActive ? "rgba(45, 212, 191, 0.1)" : "transparent",
-                    color: isActive ? C.tealLight : C.textSecondary,
-                    border:"none",padding:"8px 16px",borderRadius:100,
-                    fontSize:13,fontWeight:500,fontFamily:FD,letterSpacing:"0.01em",
-                    cursor:"pointer",transition:`all 0.3s ${EASE}`,
-                  }}
-                    onMouseEnter={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.color=C.textPrimary;(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.06)";}}}
-                    onMouseLeave={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.color=C.textSecondary;(e.currentTarget as HTMLElement).style.background="transparent";}}}
-                  >{n.label}</button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
+        {/* RIGHT: Portfolio tab + demo + wallet + mobile hamburger */}
+        <div style={{display:"flex",alignItems:"center",gap:isMobile?10:14}}>
+          {!isMobile && (() => {
+            const isActive = tab==="portfolio" || (tab==="detail" && fromTab==="portfolio");
+            return (
+              <button onClick={()=>setTab("portfolio")} style={{
+                display:"flex",alignItems:"center",gap:8,
+                background: isActive
+                  ? `linear-gradient(135deg, ${C.teal} 0%, ${C.tealLight} 100%)`
+                  : "rgba(45, 212, 191, 0.08)",
+                color: isActive ? "#000" : C.tealLight,
+                border: isActive ? "none" : "0.5px solid rgba(45, 212, 191, 0.3)",
+                padding: isActive ? "8px 18px" : "7px 16px 7px 14px",
+                borderRadius:100,
+                fontSize:13, fontWeight: isActive ? 600 : 500,
+                fontFamily:FD, letterSpacing:"0.01em",
+                cursor:"pointer", transition:`all 0.3s ${EASE}`,
+                boxShadow: isActive
+                  ? `0 0 0 1px rgba(45, 212, 191, 0.4), 0 6px 20px rgba(45, 212, 191, 0.3)`
+                  : `0 0 16px rgba(45, 212, 191, 0.08)`,
+              }}
+                onMouseEnter={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.15)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.5)";(e.currentTarget as HTMLElement).style.boxShadow="0 0 22px rgba(45, 212, 191, 0.2)";}}}
+                onMouseLeave={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.08)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.3)";(e.currentTarget as HTMLElement).style.boxShadow="0 0 16px rgba(45, 212, 191, 0.08)";}}}
+              >
+                {!isActive && <span style={{width:6,height:6,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 6px ${C.tealLight}`,flexShrink:0}} />}
+                Portfolio
+              </button>
+            );
+          })()}
           {!isMobile && demoMode && (
             <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderRadius:100,background:"rgba(45, 212, 191, 0.08)",border:`0.5px solid rgba(45, 212, 191, 0.25)`}}>
               <div style={{width:5,height:5,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 8px ${C.tealLight}`}} />
@@ -2215,10 +2371,10 @@ export default function App() {
             </button>
           )}
           {isMobile && (
-            <button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{
-              background:"none",border:`0.5px solid ${C.border}`,borderRadius:8,
-              padding:"8px 10px",cursor:"pointer",color:C.textSecondary,
-              fontSize:16,lineHeight:1,
+            <button onClick={()=>setSidebarOpen(!sidebarOpen)} aria-label="menu" style={{
+              background:"rgba(45, 212, 191, 0.06)",border:`0.5px solid rgba(45, 212, 191, 0.2)`,borderRadius:10,
+              padding:"10px 12px",cursor:"pointer",color:C.tealLight,
+              fontSize:20,lineHeight:1,minWidth:44,display:"flex",alignItems:"center",justifyContent:"center",
             }}>{sidebarOpen?"✕":"☰"}</button>
           )}
         </div>
