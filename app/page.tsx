@@ -1719,54 +1719,45 @@ function FlybyCanvas({ scrollProgress }: { scrollProgress: { current: number } }
   return <canvas ref={canvasRef} style={{position:"fixed",inset:0,width:"100vw",height:"100vh",zIndex:4,pointerEvents:"none"}} />;
 }
 
-// Camera orbit - ISS-style pass around the star.
-// Physics: we're on a circular orbit, camera always pointing at the star.
-// Scroll drives orbital angle. Star enters from upper-right, arcs across,
-// exits past the left edge by the end. Ring plane rotates in 3D as we pass.
+// Camera path - flying TOWARD the star while orbiting slightly.
+// Physics: we're on an inbound spiral trajectory. The star grows as we approach,
+// we arc subtly around it but primarily get closer. Less dramatic sideways
+// motion, more "hyperdrive approach" feel.
 function cameraPath(progress: number) {
   // Normalize progress 0..1 across the full scroll
   const p = Math.max(0, Math.min(4, progress));
   const t = p / 4;
 
-  // Smoother ease - quadratic so motion starts gentle and accelerates slightly mid-pass
+  // Smoother ease
   const ease = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
 
-  // ORBITAL ANGLE - spans a full 200deg arc so we genuinely pass around.
-  // +80deg: star far ahead upper-right (we're approaching)
-  // 0deg: star directly to our side (closest approach, beside us)
-  // -120deg: we've passed it, star is behind-left and drifting off-screen
-  const thetaDeg = 80 - ease * 200;
+  // ORBITAL ANGLE - much tighter arc now, we're not orbiting past, we're flying in.
+  // Gentle sweep from +25deg to -25deg so the star stays roughly centered
+  // but feels like we're circling slightly as we approach.
+  const thetaDeg = 25 - ease * 50;
   const theta = thetaDeg * Math.PI / 180;
 
-  // Apparent star position in viewport.
-  // Wider horizontal sweep (0.75 vw range) so star truly exits past the edge.
-  // sin(80deg) = 0.98 - star starts near right edge.
-  // sin(-120deg) = -0.87 - star ends past left edge.
-  const x = Math.sin(theta) * 0.75;
-  // Vertical: star rides slightly higher at closest approach (peak of our arc)
-  const y = -Math.cos(theta) * 0.12 - 0.04;
+  // Horizontal position - subtle, star stays near center
+  const x = Math.sin(theta) * 0.18;
+  // Slight vertical drift for organic feel
+  const y = -Math.cos(theta) * 0.06 - 0.02 + Math.sin(t * Math.PI) * 0.03;
 
-  // Proximity-based scale. Closest at theta=0.
-  // Use cos(theta) folded: bigger in the middle of pass, smaller at entry/exit.
-  const proximity = Math.max(-0.5, Math.cos(theta));
-  const scale = 0.6 + (proximity + 0.5) * 0.5; // 0.6 (entry/exit) -> 1.35 (closest)
+  // SCALE - this is the star of the show now. Grows from 0.7 (distant)
+  // to 2.2 (close approach), giving that "flying toward" feel.
+  const scale = 0.7 + ease * 1.5;
 
-  // Camera banking - we tilt slightly into the turn.
-  const rotZ = -Math.sin(theta) * 4;
+  // Gentle banking - we lean into the slight turn
+  const rotZ = -Math.sin(theta) * 2;
 
-  // Ring plane rotation (the big one for selling "orbit").
-  // As we arc past, the ring plane appears to rotate around the star.
-  // When star is ahead-right (+theta): rings viewed from one side, normal rotation.
-  // When we pass closest: rings compress edge-on.
-  // When star is behind-left (-theta): rings appear rotated the other way.
-  // Simulated via scaleY (vertical compression) + rotate (plane tilt).
-  const ringScaleY = 0.2 + Math.abs(Math.sin(theta * 0.8)) * 0.75;
-  // Additional plane rotation driven by viewing angle - fakes perspective
-  const ringPerspective = Math.cos(theta) * 12; // up to ±12deg additional tilt
+  // Ring plane - as we approach, rings tilt toward us (compress then open)
+  // Mid-approach: edge-on. Late approach: facing us more (opens up).
+  const approachTilt = 0.3 + ease * 0.6; // 0.3 edge-ish -> 0.9 open
+  const ringScaleY = approachTilt;
+  // Rings rotate slightly as viewing angle changes
+  const ringPerspective = Math.cos(theta) * 4;
 
-  // Opacity: star stays vivid through most of the arc.
-  // Only starts fading in the final 15% as it moves off-screen.
-  const opacity = t < 0.85 ? 1 : Math.max(0.35, 1 - (t - 0.85) * 4);
+  // Opacity - star stays visible and gets more intense as we approach
+  const opacity = 1;
 
   return {
     x,
