@@ -12,6 +12,13 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Non-frontend trees that ship in this combined repo:
+    "backend/**",
+    "programs/**",
+    "scripts/**",
+    "tests/**",
+    "migrations/**",
+    "traxis-correlation-deliverables/**",
   ]),
 ]);
 

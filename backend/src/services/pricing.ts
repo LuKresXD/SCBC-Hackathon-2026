@@ -6,6 +6,7 @@ import {
   updateLegProbability,
   updateLegResolution,
 } from '../db/queries';
+import { finalizeBundleIfReady, resolveLegOnchainMirror } from './onchain-bridge';
 
 export async function getLiveNAV(bundleId: string): Promise<NAVResult | null> {
   const legs = await getLegsByBundleId(bundleId);
@@ -88,6 +89,11 @@ export async function checkAndUpdateResolutions(bundleId: string): Promise<Leg[]
 
       if (resolved) {
         await updateLegResolution(leg.id, status, resolutionValue);
+        // Mirror the resolution on-chain. Failures are logged but do not
+        // block the DB-side resolution (UI stays accurate regardless).
+        resolveLegOnchainMirror(bundleId, leg.id, status).catch((e) =>
+          console.error('[pricing] onchain resolve mirror failed:', e)
+        );
         leg.status = status;
         leg.resolution_value = resolutionValue;
         leg.probability = prob;
@@ -98,6 +104,13 @@ export async function checkAndUpdateResolutions(bundleId: string): Promise<Leg[]
       }
     })
   );
+
+  // If this resolution round completed the bundle, call finalize_vault on-chain.
+  if (newlyResolved.length > 0) {
+    finalizeBundleIfReady(bundleId).catch((e) =>
+      console.error('[pricing] onchain finalize failed:', e)
+    );
+  }
 
   return newlyResolved;
 }

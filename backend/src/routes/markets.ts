@@ -4,8 +4,19 @@ import {
   fetchMarketByConditionId,
   searchMarkets,
 } from '../services/polymarket';
+import {
+  filterMarkets,
+  FilterConfig,
+  DEFAULT_FILTER_CONFIG,
+} from '../services/market-filter';
+import { Category } from '../services/nlp';
+import { metrics } from '../services/metrics';
 
 const router = Router();
+
+const VALID_CATEGORIES: ReadonlyArray<Category> = [
+  'crypto', 'sports', 'politics', 'economics', 'entertainment', 'tech', 'world', 'other',
+];
 
 /**
  * GET /api/markets
@@ -31,6 +42,106 @@ router.get('/', async (req: Request, res: Response) => {
     console.error('GET /api/markets error:', err);
     res.status(500).json({ error: 'Failed to fetch markets' });
   }
+});
+
+/**
+ * GET /api/markets/curated
+ * Polymarket markets after the five-stage filter pipeline. Drops BS markets
+ * (low volume, troll questions, near-duplicates, uncategorisable).
+ *
+ * Query params:
+ *   limit        max markets returned after filtering (default 24)
+ *   overfetch    raw Polymarket page size before filtering (default limit*4)
+ *   category     restrict to a single category (crypto|sports|politics|...)
+ *   min_volume   override default liquidity floor (USD)
+ *   min_days     override minimum days-to-resolution
+ *   max_days     override maximum days-to-resolution
+ */
+router.get('/curated', async (req: Request, res: Response) => {
+  try {
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit as string, 10) || 24));
+    const overfetch = Math.max(limit, Math.min(400, parseInt(req.query.overfetch as string, 10) || limit * 4));
+    const categoryParam = typeof req.query.category === 'string' ? req.query.category.toLowerCase() : undefined;
+    if (categoryParam && !VALID_CATEGORIES.includes(categoryParam as Category)) {
+      return res.status(400).json({ error: `category must be one of ${VALID_CATEGORIES.join(', ')}` });
+    }
+
+    const overrides: Partial<FilterConfig> = {};
+    const minVol = parseFloat(req.query.min_volume as string);
+    if (Number.isFinite(minVol)) overrides.minVolumeUsd = minVol;
+    const minDays = parseFloat(req.query.min_days as string);
+    if (Number.isFinite(minDays)) overrides.minDaysToResolution = minDays;
+    const maxDays = parseFloat(req.query.max_days as string);
+    if (Number.isFinite(maxDays)) overrides.maxDaysToResolution = maxDays;
+
+    const raw = await fetchMarkets({ limit: overfetch, active: true, closed: false });
+    const result = filterMarkets(raw, overrides);
+
+    // Record the run in the monitor's funnel counters
+    metrics.recordFilterRun({
+      timestamp: Date.now(),
+      source: 'curated_list',
+      input_count: result.funnel.input_count,
+      kept_count: result.funnel.kept_count,
+      rejected_count: result.funnel.rejected_count,
+      per_stage: {
+        liquidity_floor: { entered: result.funnel.per_stage.liquidity_floor.entered, rejected: result.funnel.per_stage.liquidity_floor.rejected },
+        quality_nlp: { entered: result.funnel.per_stage.quality_nlp.entered, rejected: result.funnel.per_stage.quality_nlp.rejected },
+        time_window: { entered: result.funnel.per_stage.time_window.entered, rejected: result.funnel.per_stage.time_window.rejected },
+        category_classify: { entered: result.funnel.per_stage.category_classify.entered, rejected: result.funnel.per_stage.category_classify.rejected },
+        diversity_prefilter: { entered: result.funnel.per_stage.diversity_prefilter.entered, rejected: result.funnel.per_stage.diversity_prefilter.rejected },
+      },
+    });
+
+    let kept = result.kept;
+    if (categoryParam) kept = kept.filter((r) => r.category === categoryParam);
+
+    const trimmed = kept.slice(0, limit).map((r) => ({
+      id: r.market.id,
+      question: r.market.question,
+      condition_id: r.market.condition_id,
+      outcomePrices: r.market.outcomePrices,
+      volume_usd: r.volumeUsd,
+      end_date_iso: r.market.end_date_iso,
+      days_to_resolution: r.daysToResolution,
+      yes_probability: r.yesProbability,
+      category: r.category,
+      category_confidence: Math.round(r.categoryConfidence * 1000) / 1000,
+    }));
+
+    res.json({
+      count: trimmed.length,
+      total_after_filter: kept.length,
+      funnel: result.funnel,
+      config: result.config,
+      markets: trimmed,
+    });
+  } catch (err) {
+    console.error('GET /api/markets/curated error:', err);
+    res.status(500).json({ error: 'Failed to fetch curated markets' });
+  }
+});
+
+/**
+ * GET /api/markets/curated/stats
+ * Lifetime filter-funnel stats + last N run snapshots for the monitor.
+ */
+router.get('/curated/stats', (_req: Request, res: Response) => {
+  res.json({
+    lifetime: {
+      filter_runs_total: metrics.filterRunsTotal,
+      markets_seen: metrics.filterMarketsSeen,
+      markets_kept: metrics.filterMarketsKept,
+      markets_rejected: metrics.filterMarketsRejected,
+      per_stage_rejected: metrics.filterStageRejected,
+      kept_rate:
+        metrics.filterMarketsSeen > 0
+          ? metrics.filterMarketsKept / metrics.filterMarketsSeen
+          : 0,
+    },
+    recent_runs: metrics.getRecentFilterRuns(10),
+    default_config: DEFAULT_FILTER_CONFIG,
+  });
 });
 
 /**

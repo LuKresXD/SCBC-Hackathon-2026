@@ -15,6 +15,14 @@ import { webhookRoutes } from './routes/webhook';
 import { batchRoutes } from './routes/batch';
 import { ppnRoutes } from './routes/ppn';
 import { alertRoutes } from './routes/alerts';
+import { mlRoutes } from './routes/ml';
+import { onchainRoutes } from './routes/onchain';
+import { metricsRoutes } from './routes/metrics';
+import { trancheRoutes } from './routes/tranches';
+import { lendingRoutes } from './routes/lending';
+import { hedgeRoutes } from './routes/hedge';
+import { metricsMiddleware } from './services/metrics';
+import { startMonitorServer } from './monitor/server';
 import { startCronJobs } from './services/cron';
 import { supabase } from './db/supabase';
 import { requestLogger } from './middleware/requestLogger';
@@ -30,29 +38,42 @@ app.use(cors({
   credentials: true,
 }));
 
-// Explicit preflight handler for all routes
-app.options('*', cors());
+// NOTE: app.options('*', cors()) removed  -  Express 4.22 path-to-regexp rejects the bare '*' pattern.
+// cors() middleware above still handles preflight automatically.
 
 app.use(express.json());
 
-// Request logging
+// Catch malformed JSON bodies  -  express.json() throws SyntaxError via next(err);
+// surface as 400 Bad Request instead of falling through to the 500 handler.
+app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof SyntaxError && 'status' in err && (err as { status?: number }).status === 400 && 'body' in err) {
+    return res.status(400).json({ error: 'Invalid JSON body', detail: (err as Error).message });
+  }
+  return next(err);
+});
+
+// Request logging + metrics collection
 app.use(requestLogger);
+app.use(metricsMiddleware);
 
 // Rate limiting: 100 req/min per IP (general)
+// express-rate-limit@^7.5.0 is fully compatible with Express 4 (v8 hangs on localhost).
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
-  standardHeaders: true,
+  limit: 100,
+  standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
 });
-app.use(generalLimiter);
+if (process.env.DISABLE_RATE_LIMIT !== 'true') {
+  app.use(generalLimiter);
+}
 
 // Stricter rate limit for Polymarket proxy: 30 req/min per IP
 const marketLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 30,
-  standardHeaders: true,
+  limit: 30,
+  standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many market requests, please try again later' },
 });
@@ -60,7 +81,7 @@ const marketLimiter = rateLimit({
 // Health check
 app.get('/api/health', async (_req, res) => {
   const services: {
-    supabase: { status: 'ok' | 'error'; latency_ms: number; error?: string };
+    supabase: { status: 'ok' | 'error' | 'not_configured'; latency_ms: number; error?: string };
     polymarket: { status: 'ok' | 'error'; latency_ms: number; error?: string };
   } = {
     supabase: { status: 'ok', latency_ms: 0 },
@@ -69,20 +90,26 @@ app.get('/api/health', async (_req, res) => {
 
   let overall: 'ok' | 'degraded' = 'ok';
 
-  // Check Supabase
-  try {
-    const start = Date.now();
-    const { error } = await supabase.from('bundles').select('id').limit(1);
-    services.supabase.latency_ms = Date.now() - start;
-    if (error) {
+  // Check Supabase (skip probe when placeholder  -  avoids 7s timeout)
+  if (!config.supabaseConfigured) {
+    services.supabase.status = 'not_configured';
+    services.supabase.error = 'Placeholder credentials  -  set SUPABASE_URL and SUPABASE_ANON_KEY';
+    overall = 'degraded';
+  } else {
+    try {
+      const start = Date.now();
+      const { error } = await supabase.from('bundles').select('id').limit(1);
+      services.supabase.latency_ms = Date.now() - start;
+      if (error) {
+        services.supabase.status = 'error';
+        services.supabase.error = error.message;
+        overall = 'degraded';
+      }
+    } catch (err: unknown) {
       services.supabase.status = 'error';
-      services.supabase.error = error.message;
+      services.supabase.error = err instanceof Error ? err.message : 'Unknown error';
       overall = 'degraded';
     }
-  } catch (err: any) {
-    services.supabase.status = 'error';
-    services.supabase.error = err.message ?? 'Unknown error';
-    overall = 'degraded';
   }
 
   // Check Polymarket API
@@ -95,9 +122,9 @@ app.get('/api/health', async (_req, res) => {
       services.polymarket.error = `HTTP ${resp.status}`;
       overall = 'degraded';
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     services.polymarket.status = 'error';
-    services.polymarket.error = err.message ?? 'Unknown error';
+    services.polymarket.error = err instanceof Error ? err.message : 'Unknown error';
     overall = 'degraded';
   }
 
@@ -124,6 +151,12 @@ app.use('/api/webhook', webhookRoutes);
 app.use('/api/batch', batchRoutes);
 app.use('/api/ppn', ppnRoutes);
 app.use('/api/alerts', alertRoutes);
+app.use('/api/ml', mlRoutes);
+app.use('/api/onchain', onchainRoutes);
+app.use('/api/metrics', metricsRoutes);
+app.use('/api/tranches', trancheRoutes);
+app.use('/api/lending', lendingRoutes);
+app.use('/api/hedge', hedgeRoutes);
 
 // Root redirect to API docs
 app.get('/', (_req, res) => res.redirect('/api/docs'));
@@ -132,8 +165,9 @@ app.get('/', (_req, res) => res.redirect('/api/docs'));
 app.use(errorHandler);
 
 app.listen(config.port, () => {
-  console.log(`LuKres backend running on port ${config.port}`);
+  console.log(`Senthos/Traxis backend running on port ${config.port}`);
   startCronJobs();
+  startMonitorServer();
 });
 
 export default app;

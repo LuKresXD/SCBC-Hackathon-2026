@@ -3,15 +3,28 @@ import { AppConfig } from '../types';
 
 dotenv.config();
 
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
+
+// Detect placeholder credentials so we can short-circuit DB calls (7s timeout otherwise).
+function isPlaceholder(url: string, key: string): boolean {
+  if (!url || !key) return true;
+  if (url.includes('placeholder') || url.includes('your_supabase')) return true;
+  if (key.startsWith('placeholder') || key.startsWith('your_supabase')) return true;
+  return false;
+}
+
 export const config: AppConfig = {
   port: parseInt(process.env.PORT || '3001', 10),
-  supabaseUrl: process.env.SUPABASE_URL || '',
-  supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
+  supabaseUrl,
+  supabaseAnonKey,
+  supabaseConfigured: !isPlaceholder(supabaseUrl, supabaseAnonKey),
   polymarketApiUrl: process.env.POLYMARKET_API_URL || 'https://clob.polymarket.com',
   structuringFee: 0.005, // 0.5%
 };
 
-if (!config.supabaseUrl || !config.supabaseAnonKey) {
-  console.error('Missing SUPABASE_URL or SUPABASE_ANON_KEY in environment');
-  process.exit(1);
+if (!config.supabaseConfigured) {
+  console.warn(
+    '[config] Supabase credentials are missing or placeholder  -  DB queries will short-circuit and return empty. Set SUPABASE_URL + SUPABASE_ANON_KEY in backend/.env to enable full functionality.',
+  );
 }
