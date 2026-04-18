@@ -2104,7 +2104,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
             <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:40,maxWidth:520,margin:"0 auto 40px",textAlign:"center",fontFamily:FS}}>
               Five constellations live today. Three risk tiers. One token per basket.
             </p>
-            <button onClick={onEnterApp} style={{
+            <button onClick={()=>{ window.location.href="/app"; }} style={{
               display:"inline-flex",alignItems:"center",gap:8,
               padding:isMobile?"14px 26px":"16px 32px",borderRadius:100,
               fontSize:isMobile?14:15,fontWeight:600,
@@ -2281,14 +2281,14 @@ export default function App() {
           {!isMobile && (
             <ul style={{display:"flex",gap:4,listStyle:"none",margin:0,padding:0}}>
               {[
-                {id:"home",label:"Home"},
-                {id:"markets",label:"Markets"},
-                {id:"constellations",label:"Constellations"},
+                {id:"home",label:"Home", href:"/"},
+                {id:"markets",label:"Markets", href:"/app"},
+                {id:"constellations",label:"Constellations", href:"/app/basket"},
               ].map(n=>{
                 const isActive = tab===n.id || (tab==="detail" && fromTab===n.id);
                 return (
                   <li key={n.id}>
-                    <button onClick={()=>setTab(n.id as TabId)} style={{
+                    <button onClick={()=>{ if(n.href==="/") setTab("home"); else window.location.href=n.href; }} style={{
                       background: isActive ? "rgba(45, 212, 191, 0.1)" : "transparent",
                       color: isActive ? C.tealLight : C.textSecondary,
                       border: isActive ? "0.5px solid rgba(45, 212, 191, 0.25)" : "0.5px solid transparent",
@@ -2310,28 +2310,24 @@ export default function App() {
         {/* RIGHT: Portfolio tab + demo + wallet + mobile hamburger */}
         <div style={{display:"flex",alignItems:"center",gap:isMobile?10:14}}>
           {!isMobile && (() => {
-            const isActive = tab==="portfolio" || (tab==="detail" && fromTab==="portfolio");
+            const isActive = false;
             return (
-              <button onClick={()=>setTab("portfolio")} style={{
+              <button onClick={()=>{ window.location.href="/app/portfolio"; }} style={{
                 display:"flex",alignItems:"center",gap:8,
-                background: isActive
-                  ? `linear-gradient(135deg, ${C.teal} 0%, ${C.tealLight} 100%)`
-                  : "rgba(45, 212, 191, 0.08)",
-                color: isActive ? "#000" : C.tealLight,
-                border: isActive ? "none" : "0.5px solid rgba(45, 212, 191, 0.3)",
-                padding: isActive ? "8px 18px" : "7px 16px 7px 14px",
+                background: "rgba(45, 212, 191, 0.08)",
+                color: C.tealLight,
+                border: "0.5px solid rgba(45, 212, 191, 0.3)",
+                padding: "7px 16px 7px 14px",
                 borderRadius:100,
-                fontSize:13, fontWeight: isActive ? 600 : 500,
+                fontSize:13, fontWeight: 500,
                 fontFamily:FD, letterSpacing:"0.01em",
                 cursor:"pointer", transition:`all 0.3s ${EASE}`,
-                boxShadow: isActive
-                  ? `0 0 0 1px rgba(45, 212, 191, 0.4), 0 6px 20px rgba(45, 212, 191, 0.3)`
-                  : `0 0 16px rgba(45, 212, 191, 0.08)`,
+                boxShadow: `0 0 16px rgba(45, 212, 191, 0.08)`,
               }}
-                onMouseEnter={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.15)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.5)";(e.currentTarget as HTMLElement).style.boxShadow="0 0 22px rgba(45, 212, 191, 0.2)";}}}
-                onMouseLeave={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.08)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.3)";(e.currentTarget as HTMLElement).style.boxShadow="0 0 16px rgba(45, 212, 191, 0.08)";}}}
+                onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.15)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.5)";(e.currentTarget as HTMLElement).style.boxShadow="0 0 22px rgba(45, 212, 191, 0.2)";}}
+                onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.08)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.3)";(e.currentTarget as HTMLElement).style.boxShadow="0 0 16px rgba(45, 212, 191, 0.08)";}}
               >
-                {!isActive && <span style={{width:6,height:6,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 6px ${C.tealLight}`,flexShrink:0}} />}
+                <span style={{width:6,height:6,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 6px ${C.tealLight}`,flexShrink:0}} />
                 Portfolio
               </button>
             );
