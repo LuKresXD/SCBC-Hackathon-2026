@@ -259,9 +259,28 @@ solana program show E77R7yqUEAWz9jUk92kSnrpvUBEwGpPT3iZaThbKQcJb --url devnet
 solana program show 4NnrpeWgdmVymcdGqbrmQUunHHvyVSevUXCKFGJYwbtE --url devnet
 ```
 
+### Surprises + caveats worth flagging to the team
+
+- **ARCHITECTURE.md claims 15 seeded bundles. Reality is 2.** `backend/src/scripts/seed.ts:55` defines only `LK-90-0430` and `LK-70-0515`. The 15 STHS-* tiles in `app/app/_lib/bundles.ts` are a frontend-only visual set and do not map to Supabase rows or on-chain vaults. If a judge clicks an STHS-* tile and expects it backed by an on-chain PDA, it is not.
+- **Branding drift**: the product is Senthos (STHS) on the frontend but seeds go into Supabase as `LK-*`. Deposit flow appears to link STHS-* → LK-* by index position (unvalidated by me). Worth an eyeball before the demo.
+- **Integration tests are stale**. `tests/traxis_vault.test.ts:103` still calls `initializeVault` with the pre-split account shape (`traxMint`, `usdcMint`, `usdcVault`, `tokenProgram` in the accounts map). They will fail against the new program. Either mirror the two-step client flow or route the test through `backend/src/solana/client.ts::initializeVault` which already knows the split.
+- **PPN end-to-end is unverified**. `traxis_ppn` was upgraded together with vault for consistency, but no `initialize_note` / `harvest_yield` / `redeem_at_maturity` call has been exercised post-fix. PPN's `harvest_yield` CPIs into `vault::deposit` — if the deposit instruction has a similar latent stack problem we have not hit yet, PPN flow is the place it will show up.
+- **The 600-byte residual after Boxing everything** means `initialize_vault` is the only instruction currently under pressure. `deposit`, `resolve_leg`, `finalize_vault`, `redeem`, `admin_withdraw_fees` all compiled without the warning. But the warning threshold is a build-time check — if anyone adds a field to `InitializeVault` later, watch `docker-build-both.log` for the stack-offset error.
+- **Fee recipient is the deployer wallet itself** (intentional for the hackathon — keeps the setup one-wallet-friendly). Rotate to a multisig before any live deployment, per `CREDENTIALS.md` §6 checklist.
+- **GitGuardian false positive on `eeeefab`** flagged the base58 `declare_id!` constants in Rust sources. Those pubkeys are public by design. Safe to dismiss. (Still applies after this rebuild with the new IDs.)
+
 ### Still open for Sunday
 
-- `tests/traxis_vault.test.ts` still constructs `initializeVault` with the pre-split account shape; update to mirror the two-step client flow or swap to calling `client.ts::initializeVault` directly.
-- PPN `initialize_note` path (`traxis_ppn`) has not been exercised end-to-end post-upgrade.
-- Railway + Vercel deploy (`22-railway-env-export.command` → Railway → Vercel → Devfolio submit).
+- Update `tests/traxis_vault.test.ts` for the two-step flow, then `anchor test` or re-verify by running the full init path from `scripts/init-demo-vaults.ts`.
+- Walk `traxis_ppn` end-to-end manually (init_mock_adapter → initialize_note → harvest_yield → redeem_at_maturity).
+- Push commit `33d2edd` after the team Telegram ping.
+- Railway + Vercel deploy (`22-railway-env-export.command` → Railway → Vercel → Devfolio submit before Mon 2026-04-20 23:59 PDT).
+- After deploy, smoke the Railway `/api/onchain/status` and Vercel `/app/basket/<id>` deposit flow with a devnet Phantom wallet.
+
+### Team heads-up checklist (for the Telegram message)
+
+- Fresh program IDs in use; paste them into any personal `.env` files.
+- `initialize_vault` is now a two-step flow (Rust + IDL). Client API is unchanged; anyone composing raw RPC with the old single-instruction IDL will fail.
+- `Cargo.toml` has `overflow-checks = false` in `[profile.release]`. Fine for devnet demo, not fine for mainnet.
+- Do not re-seed from Victor's machine; Supabase already has both bundles with `vault_pda` populated.
 
