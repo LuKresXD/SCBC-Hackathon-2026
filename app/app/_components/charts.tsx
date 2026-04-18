@@ -1,14 +1,10 @@
 "use client";
 /**
- * Shared chart + card primitives used by every product page.
- *
- * All of these were previously inlined in the monolithic `app/app/page.tsx`;
- * they're now isolated so multiple pages can import them without duplicating
- * canvas rendering logic.
+ * Shared chart + card primitives — orbital dark-space theme.
  */
 
 import React, { useEffect, useRef } from "react";
-import { C, FS, FD, EASE, lightenColor, tc } from "../_lib/tokens";
+import { C, FM, FS, FD, EASE, lightenColor, darkenColor, tc } from "../_lib/tokens";
 
 export function Sparkline({
   data,
@@ -86,7 +82,7 @@ export function PulseGauge({
     ctx.beginPath();
     ctx.arc(cx, cy, r, Math.PI * 0.75, Math.PI * 2.25);
     ctx.lineWidth = 4;
-    ctx.strokeStyle = C.border;
+    ctx.strokeStyle = "rgba(45, 212, 191, 0.12)";
     ctx.lineCap = "round";
     ctx.stroke();
     const endAngle = Math.PI * 0.75 + (prob / 100) * Math.PI * 1.5;
@@ -105,14 +101,8 @@ export function PulseGauge({
 function polarToCartesian(cx: number, cy: number, r: number, angleRad: number) {
   return { x: cx + r * Math.cos(angleRad), y: cy + r * Math.sin(angleRad) };
 }
-function arcPath(
-  cx: number,
-  cy: number,
-  rOuter: number,
-  rInner: number,
-  startAngle: number,
-  endAngle: number,
-) {
+
+function arcPath(cx: number, cy: number, rOuter: number, rInner: number, startAngle: number, endAngle: number) {
   const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
   const start = polarToCartesian(cx, cy, rOuter, startAngle);
   const end = polarToCartesian(cx, cy, rOuter, endAngle);
@@ -145,16 +135,13 @@ export function SvgDonut({
   if (isEmpty || data.length === 0) {
     return (
       <svg width={TOTAL} height={TOTAL} style={{ display: "block" }}>
-        <circle cx={cx} cy={cy} r={baseR + thickness / 2} fill="none" stroke={C.border} strokeWidth={thickness} opacity={0.35} />
-        <circle cx={cx} cy={cy} r={baseR - 1} fill={C.surface} stroke={C.border} strokeWidth={0.5} />
+        <circle cx={cx} cy={cy} r={baseR + thickness / 2} fill="none" stroke="rgba(45, 212, 191, 0.08)" strokeWidth={thickness} opacity={0.5} />
+        <circle cx={cx} cy={cy} r={baseR - 1} fill={C.surface} stroke="rgba(45, 212, 191, 0.08)" strokeWidth={0.5} />
       </svg>
     );
   }
 
   const total = data.reduce((s, d) => s + d.value, 0);
-  // Build slices immutably: each slice's start is the cumulative span of all
-  // preceding slices. React 19's purity rules reject any mutable accumulator
-  // during render, so we use `reduce` to thread the offset through.
   type Slice = { id: string; value: number; color: string; start: number; end: number };
   const slices: Slice[] = data.reduce<Slice[]>((acc, d) => {
     const start = acc.length ? acc[acc.length - 1].end : -Math.PI / 2;
@@ -164,20 +151,16 @@ export function SvgDonut({
   }, []);
 
   return (
-    <svg
-      width={TOTAL}
-      height={TOTAL}
-      style={{ display: "block" }}
-      onMouseLeave={() => onHover(null)}
-    >
+    <svg width={TOTAL} height={TOTAL} style={{ display: "block" }} onMouseLeave={() => onHover(null)}>
       <defs>
         {slices.map((s) => (
           <linearGradient key={`grad-${s.id}`} id={`grad-${s.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor={lightenColor(s.color, 0.25)} />
-            <stop offset="100%" stopColor={s.color} />
+            <stop offset="50%" stopColor={s.color} />
+            <stop offset="100%" stopColor={darkenColor(s.color, 0.18)} />
           </linearGradient>
         ))}
-        <radialGradient id="innerFrost" cx="50%" cy="0%" r="100%">
+        <radialGradient id="innerFrost" cx="50%" cy="45%" r="55%">
           <stop offset="0%" stopColor="#1a2536" stopOpacity="1" />
           <stop offset="70%" stopColor={C.card} stopOpacity="1" />
           <stop offset="100%" stopColor="#0c131c" stopOpacity="1" />
@@ -211,7 +194,7 @@ export function SvgDonut({
         );
       })}
       <circle cx={cx} cy={cy} r={baseR - 1} fill="url(#innerFrost)" />
-      <circle cx={cx} cy={cy} r={baseR - 1} fill="none" stroke={C.border} strokeWidth="0.5" opacity="0.6" />
+      <circle cx={cx} cy={cy} r={baseR - 1} fill="none" stroke="rgba(45, 212, 191, 0.1)" strokeWidth="0.5" opacity="0.6" />
     </svg>
   );
 }
@@ -233,36 +216,41 @@ export function BundleCard({
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        background: hov ? C.cardHover : C.card,
-        border: `0.5px solid ${hov ? C.borderHover : C.border}`,
-        borderRadius: 14,
+        background: hov
+          ? `linear-gradient(135deg, rgba(15, 21, 32, 0.9) 0%, ${color}0a 100%)`
+          : "linear-gradient(135deg, rgba(15, 21, 32, 0.7) 0%, rgba(5, 8, 12, 0.8) 100%)",
+        border: `0.5px solid ${hov ? color + "50" : "rgba(255, 255, 255, 0.06)"}`,
+        borderRadius: 16,
         padding: "18px 20px 14px",
         cursor: "pointer",
-        transition: `all 0.2s ${EASE}`,
+        transition: `all 0.3s ${EASE}`,
         position: "relative",
         overflow: "hidden",
+        transform: hov ? "translateY(-2px)" : "translateY(0)",
+        boxShadow: hov ? `0 12px 32px rgba(0,0,0,0.4), 0 0 24px ${color}18` : "0 4px 14px rgba(0,0,0,0.2)",
+        backdropFilter: "blur(10px)",
       }}
     >
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: color, opacity: 0.8 }} />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: color, opacity: hov ? 1 : 0.75 }} />
+      <div style={{ position: "absolute", top: -60, right: -60, width: 180, height: 180, background: `radial-gradient(circle, ${color}20 0%, transparent 65%)`, pointerEvents: "none", opacity: hov ? 1 : 0.4, transition: `opacity 0.3s ${EASE}` }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, position: "relative" }}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD, marginBottom: 4 }}>{bundle.id}</div>
-          <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD, marginBottom: 4, letterSpacing: "0.01em" }}>{bundle.id}</div>
+          <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FM, letterSpacing: "0.04em" }}>
             {bundle.resolved}/{bundle.totalLegs} resolved · {bundle.daysLeft}d left
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 24, fontWeight: 700, color, fontFamily: FD, lineHeight: 1 }}>{(bundle.nav * 100).toFixed(1)}%</div>
-          <div style={{ fontSize: 11, color: C.textSecondary, fontFamily: FS, marginTop: 2 }}>${bundle.nav.toFixed(3)}</div>
+          <div style={{ fontSize: 26, fontWeight: 300, color, fontFamily: FD, lineHeight: 1, letterSpacing: "-0.02em" }}>{(bundle.nav * 100).toFixed(1)}%</div>
+          <div style={{ fontSize: 11, color: C.textSecondary, fontFamily: FM, marginTop: 3 }}>${bundle.nav.toFixed(3)}</div>
         </div>
       </div>
       <div style={{ marginBottom: 10, height: 44 }}>
         <Sparkline data={bundle.history} color={color} height={44} width={300} />
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontFamily: FS }}>
-        <span style={{ color: bundle.change >= 0 ? C.green : C.red }}>
-          {bundle.change >= 0 ? "+" : ""}
-          {bundle.change.toFixed(1)}% today
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontFamily: FM, letterSpacing: "0.02em", position: "relative" }}>
+        <span style={{ color: bundle.change >= 0 ? C.green : C.red, fontWeight: 500 }}>
+          {bundle.change >= 0 ? "+" : ""}{bundle.change.toFixed(1)}% today
         </span>
         <span style={{ color: C.textMuted }}>Resolves {bundle.date}</span>
       </div>
@@ -282,20 +270,20 @@ export function MetricTile({
   sub?: string;
 }) {
   return (
-    <div style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 12, padding: "16px 18px" }}>
-      <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FS, letterSpacing: "0.07em", marginBottom: 10 }}>{label}</div>
-      <div
-        style={{
-          fontSize: 22,
-          fontWeight: 500,
-          color: color ?? C.textPrimary,
-          fontFamily: FS,
-          letterSpacing: "-0.01em",
-        }}
-      >
-        {value}
-      </div>
-      {sub && <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 4 }}>{sub}</div>}
+    <div style={{
+      background: "linear-gradient(135deg, rgba(15, 21, 32, 0.7) 0%, rgba(5, 8, 12, 0.8) 100%)",
+      border: "0.5px solid rgba(255, 255, 255, 0.06)",
+      borderRadius: 14,
+      padding: "18px 20px",
+      position: "relative",
+      overflow: "hidden",
+      backdropFilter: "blur(10px)",
+    }}>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 1.5, background: `linear-gradient(to right, transparent, ${color || C.tealLight}66, transparent)`, opacity: 0.6 }} />
+      <div style={{ position: "absolute", top: -40, right: -40, width: 120, height: 120, borderRadius: "50%", background: `radial-gradient(circle, ${color || C.tealLight}15 0%, transparent 65%)`, pointerEvents: "none" }} />
+      <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 10, position: "relative" }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 500, color: color ?? C.textPrimary, fontFamily: FD, letterSpacing: "-0.01em", position: "relative" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 6, position: "relative" }}>{sub}</div>}
     </div>
   );
 }
@@ -316,15 +304,17 @@ export function Pill({
       onClick={onClick}
       style={{
         padding: "7px 16px",
-        borderRadius: 8,
-        border: `0.5px solid ${active ? color || C.teal : C.border}`,
-        background: active ? (color || C.teal) + "18" : "transparent",
-        color: active ? color || C.teal : C.textSecondary,
+        borderRadius: 100,
+        border: `0.5px solid ${active ? (color || C.tealLight) : "rgba(255, 255, 255, 0.08)"}`,
+        background: active ? `${color || C.tealLight}15` : "rgba(15, 21, 32, 0.4)",
+        color: active ? (color || C.tealLight) : C.textSecondary,
         fontSize: 12,
-        fontFamily: FS,
+        fontFamily: FD,
         cursor: "pointer",
         transition: `all 0.2s ${EASE}`,
         fontWeight: active ? 500 : 400,
+        boxShadow: active ? `0 0 16px ${color || C.tealLight}20` : "none",
+        letterSpacing: "0.01em",
       }}
     >
       {children}
