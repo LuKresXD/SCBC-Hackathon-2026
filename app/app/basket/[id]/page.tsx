@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { Header, PageFrame } from "../../_components/Header";
 import { Sparkline, MetricTile } from "../../_components/charts";
 import { C, FS, FD, EASE, tc, fmtUsd } from "../../_lib/tokens";
@@ -11,7 +11,6 @@ import { useSandbox } from "../../_lib/demo-state";
 
 export default function BasketDetail() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const { state, dispatch } = useSandbox();
   const bundle = bundleById(params.id);
   const [amt, setAmt] = useState("");

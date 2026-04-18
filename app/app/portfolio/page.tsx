@@ -1,16 +1,24 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { Header, PageFrame } from "../_components/Header";
 import { SvgDonut, MetricTile } from "../_components/charts";
-import { C, FS, FD, EASE, tc, trancheColor, fmtUsd } from "../_lib/tokens";
+import { C, FS, FD, tc, trancheColor, fmtUsd } from "../_lib/tokens";
 import { bundleById } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
 
 export default function PortfolioPage() {
   const { state, dispatch, totals } = useSandbox();
   const [activeId, setActiveId] = useState<string | null>(null);
+  // `renderNow` is used by accrued-yield displays. React 19's purity rule
+  // forbids Date.now() in render, so we capture it in state (via a lazy
+  // initializer) and let a 1s interval keep it fresh.
+  const [renderNow, setRenderNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setRenderNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const donutData: Array<{ id: string; value: number; color: string }> = [
     ...(state.usdc > 0 ? [{ id: "cash", value: state.usdc, color: "#4a5a6a" }] : []),
@@ -132,7 +140,7 @@ export default function PortfolioPage() {
               <Link href="/app/ppn" style={{ fontSize: 11, color: C.violet, fontFamily: FS, textDecoration: "none" }}>View all →</Link>
             </div>
             {state.ppnVaults.map((v) => {
-              const elapsed = Math.max(0, (Date.now() - v.createdAt) / 86_400_000);
+              const elapsed = Math.max(0, (renderNow - v.createdAt) / 86_400_000);
               const accrued = v.principal * (v.apy / 100 / 365) * Math.min(elapsed, v.maturityDays);
               return (
                 <div key={v.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: `0.5px solid ${C.border}` }}>

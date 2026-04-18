@@ -152,13 +152,16 @@ export function SvgDonut({
   }
 
   const total = data.reduce((s, d) => s + d.value, 0);
-  let cursor = -Math.PI / 2;
-  const slices = data.map((d) => {
+  // Build slices immutably: each slice's start is the cumulative span of all
+  // preceding slices. React 19's purity rules reject any mutable accumulator
+  // during render, so we use `reduce` to thread the offset through.
+  type Slice = { id: string; value: number; color: string; start: number; end: number };
+  const slices: Slice[] = data.reduce<Slice[]>((acc, d) => {
+    const start = acc.length ? acc[acc.length - 1].end : -Math.PI / 2;
     const span = (d.value / total) * Math.PI * 2;
-    const s = { ...d, start: cursor, end: cursor + span };
-    cursor += span;
-    return s;
-  });
+    acc.push({ ...d, start, end: start + span });
+    return acc;
+  }, []);
 
   return (
     <svg

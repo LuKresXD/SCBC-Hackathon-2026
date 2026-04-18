@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
-import Link from "next/link";
+import React, { useEffect, useState } from "react";
 import { Header, PageFrame } from "../_components/Header";
 import { MetricTile } from "../_components/charts";
 import { C, FS, FD, EASE, tc, fmtUsd } from "../_lib/tokens";
@@ -14,8 +13,14 @@ export default function PpnPage() {
   const [amt, setAmt] = useState("");
   const [maturityDays, setMaturityDays] = useState(30);
   const [confirmed, setConfirmed] = useState(false);
+  // `renderNow` is used by accrued-yield displays. React 19's purity rule
+  // forbids Date.now() in render, so we keep it in state + interval.
+  const [renderNow, setRenderNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setRenderNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
-  const bundle = bundleById(selectedBundle)!;
   const dep = parseFloat(amt) || 0;
   const APY = 0.084;
   const estimatedYield = dep * (APY / 365) * maturityDays;
@@ -83,7 +88,7 @@ export default function PpnPage() {
                 <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, letterSpacing: "0.08em", marginBottom: 12 }}>YOUR VAULTS</div>
                 {state.ppnVaults.map((v) => {
                   const b = bundleById(v.bundleId);
-                  const elapsed = Math.max(0, (Date.now() - v.createdAt) / 86_400_000);
+                  const elapsed = Math.max(0, (renderNow - v.createdAt) / 86_400_000);
                   const accrued = v.principal * (v.apy / 100 / 365) * Math.min(elapsed, v.maturityDays);
                   return (
                     <div key={v.id} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `0.5px solid ${C.border}` }}>

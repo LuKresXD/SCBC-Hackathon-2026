@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { C, FS, FD, EASE } from "../_lib/tokens";
 import { useSandbox } from "../_lib/demo-state";
@@ -43,7 +44,7 @@ export function Header({ onResetClick }: { onResetClick?: () => void }) {
       }}
     >
       <Link href="/" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none" }}>
-        <img src="/senthos_full.png" alt="Senthos" style={{ width: 26, height: 26 }} />
+        <Image src="/senthos_full.png" alt="Senthos" width={26} height={26} priority />
         <span style={{ fontSize: 15, fontWeight: 600, color: C.textPrimary, fontFamily: FD, letterSpacing: "-0.01em" }}>Senthos</span>
         <span style={{ fontSize: 10, color: C.textMuted, fontFamily: FS, padding: "2px 7px", borderRadius: 999, border: `0.5px solid ${C.border}`, letterSpacing: "0.04em", marginLeft: 4 }}>devnet</span>
       </Link>

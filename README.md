@@ -1,5 +1,34 @@
 # Senthos / Traxis · SCBC Hackathon 2026 · Combined Repo
 
+Structured-prediction-market protocol with four product primitives (Native Basket, Tranches, Principal Protected Notes, Lending/Repo) plus a custom hedge builder, all running on Solana devnet with live Polymarket data and an NLP-gated market filter.
+
+## Start here
+Read `ARCHITECTURE.md` first — it is the single onboarding document that covers the whole system (topology, every page, every endpoint, the math, and the recipe book for common changes).
+Other docs, in reading order:
+- `PRODUCTS.md` — taxonomy of the four primitives + roadmap
+- `MARKET_FILTER.md` — the NLP + 5-stage filter pipeline
+- `MODEL_INTEGRATION.md` — correlation model and audit
+- `SESSION_NOTES.md` — chronological build log
+- `CREDENTIALS.md` — env var inventory
+- `ONCHAIN.md`, `ONCHAIN_DESIGN.md` — Anchor program details
+- `AUDIT.md`, `SECURITY.md` — security posture
+
+## 60-second quickstart
+```bash
+# terminal 1 — backend (+ monitor on :3002)
+cd backend && npm install && npm run dev
+
+# terminal 2 — frontend
+npm install && npm run dev
+
+# open it
+open http://localhost:3000          # landing
+open http://localhost:3000/app      # authenticated app (Markets)
+open http://localhost:3002          # real-time monitor dashboard
+```
+Full start/stop + verification commands are in `ARCHITECTURE.md` §4.
+
+## Merge provenance
 This folder merges **three branches** of [LuKresXD/SCBC-Hackathon-2026](https://github.com/LuKresXD/SCBC-Hackathon-2026) into a single working tree:
 
 | Branch | Contribution |

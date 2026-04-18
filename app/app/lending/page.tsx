@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Header, PageFrame } from "../_components/Header";
 import { MetricTile } from "../_components/charts";
-import { C, FS, FD, EASE, tc, fmtUsd, BACKEND_URL } from "../_lib/tokens";
+import { C, FS, FD, tc, fmtUsd, BACKEND_URL } from "../_lib/tokens";
 import { bundleById } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
 

@@ -6,7 +6,7 @@ import { Header, PageFrame } from "../_components/Header";
 import { C, FS, FD, EASE, trancheColor, tc } from "../_lib/tokens";
 import { BUNDLES } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
-import { quoteTranchesLocal, TrancheQuote } from "./_quote";
+import { quoteTranchesLocal, type TrancheQuote } from "./_quote";
 
 export default function TranchesPage() {
   const router = useRouter();

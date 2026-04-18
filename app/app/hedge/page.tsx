@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Header, PageFrame } from "../_components/Header";
 import { MetricTile } from "../_components/charts";
-import { C, FS, FD, EASE, BACKEND_URL, fmtUsd } from "../_lib/tokens";
+import { C, FS, FD, BACKEND_URL } from "../_lib/tokens";
 import { useSandbox } from "../_lib/demo-state";
 
 type Market = { id: string; question: string; condition_id: string; yes_probability: number | null; volume_usd: number; category: string };
@@ -18,11 +18,15 @@ type AnalyzeResp = {
 };
 
 export default function HedgePage() {
-  const { state, dispatch } = useSandbox();
+  const { dispatch } = useSandbox();
   const [markets, setMarkets] = useState<Market[]>([]);
   const [legs, setLegs] = useState<LegDraft[]>([]);
-  const [analyze, setAnalyze] = useState<AnalyzeResp | null>(null);
+  // `analyzeResult` holds the latest fetch outcome; `analyze` below is a
+  // derived value so a basket with <2 legs always displays as unanalysed
+  // without triggering a setState cascade inside useEffect.
+  const [analyzeResult, setAnalyzeResult] = useState<AnalyzeResp | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const analyze = legs.length >= 2 ? analyzeResult : null;
 
   useEffect(() => {
     fetch(`${BACKEND_URL}/api/markets/curated?limit=24&overfetch=120`)
@@ -32,10 +36,8 @@ export default function HedgePage() {
   }, []);
 
   useEffect(() => {
-    if (legs.length < 2) {
-      setAnalyze(null);
-      return;
-    }
+    if (legs.length < 2) return; // derived `analyze` already returns null
+    let cancelled = false;
     fetch(`${BACKEND_URL}/api/hedge/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -43,13 +45,20 @@ export default function HedgePage() {
     })
       .then((r) => r.json())
       .then((body) => {
-        if (body.error) setErr(body.error);
-        else {
-          setAnalyze(body);
+        if (cancelled) return;
+        if (body.error) {
+          setErr(body.error);
+        } else {
+          setAnalyzeResult(body);
           setErr(null);
         }
       })
-      .catch((e) => setErr((e as Error).message));
+      .catch((e) => {
+        if (!cancelled) setErr((e as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [legs]);
 
   function addLeg(m: Market, side: "YES" | "NO") {
