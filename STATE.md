@@ -1,6 +1,6 @@
 # Traxis — build state summary
 
-*Last updated: 2026-04-18 (combined repo audit + live-dashboard pass)*
+*Last updated: 2026-04-18 (Victor's session — credentials + bootstrap scripts pass)*
 
 ## TL;DR
 
@@ -10,6 +10,66 @@ RPC `getAccountInfo` against `DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat`
 Both return `executable: true`, `owner: BPFLoaderUpgradeab1e...`, `lamports: 1141440`.
 Proof via the new backend endpoint `GET /api/onchain/status` (see
 `backend/src/routes/onchain.ts`) and visible on the `/live` page of the frontend.
+
+## Victor's section status (2026-04-18)
+
+Everything in CREDENTIALS.md that's required for the backend has been configured:
+
+- ✅ **Supabase** — project `wgjmjjfbkxjuzatizrxl` created; SQL schema (core +
+  on-chain mirror columns from `scripts/supabase-init.sql`) applied
+  successfully. New-format key (`sb_secret_*`) wired into `backend/.env`.
+- ✅ **Solana devnet** — both program IDs, USDC mint, fee recipient, authority
+  keypair path all set in `backend/.env`. Circle devnet USDC mint
+  `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` confirmed live.
+- ✅ **Authority SOL balance** — deployer wallet funded on devnet.
+- ✅ **FEE_RECIPIENT USDC ATA** — confirmed exists on devnet.
+- ✅ **Polymarket URL** — default `https://clob.polymarket.com` in `.env`.
+- ✅ **Root `dotenv` dep** — `scripts/init-demo-vaults.ts` requires `dotenv` at
+  repo root; added to root `package.json` and `package-lock.json`.
+
+What's gitignored and sits ONLY on Victor's machine (re-populate via the
+bootstrap scripts if someone else picks this up):
+
+    backend/.env        (real Supabase URL + key, program IDs, authority path)
+    .creds/             (Supabase credentials, Railway env template, etc.)
+
+### Outstanding issue for Luka: DeclaredProgramIdMismatch on vault init
+
+`scripts/init-demo-vaults.ts` fails for every bundle with Anchor error 4100
+(`DeclaredProgramIdMismatch`) at ~3906 compute units — a program-side check,
+NOT a client-side assertion. Deep investigation this session confirmed:
+
+1. Local `target/deploy/traxis_vault.so` is byte-identical to the on-chain
+   program code (same sha256, same 363,520-byte length).
+2. Local `.so` contains exactly **one** occurrence of the correct
+   `DY7NAimr...` declare_id bytes at file offset 0x4e09b (inside `.rodata`
+   section, 8-byte unaligned but that's fine for SBF).
+3. Local `.so` contains **zero** occurrences of any historical declare_id
+   (`B8zgsrt...` for vault, `7WUMSv8...` for ppn). Same for 8-byte chunks —
+   no split/fragmented encoding anywhere.
+4. No relocations touch the declare_id offset (the 1606 `R_BPF_*` entries all
+   live outside `.rodata`).
+5. Source `programs/*/src/lib.rs` has the correct `declare_id!` macro value.
+6. Backend IDL (`backend/src/idl/traxis_vault.json`) has `address =
+   DY7NAimr...` matching.
+7. Backend client passes `DY7NAimr...` as `programId` via
+   `buildProgram()` in `backend/src/solana/anchor.ts`.
+
+So the check `*program_id != ID` inside Anchor's `try_entry` should pass, yet
+it doesn't. The binary-patch approach from phase 15 *should* be complete, but
+evidently isn't — there's a reference somewhere we haven't pinpointed.
+
+**Recommended fix**: rebuild both `.so` files from source via
+`13-build-both.command` (Docker, ~20 min) with the correct `declare_id!`
+already in `lib.rs`, then redeploy via `14-deploy-devnet.command`. This
+sidesteps the question of what the binary patch missed.
+
+**Impact**: vault init is the only thing blocked. Deployment verification
+(`/api/onchain/status`), bundle data queries
+(`/api/bundles`, `/api/markets`), Polymarket mirror, and the live dashboard
+all work without on-chain vault PDAs. Victor seeded 2 of 15 bundles before
+the vault init started failing; the remaining 13 are skipped and will be
+seeded once init works (`backend/src/scripts/seed.ts` is idempotent).
 
 ## Build artifacts (as of this moment)
 
