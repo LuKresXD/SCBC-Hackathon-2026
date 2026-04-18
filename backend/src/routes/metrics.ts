@@ -18,9 +18,9 @@ const router = Router();
 
 const RPC_URL = process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
 const VAULT_PROGRAM_ID =
-  process.env.TRAXIS_VAULT_PROGRAM_ID ?? 'DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat';
+  process.env.TRAXIS_VAULT_PROGRAM_ID ?? 'E77R7yqUEAWz9jUk92kSnrpvUBEwGpPT3iZaThbKQcJb';
 const PPN_PROGRAM_ID =
-  process.env.TRAXIS_PPN_PROGRAM_ID ?? '3wDHsr9EnWkF968zYmSsj4hShNkAyFV6r7zxPrjqWNsp';
+  process.env.TRAXIS_PPN_PROGRAM_ID ?? '4NnrpeWgdmVymcdGqbrmQUunHHvyVSevUXCKFGJYwbtE';
 
 let _conn: Connection | null = null;
 function conn() {

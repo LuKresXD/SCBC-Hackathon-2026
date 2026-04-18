@@ -1,6 +1,6 @@
 # Traxis — build state summary
 
-*Last updated: 2026-04-18 (combined repo audit + live-dashboard pass)*
+*Last updated: 2026-04-18 (Victor's session — credentials + bootstrap scripts pass)*
 
 ## TL;DR
 
@@ -10,6 +10,66 @@ RPC `getAccountInfo` against `DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat`
 Both return `executable: true`, `owner: BPFLoaderUpgradeab1e...`, `lamports: 1141440`.
 Proof via the new backend endpoint `GET /api/onchain/status` (see
 `backend/src/routes/onchain.ts`) and visible on the `/live` page of the frontend.
+
+## Victor's section status (2026-04-18)
+
+Everything in CREDENTIALS.md that's required for the backend has been configured:
+
+- ✅ **Supabase** — project `wgjmjjfbkxjuzatizrxl` created; SQL schema (core +
+  on-chain mirror columns from `scripts/supabase-init.sql`) applied
+  successfully. New-format key (`sb_secret_*`) wired into `backend/.env`.
+- ✅ **Solana devnet** — both program IDs, USDC mint, fee recipient, authority
+  keypair path all set in `backend/.env`. Circle devnet USDC mint
+  `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` confirmed live.
+- ✅ **Authority SOL balance** — deployer wallet funded on devnet.
+- ✅ **FEE_RECIPIENT USDC ATA** — confirmed exists on devnet.
+- ✅ **Polymarket URL** — default `https://clob.polymarket.com` in `.env`.
+- ✅ **Root `dotenv` dep** — `scripts/init-demo-vaults.ts` requires `dotenv` at
+  repo root; added to root `package.json` and `package-lock.json`.
+
+What's gitignored and sits ONLY on Victor's machine (re-populate via the
+bootstrap scripts if someone else picks this up):
+
+    backend/.env        (real Supabase URL + key, program IDs, authority path)
+    .creds/             (Supabase credentials, Railway env template, etc.)
+
+### Outstanding issue for Luka: DeclaredProgramIdMismatch on vault init
+
+`scripts/init-demo-vaults.ts` fails for every bundle with Anchor error 4100
+(`DeclaredProgramIdMismatch`) at ~3906 compute units — a program-side check,
+NOT a client-side assertion. Deep investigation this session confirmed:
+
+1. Local `target/deploy/traxis_vault.so` is byte-identical to the on-chain
+   program code (same sha256, same 363,520-byte length).
+2. Local `.so` contains exactly **one** occurrence of the correct
+   `DY7NAimr...` declare_id bytes at file offset 0x4e09b (inside `.rodata`
+   section, 8-byte unaligned but that's fine for SBF).
+3. Local `.so` contains **zero** occurrences of any historical declare_id
+   (`B8zgsrt...` for vault, `7WUMSv8...` for ppn). Same for 8-byte chunks —
+   no split/fragmented encoding anywhere.
+4. No relocations touch the declare_id offset (the 1606 `R_BPF_*` entries all
+   live outside `.rodata`).
+5. Source `programs/*/src/lib.rs` has the correct `declare_id!` macro value.
+6. Backend IDL (`backend/src/idl/traxis_vault.json`) has `address =
+   DY7NAimr...` matching.
+7. Backend client passes `DY7NAimr...` as `programId` via
+   `buildProgram()` in `backend/src/solana/anchor.ts`.
+
+So the check `*program_id != ID` inside Anchor's `try_entry` should pass, yet
+it doesn't. The binary-patch approach from phase 15 *should* be complete, but
+evidently isn't — there's a reference somewhere we haven't pinpointed.
+
+**Recommended fix**: rebuild both `.so` files from source via
+`13-build-both.command` (Docker, ~20 min) with the correct `declare_id!`
+already in `lib.rs`, then redeploy via `14-deploy-devnet.command`. This
+sidesteps the question of what the binary patch missed.
+
+**Impact**: vault init is the only thing blocked. Deployment verification
+(`/api/onchain/status`), bundle data queries
+(`/api/bundles`, `/api/markets`), Polymarket mirror, and the live dashboard
+all work without on-chain vault PDAs. Victor seeded 2 of 15 bundles before
+the vault init started failing; the remaining 13 are skipped and will be
+seeded once init works (`backend/src/scripts/seed.ts` is idempotent).
 
 ## Build artifacts (as of this moment)
 
@@ -145,3 +205,82 @@ of the keypair files (DY7NA..., 3wDHsr9...). Two fixes applied together:
 - `14-deploy-devnet.command` — host-side `solana program deploy` + IDL sync + .env emit (phase-15 updated)
 
 The `03b-i-*.command` files from the toolchain-hunt phase are dead and can be deleted.
+
+## 2026-04-18 Luka's deploy
+
+Clean rebuild from source with fresh keypairs. Resolves the 4100 DeclaredProgramIdMismatch from Victor's binary-patched .so and a separate latent BPF stack overflow in `InitializeVault::try_accounts` (5952 of 4096 bytes, per the build log). All account and source references to the old vault/ppn program IDs have been updated to the new ones.
+
+### Programs (devnet)
+
+- `traxis_vault`: `E77R7yqUEAWz9jUk92kSnrpvUBEwGpPT3iZaThbKQcJb`
+  - ProgramData: `Gd4UoMKwL5qzuAJXAfGbAwY6JSD9HFQhexuA1V79LGJd`
+- `traxis_ppn`:   `4NnrpeWgdmVymcdGqbrmQUunHHvyVSevUXCKFGJYwbtE`
+  - ProgramData: `GVtzezEjHL2jxxJxGFK1mWTvMsph5Z6B67H1PTMSzAxB`
+- deployer / authority / FEE_RECIPIENT: `8YCkukv2Er9V8vc5tZdaDhupHiUKmHUdxD3iyvMbUEVx`
+- FEE_RECIPIENT USDC ATA (Circle devnet USDC): `HVB4Yn1ns2bauXjHRzPQdAjmKxe1PbWp6bZuwcPTgZrd`
+
+Both `.so` were rebuilt from source with declare_id matching keypair pubkeys, then deployed + upgraded. Upgrade was needed because the first build still had the `initialize_vault` stack overflow; the upgrade carries the split-instruction fix.
+
+### Stack-overflow fix
+
+`InitializeVault::try_accounts` overflowed the BPF 4 KB per-frame stack by 1856 bytes (5952 total). Three incremental fixes were applied:
+
+1. Boxed every `Account<T>` field in the struct (-1256 bytes).
+2. `overflow-checks = false` in the release profile (-72 bytes).
+3. Split into two instructions: `initialize_vault` (creates Vault PDA + legs only) and `initialize_vault_tokens` (creates TRAX mint + USDC vault PDA and populates the vault's mint/vault pubkey fields). This kept each instruction at <= 2 `init` constraints and brought both well under the 4096-byte limit.
+
+Client-side is unchanged: `initializeVault()` in `backend/src/solana/client.ts` now issues two RPC calls internally so downstream code does not see the split.
+
+### Bundles initialized on-chain
+
+- `LK-90-0430` (id `a689577b-0af7-4bd0-bb99-5b39860d60c4`)
+  - vault_pda:  `9QUC7ceRG8rA4njunPNDBjP2k49XSWKzXoQvXUKwV9wU`
+  - trax_mint:  `3oztqkcNsn2kLvKk4czhpiK38hJhriXC5iL4wMqbNeM5`
+  - usdc_vault: `AChHqE4tw6HmJ8cKt9rGc3a5NqeZwQLx2goKy4cjJ4B5`
+  - initialize_vault_tokens tx: `8XLGEUrTuEx6F4PL6g5ygnuPMPtJajG4uVfhEhE1yMN3MyyQDCtdvb7UsZNJ6U67SBMXydTVeGnzgR2iPXZmU3j`
+- `LK-70-0515` (id `0c68b41e-fa4f-4e29-99a3-5511d0bebd98`)
+  - vault_pda:  `EKbt6hm7UGF3RSew7PqDfzVtkR1Es7HQSf1uikHx9ym3`
+  - trax_mint:  `CpYQtGnjJLdnt1jprMit9vYPugoWCD9YnseDBNRVP6E2`
+  - usdc_vault: `8zreWufDajU4T21qv4xavjF6impVgjUHH7qMWjR4dKXg`
+  - initialize_vault_tokens tx: `p5vDBd9DhiKoVL2it8tsYoX8cotjvmBMMzCRhNWX3gXqBmq4wsJvyMSRhmPGJ9FKR3DoQRWd881YAGZ3E6L4j1P`
+
+The seed script defines only the two `LK-*` bundles; the 15 `STHS-*` tiles in `app/app/_lib/bundles.ts` are a frontend-only visualization set and do not correspond to on-chain vaults.
+
+### Verification
+
+```
+curl -s http://localhost:3001/api/onchain/status | jq '.programs | keys, .vault.executable, .ppn.executable'
+# [ "ppn", "vault" ] true true
+
+curl -s http://localhost:3001/api/bundles | jq '.[] | {name, vault_pda}'
+# both bundles now have vault_pda populated
+
+solana program show E77R7yqUEAWz9jUk92kSnrpvUBEwGpPT3iZaThbKQcJb --url devnet
+solana program show 4NnrpeWgdmVymcdGqbrmQUunHHvyVSevUXCKFGJYwbtE --url devnet
+```
+
+### Surprises + caveats worth flagging to the team
+
+- **ARCHITECTURE.md claims 15 seeded bundles. Reality is 2.** `backend/src/scripts/seed.ts:55` defines only `LK-90-0430` and `LK-70-0515`. The 15 STHS-* tiles in `app/app/_lib/bundles.ts` are a frontend-only visual set and do not map to Supabase rows or on-chain vaults. If a judge clicks an STHS-* tile and expects it backed by an on-chain PDA, it is not.
+- **Branding drift**: the product is Senthos (STHS) on the frontend but seeds go into Supabase as `LK-*`. Deposit flow appears to link STHS-* → LK-* by index position (unvalidated by me). Worth an eyeball before the demo.
+- **Integration tests are stale**. `tests/traxis_vault.test.ts:103` still calls `initializeVault` with the pre-split account shape (`traxMint`, `usdcMint`, `usdcVault`, `tokenProgram` in the accounts map). They will fail against the new program. Either mirror the two-step client flow or route the test through `backend/src/solana/client.ts::initializeVault` which already knows the split.
+- **PPN end-to-end is unverified**. `traxis_ppn` was upgraded together with vault for consistency, but no `initialize_note` / `harvest_yield` / `redeem_at_maturity` call has been exercised post-fix. PPN's `harvest_yield` CPIs into `vault::deposit` — if the deposit instruction has a similar latent stack problem we have not hit yet, PPN flow is the place it will show up.
+- **The 600-byte residual after Boxing everything** means `initialize_vault` is the only instruction currently under pressure. `deposit`, `resolve_leg`, `finalize_vault`, `redeem`, `admin_withdraw_fees` all compiled without the warning. But the warning threshold is a build-time check — if anyone adds a field to `InitializeVault` later, watch `docker-build-both.log` for the stack-offset error.
+- **Fee recipient is the deployer wallet itself** (intentional for the hackathon — keeps the setup one-wallet-friendly). Rotate to a multisig before any live deployment, per `CREDENTIALS.md` §6 checklist.
+- **GitGuardian false positive on `eeeefab`** flagged the base58 `declare_id!` constants in Rust sources. Those pubkeys are public by design. Safe to dismiss. (Still applies after this rebuild with the new IDs.)
+
+### Still open for Sunday
+
+- Update `tests/traxis_vault.test.ts` for the two-step flow, then `anchor test` or re-verify by running the full init path from `scripts/init-demo-vaults.ts`.
+- Walk `traxis_ppn` end-to-end manually (init_mock_adapter → initialize_note → harvest_yield → redeem_at_maturity).
+- Push commit `33d2edd` after the team Telegram ping.
+- Railway + Vercel deploy (`22-railway-env-export.command` → Railway → Vercel → Devfolio submit before Mon 2026-04-20 23:59 PDT).
+- After deploy, smoke the Railway `/api/onchain/status` and Vercel `/app/basket/<id>` deposit flow with a devnet Phantom wallet.
+
+### Team heads-up checklist (for the Telegram message)
+
+- Fresh program IDs in use; paste them into any personal `.env` files.
+- `initialize_vault` is now a two-step flow (Rust + IDL). Client API is unchanged; anyone composing raw RPC with the old single-instruction IDL will fail.
+- `Cargo.toml` has `overflow-checks = false` in `[profile.release]`. Fine for devnet demo, not fine for mainnet.
+- Do not re-seed from Victor's machine; Supabase already has both bundles with `vault_pda` populated.
+

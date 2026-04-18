@@ -303,7 +303,10 @@ export async function initializeVault(
   const [traxMint] = deriveTraxMint(args.bundleId);
   const [usdcVault] = deriveUsdcVault(args.bundleId);
 
-  const signature = await program.methods
+  // Step 1/2: create the Vault PDA and store leg metadata. The Rust program
+  // splits this from token creation so each instruction's try_accounts stays
+  // under BPF's 4 KB stack budget.
+  await program.methods
     .initializeVault({
       bundleSeed: Array.from(bundleSeed),
       issuePriceBps: args.issuePriceBps,
@@ -321,10 +324,22 @@ export async function initializeVault(
     .accounts({
       authority: cfg.authorityKeypair.publicKey,
       vault: vaultPda,
+      feeRecipient: cfg.feeRecipient,
+      systemProgram: SystemProgram.programId,
+      rent: SYSVAR_RENT_PUBKEY,
+    })
+    .rpc();
+
+  // Step 2/2: create the TRAX mint and the PDA-owned USDC vault token account.
+  // Populates vault.trax_mint, vault.usdc_mint, vault.usdc_vault.
+  const signature = await program.methods
+    .initializeVaultTokens()
+    .accounts({
+      authority: cfg.authorityKeypair.publicKey,
+      vault: vaultPda,
       traxMint,
       usdcMint: cfg.usdcMint,
       usdcVault,
-      feeRecipient: cfg.feeRecipient,
       systemProgram: SystemProgram.programId,
       tokenProgram: TOKEN_PROGRAM_ID,
       rent: SYSVAR_RENT_PUBKEY,

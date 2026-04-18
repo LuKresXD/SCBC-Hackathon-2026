@@ -10,8 +10,8 @@ import hashlib
 import json
 import os
 
-VAULT_ADDRESS = "DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat"
-PPN_ADDRESS = "3wDHsr9EnWkF968zYmSsj4hShNkAyFV6r7zxPrjqWNsp"
+VAULT_ADDRESS = "E77R7yqUEAWz9jUk92kSnrpvUBEwGpPT3iZaThbKQcJb"
+PPN_ADDRESS = "4NnrpeWgdmVymcdGqbrmQUunHHvyVSevUXCKFGJYwbtE"
 
 
 def ix_disc(name: str) -> list[int]:
@@ -233,15 +233,26 @@ vault_instructions = [
         "accounts": [
             acc("authority", writable=True, signer=True),
             acc("vault", writable=True),
+            acc("fee_recipient"),
+            acc("system_program", address=SYSTEM_PROGRAM),
+            acc("rent", address=RENT_SYSVAR),
+        ],
+        "args": [{"name": "args", "type": defined("InitializeVaultArgs")}],
+    },
+    {
+        "name": "initialize_vault_tokens",
+        "discriminator": ix_disc("initialize_vault_tokens"),
+        "accounts": [
+            acc("authority", writable=True, signer=True),
+            acc("vault", writable=True),
             acc("trax_mint", writable=True),
             acc("usdc_mint"),
             acc("usdc_vault", writable=True),
-            acc("fee_recipient"),
             acc("system_program", address=SYSTEM_PROGRAM),
             acc("token_program", address=TOKEN_PROGRAM),
             acc("rent", address=RENT_SYSVAR),
         ],
-        "args": [{"name": "args", "type": defined("InitializeVaultArgs")}],
+        "args": [],
     },
     {
         "name": "deposit",

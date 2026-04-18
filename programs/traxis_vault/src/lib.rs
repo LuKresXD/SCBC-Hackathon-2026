@@ -20,19 +20,31 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat");
+declare_id!("E77R7yqUEAWz9jUk92kSnrpvUBEwGpPT3iZaThbKQcJb");
 
 #[program]
 pub mod traxis_vault {
     use super::*;
 
-    /// Create a new vault + TRAX mint + USDC vault account.
+    /// Step 1/2 of vault creation. Creates the Vault PDA and stores the
+    /// leg metadata. Does NOT create the TRAX mint or USDC vault — those
+    /// are handled by `initialize_vault_tokens` to keep each instruction's
+    /// stack usage within BPF's 4 KB-per-frame limit.
     /// Admin only. Binds the vault to a Supabase bundle UUID via `bundle_seed`.
     pub fn initialize_vault(
         ctx: Context<InitializeVault>,
         args: InitializeVaultArgs,
     ) -> Result<()> {
         instructions::initialize_vault::handler(ctx, args)
+    }
+
+    /// Step 2/2 of vault creation. Creates the TRAX mint and the USDC vault
+    /// token account, and populates the corresponding pubkey fields on the
+    /// Vault account. Must be called after `initialize_vault`.
+    pub fn initialize_vault_tokens(
+        ctx: Context<InitializeVaultTokens>,
+    ) -> Result<()> {
+        instructions::initialize_vault_tokens::handler(ctx)
     }
 
     /// User deposits USDC, receives TRAX atomically.
