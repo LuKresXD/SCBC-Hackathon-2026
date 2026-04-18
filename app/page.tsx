@@ -17,14 +17,16 @@ const useMobile = () => useContext(MobileCtx);
 
 
 const C = {
-  bg: "#0a0e13", surface: "#0f1520", card: "#131c28", cardHover: "#172030",
-  border: "#1a2a3a", borderHover: "#243a50", teal: "#0d9488", tealBg: "#042420",
+  bg: "#05080c", surface: "#0a0f18", card: "#0d131c", cardHover: "#121a26",
+  border: "rgba(45, 212, 191, 0.08)", borderHover: "rgba(45, 212, 191, 0.18)",
+  teal: "#0d9488", tealLight: "#2dd4bf", tealBg: "#042420",
   amber: "#d97706", amberBg: "#1c1000", coral: "#ea580c", coralBg: "#1c0a00",
   green: "#22c55e", greenBg: "#0a1f10", red: "#ef4444", redBg: "#1f0a0a",
   textPrimary: "#eef2f7", textSecondary: "#6b8099", textMuted: "#3a4f62",
 };
-const FS = "'DM Sans', system-ui, sans-serif";
+const FS = "'Inter', system-ui, sans-serif";
 const FD = "'Inter', system-ui, sans-serif";
+const FM = "'JetBrains Mono', 'SF Mono', Menlo, monospace";
 const EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 
 function genHistory(tier: number, days: number, finalNav: number) {
@@ -467,7 +469,7 @@ function FeaturedHero({ bundle, onClick }: { bundle:Bundle, onClick:()=>void }) 
             </div>
           </div>
           <div style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,color,fontFamily:FS,fontWeight:500}}>
-            View basket →
+            View constellation →
           </div>
         </div>
         {!isMobile && (
@@ -509,7 +511,7 @@ function MarketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
     <div>
       <div style={{marginBottom:28}}>
         <div style={{fontSize:28,fontWeight:700,color:C.textPrimary,fontFamily:FD,marginBottom:4,letterSpacing:"-0.01em"}}>Markets</div>
-        <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>{BUNDLES.length} active baskets · live NAV</div>
+        <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>{BUNDLES.length} active constellations · live NAV</div>
       </div>
       <Ticker />
       <FeaturedHero bundle={featured} onClick={()=>onSelect(featured,"markets")} />
@@ -578,7 +580,7 @@ function MarketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
 type TimeFilter="week"|"month"|"long";
 type SortOption="change_desc"|"change_asc"|"nav_desc"|"nav_asc"|"days_asc";
 
-function BasketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
+function ConstellationsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
   const [tier,setTier]=useState<90|70|50>(90);
   const [time,setTime]=useState<TimeFilter>("week");
   const [sort,setSort]=useState<SortOption>("change_desc");
@@ -597,8 +599,8 @@ function BasketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
   return (
     <div>
       <div style={{marginBottom:24}}>
-        <div style={{fontSize:28,fontWeight:700,color:C.textPrimary,fontFamily:FD,marginBottom:4,letterSpacing:"-0.01em"}}>Baskets</div>
-        <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>Browse and filter all available structured baskets</div>
+        <div style={{fontSize:28,fontWeight:700,color:C.textPrimary,fontFamily:FD,marginBottom:4,letterSpacing:"-0.01em"}}>Constellations</div>
+        <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS}}>Browse and filter all available structured constellations</div>
       </div>
       <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:14,padding:"18px 20px",marginBottom:20}}>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
@@ -623,10 +625,10 @@ function BasketsPage({ onSelect }: { onSelect:(b:Bundle,from:string)=>void }) {
         </div>
       </div>
       {filtered.length===0?(
-        <div style={{textAlign:"center",color:C.textMuted,padding:"60px 0",fontSize:14,fontFamily:FS}}>No baskets match these filters</div>
+        <div style={{textAlign:"center",color:C.textMuted,padding:"60px 0",fontSize:14,fontFamily:FS}}>No constellations match these filters</div>
       ):(
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(300px,1fr))",gap:14}}>
-          {filtered.map(b=><BundleCard key={b.id} bundle={b} onClick={()=>onSelect(b,"baskets")} />)}
+          {filtered.map(b=><BundleCard key={b.id} bundle={b} onClick={()=>onSelect(b,"constellations")} />)}
         </div>
       )}
     </div>
@@ -673,7 +675,7 @@ function DetailPage({ bundle, fromTab, onBack, demoMode, demoUsdc, onDemoDeposit
         onMouseLeave={e=>(e.currentTarget as HTMLElement).style.color=C.textSecondary}
       >
         <span style={{fontSize:16,lineHeight:1}}>←</span>
-        <span>Back to {fromTab==="baskets"?"Baskets":fromTab==="portfolio"?"Portfolio":"Markets"}</span>
+        <span>Back to {fromTab==="constellations"?"Constellations":fromTab==="portfolio"?"Portfolio":"Markets"}</span>
       </button>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
         <div>
@@ -984,9 +986,9 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
 
       {hasNoPositions && (
         <div style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:16,padding:"40px 24px",textAlign:"center"}}>
-          <div style={{fontSize:14,color:C.textSecondary,fontFamily:FS,marginBottom:6}}>No basket positions yet</div>
+          <div style={{fontSize:14,color:C.textSecondary,fontFamily:FS,marginBottom:6}}>No constellation positions yet</div>
           <div style={{fontSize:12,color:C.textMuted,fontFamily:FS}}>
-            {demoMode ? "Head to Baskets or Markets to make your first demo purchase" : "Connect a wallet and deposit to get started"}
+            {demoMode ? "Head to Constellations or Markets to make your first demo purchase" : "Connect a wallet and deposit to get started"}
           </div>
         </div>
       )}
@@ -1197,84 +1199,417 @@ function PortfolioPage({ onSelect, portfolio, vaultPositions, usdcBalance, demoM
   );
 }
 
-function AboutPage() {
+
+// =========================================================================
+// STARFIELD — subtle atmospheric background for all app pages
+// =========================================================================
+function StarfieldBG() {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current; if (!c) return;
+    const ctx = c.getContext("2d")!;
+    let stars: {x:number,y:number,r:number,tw:number,speed:number}[] = [];
+    let raf = 0;
+
+    const resize = () => {
+      c.width = window.innerWidth;
+      c.height = window.innerHeight;
+      stars = [];
+      const count = Math.floor((c.width * c.height) / 9000); // sparse
+      for (let i=0;i<count;i++) {
+        stars.push({
+          x: Math.random()*c.width,
+          y: Math.random()*c.height,
+          r: Math.random()*0.9 + 0.2,
+          tw: Math.random()*Math.PI*2,
+          speed: Math.random()*0.0025 + 0.001,
+        });
+      }
+    };
+    const draw = () => {
+      ctx.clearRect(0,0,c.width,c.height);
+      for (const s of stars) {
+        const alpha = (Math.sin(s.tw)+1)/2 * 0.35 + 0.15;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(180, 210, 235, ${alpha})`;
+        ctx.fill();
+        s.tw += s.speed;
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    resize();
+    draw();
+    window.addEventListener("resize", resize);
+    return () => { window.removeEventListener("resize", resize); cancelAnimationFrame(raf); };
+  }, []);
+  return <canvas ref={ref} style={{position:"fixed",inset:0,zIndex:0,pointerEvents:"none"}} />;
+}
+
+// =========================================================================
+// LANDING PAGE — orbital hero, ported from prototype
+// =========================================================================
+function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:string)=>void }) {
   const isMobile = useMobile();
+  const systemRef = useRef<HTMLDivElement>(null);
+  const orbit1Ref = useRef<HTMLDivElement>(null);
+  const orbit2Ref = useRef<HTMLDivElement>(null);
+  const orbit3Ref = useRef<HTMLDivElement>(null);
+  const pc1Ref = useRef<HTMLDivElement>(null);
+  const pc2Ref = useRef<HTMLDivElement>(null);
+  const pc3Ref = useRef<HTMLDivElement>(null);
+  const [activeChapter, setActiveChapter] = useState(0);
+  const chapterRefs = useRef<(HTMLDivElement|null)[]>([]);
+
+  // Scroll-driven orbit rotation
+  useEffect(() => {
+    let raf = 0;
+    let t = 0;
+    const update = () => {
+      t += 0.3;
+      const y = window.scrollY;
+      const vh = window.innerHeight;
+      const progress = y / vh;
+      if (orbit1Ref.current) orbit1Ref.current.style.transform = `translate(-50%, -50%) rotate(${progress*360*0.8}deg)`;
+      if (orbit2Ref.current) orbit2Ref.current.style.transform = `translate(-50%, -50%) rotate(${-progress*360*0.5}deg)`;
+      if (orbit3Ref.current) orbit3Ref.current.style.transform = `translate(-50%, -50%) rotate(${progress*360*0.3}deg)`;
+      if (pc1Ref.current) pc1Ref.current.style.transform = `rotate(${progress*360*1.2 + 30 + t*0.8}deg)`;
+      if (pc2Ref.current) pc2Ref.current.style.transform = `rotate(${progress*360*0.7 + 120 + t*0.5}deg)`;
+      if (pc3Ref.current) pc3Ref.current.style.transform = `rotate(${progress*360*0.4 + 210 + t*0.3}deg)`;
+
+      // progress dots — which chapter is most visible
+      const scrollMid = y + vh/2;
+      let active = 0;
+      chapterRefs.current.forEach((el, i) => {
+        if (el && scrollMid >= el.offsetTop) active = i;
+      });
+      setActiveChapter(active);
+
+      raf = requestAnimationFrame(update);
+    };
+    raf = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const scrollToChapter = (i:number) => {
+    const el = chapterRefs.current[i];
+    if (el) el.scrollIntoView({ behavior:"smooth" });
+  };
+
+  const chapters = [
+    {id:"arrival",label:"ARRIVAL"},
+    {id:"constellations",label:"CONSTELLATIONS"},
+    {id:"tiers",label:"ORBITAL TIERS"},
+    {id:"mechanics",label:"MECHANICS"},
+    {id:"launch",label:"LAUNCH"},
+  ];
+
   return (
-    <div>
-      <div style={{marginBottom:48}}>
-        <div style={{fontSize:isMobile?26:34,fontWeight:700,color:C.textPrimary,fontFamily:FD,lineHeight:1.2,marginBottom:16,letterSpacing:"-0.02em"}}>
-          One deposit.<br/>Diversified prediction market exposure.
+    <div style={{position:"relative",overflow:"hidden",background:"transparent"}}>
+      <style>{`
+        @keyframes starPulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.08); opacity: 0.85; }
+        }
+        @keyframes flarePulse {
+          0%, 100% { opacity: 0.4; }
+          50% { opacity: 0.9; }
+        }
+        @keyframes landingBob {
+          0%, 100% { transform: translateX(-50%) translateY(0); }
+          50% { transform: translateX(-50%) translateY(6px); }
+        }
+      `}</style>
+
+      {/* Fixed orbital system */}
+      <div ref={systemRef} style={{
+        position:"fixed",
+        top:"50%",
+        left: isMobile ? "50%" : "25%",
+        transform:"translate(-50%, -50%)",
+        width: isMobile ? 360 : 640,
+        height: isMobile ? 360 : 640,
+        zIndex:1,
+        pointerEvents:"none",
+        opacity: isMobile ? 0.45 : 1,
+      }}>
+        {/* Rings */}
+        <div ref={orbit3Ref} style={{
+          position:"absolute",top:"50%",left:"50%",borderRadius:"50%",
+          border:`1px solid rgba(234, 88, 12, 0.22)`,
+          width:isMobile?480:620,height:isMobile?480:620,
+          marginTop:isMobile?-240:-310,marginLeft:isMobile?-240:-310,
+        }} />
+        <div ref={orbit2Ref} style={{
+          position:"absolute",top:"50%",left:"50%",borderRadius:"50%",
+          border:`1px solid rgba(217, 119, 6, 0.3)`,
+          boxShadow:"0 0 50px rgba(217, 119, 6, 0.1)",
+          width:isMobile?340:440,height:isMobile?340:440,
+          marginTop:isMobile?-170:-220,marginLeft:isMobile?-170:-220,
+        }} />
+        <div ref={orbit1Ref} style={{
+          position:"absolute",top:"50%",left:"50%",borderRadius:"50%",
+          border:`1px solid rgba(13, 148, 136, 0.4)`,
+          boxShadow:"0 0 40px rgba(13, 148, 136, 0.15), inset 0 0 40px rgba(13, 148, 136, 0.05)",
+          width:isMobile?220:280,height:isMobile?220:280,
+          marginTop:isMobile?-110:-140,marginLeft:isMobile?-110:-140,
+        }} />
+
+        {/* Planets */}
+        <div ref={pc1Ref} style={{position:"absolute",top:"50%",left:"50%",transformOrigin:"0 0"}}>
+          <div style={{position:"absolute",width:14,height:14,borderRadius:"50%",top:"50%",left:"50%",marginTop:-7,marginLeft:-7,
+            transform:`translate(${isMobile?110:140}px, 0)`,
+            background:C.tealLight,boxShadow:`0 0 20px ${C.tealLight}`,
+          }} />
         </div>
-        <div style={{fontSize:isMobile?14:15,color:C.textSecondary,fontFamily:FS,lineHeight:1.75,maxWidth:640}}>
-          Senthos bundles 10 or more high-liquidity prediction market positions into a single token. Pick your risk level, deposit USDC, and receive a basket token that trades freely and auto-redeems when markets settle.
+        <div ref={pc2Ref} style={{position:"absolute",top:"50%",left:"50%",transformOrigin:"0 0"}}>
+          <div style={{position:"absolute",width:14,height:14,borderRadius:"50%",top:"50%",left:"50%",marginTop:-7,marginLeft:-7,
+            transform:`translate(${isMobile?170:220}px, 0)`,
+            background:"#fbbf24",boxShadow:"0 0 20px #fbbf24",
+          }} />
+        </div>
+        <div ref={pc3Ref} style={{position:"absolute",top:"50%",left:"50%",transformOrigin:"0 0"}}>
+          <div style={{position:"absolute",width:14,height:14,borderRadius:"50%",top:"50%",left:"50%",marginTop:-7,marginLeft:-7,
+            transform:`translate(${isMobile?240:310}px, 0)`,
+            background:"#fb923c",boxShadow:"0 0 20px #fb923c",
+          }} />
+        </div>
+
+        {/* Central Star */}
+        <div style={{position:"absolute",top:"50%",left:"50%",width:isMobile?130:160,height:isMobile?130:160,marginTop:isMobile?-65:-80,marginLeft:isMobile?-65:-80}}>
+          <div style={{position:"absolute",inset:-100,borderRadius:"50%",
+            background:"radial-gradient(circle, rgba(45, 212, 191, 0.4) 0%, rgba(13, 148, 136, 0.2) 30%, transparent 70%)",
+            animation:"starPulse 4s ease-in-out infinite",
+          }} />
+          <div style={{position:"absolute",inset:-40,borderRadius:"50%",
+            background:"radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, rgba(45, 212, 191, 0.4) 20%, rgba(13, 148, 136, 0.2) 50%, transparent 75%)",
+            filter:"blur(10px)",
+            animation:"starPulse 3s ease-in-out infinite 0.5s",
+          }} />
+          <div style={{position:"absolute",inset:0,borderRadius:"50%",
+            background:"radial-gradient(circle at 40% 40%, #ffffff 0%, #a5f3fc 15%, #2dd4bf 35%, #0d9488 60%, #0a3a3a 100%)",
+            boxShadow:"inset -15px -15px 30px rgba(0, 0, 0, 0.4), inset 10px 10px 25px rgba(255, 255, 255, 0.2), 0 0 60px rgba(45, 212, 191, 0.5)",
+          }} />
+          <div style={{position:"absolute",top:"50%",left:"50%",width:3,height:isMobile?220:280,marginTop:isMobile?-110:-140,marginLeft:-1.5,
+            background:"linear-gradient(to bottom, transparent 0%, rgba(255, 255, 255, 0.9) 50%, transparent 100%)",
+            filter:"blur(1px)",animation:"flarePulse 3s ease-in-out infinite",
+          }} />
+          <div style={{position:"absolute",top:"50%",left:"50%",width:isMobile?220:280,height:3,marginTop:-1.5,marginLeft:isMobile?-110:-140,
+            background:"linear-gradient(to right, transparent 0%, rgba(255, 255, 255, 0.9) 50%, transparent 100%)",
+            filter:"blur(1px)",animation:"flarePulse 3s ease-in-out infinite 0.8s",
+          }} />
         </div>
       </div>
-      <div style={{marginBottom:48}}>
-        <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,letterSpacing:"0.08em",fontWeight:500,marginBottom:16}}>HOW IT WORKS</div>
-        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(3,1fr)",gap:12}}>
-          {[
-            {n:"01",title:"Pick a tier and deposit",body:"Choose your risk level and deposit USDC. Your funds buy the underlying prediction market positions. A 0.5% structuring fee is taken at issuance.",color:C.teal},
-            {n:"02",title:"Receive a basket token",body:"An STHS token lands in your wallet. It tracks the live net asset value of the basket and trades freely. You can exit at any time.",color:C.amber},
-            {n:"03",title:"Collect at resolution",body:"When the final position resolves, USDC is sent directly to your wallet. No claiming, no manual steps, nothing to do.",color:C.coral},
-          ].map(s=>(
-            <div key={s.n} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:14,padding:"22px 20px"}}>
-              <div style={{fontSize:20,fontWeight:700,color:s.color,fontFamily:FD,marginBottom:14,opacity:0.45}}>{s.n}</div>
-              <div style={{fontSize:14,fontWeight:600,color:C.textPrimary,fontFamily:FD,marginBottom:8}}>{s.title}</div>
-              <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS,lineHeight:1.65}}>{s.body}</div>
+
+      {/* Progress dots (desktop) */}
+      {!isMobile && (
+        <div style={{position:"fixed",right:36,top:"50%",transform:"translateY(-50%)",zIndex:50,display:"flex",flexDirection:"column",gap:18}}>
+          {chapters.map((ch, i) => (
+            <div key={ch.id} onClick={()=>scrollToChapter(i)} style={{
+              position:"relative",width:10,height:10,borderRadius:"50%",
+              border:`1px solid ${activeChapter===i?C.tealLight:C.textMuted}`,
+              background:activeChapter===i?C.tealLight:"transparent",
+              boxShadow:activeChapter===i?`0 0 14px ${C.tealLight}`:"none",
+              transform:activeChapter===i?"scale(1.15)":"scale(1)",
+              transition:`all 0.3s ${EASE}`,cursor:"pointer",
+            }}>
+              <span style={{
+                position:"absolute",right:22,top:"50%",transform:"translateY(-50%)",
+                fontFamily:FM,fontSize:10,letterSpacing:"0.1em",
+                color:activeChapter===i?C.tealLight:C.textMuted,
+                whiteSpace:"nowrap",opacity:activeChapter===i?1:0,
+                transition:"opacity 0.3s",pointerEvents:"none",
+              }}>{ch.label}</span>
             </div>
           ))}
         </div>
-      </div>
-      <div style={{marginBottom:48}}>
-        <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,letterSpacing:"0.08em",fontWeight:500,marginBottom:16}}>RISK TIERS</div>
-        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(3,1fr)",gap:12}}>
-          {[
-            {tier:90,label:"Conservative",desc:"High-probability basket averaging around 90% implied probability. Built for users who want exposure with minimal downside.",color:C.teal},
-            {tier:70,label:"Balanced",desc:"Medium conviction basket averaging around 70% probability. Broader range of outcomes with meaningful upside.",color:C.amber},
-            {tier:50,label:"High conviction",desc:"Near even-odds basket. Maximum payout potential for users with strong directional views.",color:C.coral},
-          ].map(t=>(
-            <div key={t.tier} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:14,padding:"22px 20px",borderTop:`2px solid ${t.color}`}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={{fontSize:30,fontWeight:700,color:t.color,fontFamily:FD,lineHeight:1}}>{t.tier}%</div>
-                <div style={{fontSize:11,padding:"3px 8px",borderRadius:20,background:t.color+"15",color:t.color,fontFamily:FS}}>{t.label}</div>
+      )}
+
+      {/* Content sections */}
+      <main style={{position:"relative",zIndex:10,pointerEvents:"none"}}>
+
+        {/* SECTION 1 — Arrival */}
+        <section ref={el=>{chapterRefs.current[0]=el;}} style={{minHeight:"100vh",padding:isMobile?"120px 24px 80px":"140px 64px 80px",display:"flex",alignItems:"center",position:"relative",pointerEvents:"auto"}}>
+          {isMobile && <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(5, 8, 12, 0.75) 60%, rgba(5, 8, 12, 0.95) 100%)",pointerEvents:"none",zIndex:2}} />}
+          <div style={{marginLeft:isMobile?0:"50%",maxWidth:580,position:"relative",zIndex:5}}>
+            <div style={{display:"inline-flex",alignItems:"center",gap:10,fontFamily:FM,fontSize:isMobile?10:11,fontWeight:500,color:C.tealLight,letterSpacing:"0.2em",marginBottom:32,padding:"6px 12px",border:"1px solid rgba(45, 212, 191, 0.3)",borderRadius:100,background:"rgba(45, 212, 191, 0.05)"}}>
+              <span style={{width:6,height:6,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 10px ${C.tealLight}`,animation:"starPulse 2s ease-in-out infinite"}} />
+              LIVE ON SOLANA
+            </div>
+            <h1 style={{fontFamily:FD,fontSize:isMobile?"clamp(44px, 10vw, 60px)":"clamp(56px, 7vw, 92px)",fontWeight:200,lineHeight:1.02,letterSpacing:"-0.035em",marginBottom:32,color:C.textPrimary}}>
+              Prediction markets, <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>structured</span>.
+            </h1>
+            <p style={{fontSize:isMobile?16:18,lineHeight:1.65,color:C.textSecondary,fontWeight:300,maxWidth:480,fontFamily:FS}}>
+              One deposit. Ten curated positions. A single token that tracks the whole constellation — and pays out when markets settle.
+            </p>
+          </div>
+          {!isMobile && (
+            <div style={{position:"absolute",bottom:40,left:"50%",transform:"translateX(-50%)",fontFamily:FM,fontSize:10,letterSpacing:"0.22em",color:C.textMuted,display:"flex",flexDirection:"column",alignItems:"center",gap:10,animation:"landingBob 2s ease-in-out infinite"}}>
+              <span>SCROLL</span>
+              <div style={{width:1,height:30,background:`linear-gradient(to bottom, ${C.textMuted}, transparent)`}} />
+            </div>
+          )}
+        </section>
+
+        {/* SECTION 2 — Constellations */}
+        <section ref={el=>{chapterRefs.current[1]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 64px",display:"flex",alignItems:"center",position:"relative",pointerEvents:"auto"}}>
+          {isMobile && <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(5, 8, 12, 0.75) 60%, rgba(5, 8, 12, 0.95) 100%)",pointerEvents:"none",zIndex:2}} />}
+          <div style={{marginLeft:isMobile?0:"50%",maxWidth:580,position:"relative",zIndex:5}}>
+            <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+              <span style={{width:28,height:1,background:"currentColor"}} />
+              Chapter 01 · Constellations
+            </div>
+            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(32px, 8vw, 44px)":"clamp(40px, 5vw, 58px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary}}>
+              Not a single bet. A <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>constellation</span> of them.
+            </h2>
+            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS}}>
+              Betting on one prediction market is a coin flip. A Senthos Constellation bundles 10 or more high-liquidity positions into a single basket token — spreading exposure across uncorrelated outcomes.
+            </p>
+            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS}}>
+              You don't pick the positions. Our structurers do. You pick the risk profile — and buy the whole sky at once.
+            </p>
+            <div style={{marginTop:40,padding:isMobile?18:24,background:"rgba(15, 21, 32, 0.5)",border:"1px solid rgba(45, 212, 191, 0.1)",borderRadius:14,backdropFilter:"blur(12px)"}}>
+              <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.18em",color:C.textMuted,marginBottom:14}}>EXAMPLE · STHS-90-0515</div>
+              <div style={{fontFamily:FM,fontSize:isMobile?13:15,fontWeight:500,color:C.tealLight,marginBottom:14}}>10 positions · Conservative tier · Resolves May 15</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {[
+                  ["Fed holds rates in June","91%"],
+                  ["US avoids recession 2025","88%"],
+                  ["BTC above $80k by May","92%"],
+                  ["NVIDIA beats Q1 earnings","87%"],
+                  ["Gold above $2,400/oz","90%"],
+                ].map(([l,p],i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:10,fontSize:isMobile?12:13,color:C.textSecondary,padding:"6px 0",borderBottom:i<4?"0.5px solid rgba(255, 255, 255, 0.04)":"none",fontFamily:FS}}>
+                    <span>{l}</span>
+                    <span style={{fontFamily:FM,color:C.tealLight,fontSize:isMobile?11:12,marginLeft:"auto",letterSpacing:"0.04em"}}>{p}</span>
+                  </div>
+                ))}
+                <div style={{fontSize:isMobile?12:13,color:C.textMuted,opacity:0.6,padding:"6px 0",fontFamily:FS}}>+ 5 more positions</div>
               </div>
-              <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS,lineHeight:1.65,marginBottom:16}}>{t.desc}</div>
-              <div style={{borderTop:`0.5px solid ${C.border}`,paddingTop:12,display:"flex",flexDirection:"column",gap:6}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.textMuted,fontFamily:FS}}>
-                  <span>Issue price</span><span style={{color:t.color}}>~${(t.tier/100).toFixed(2)}</span>
-                </div>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.textMuted,fontFamily:FS}}>
-                  <span>Max payout</span><span style={{color:C.green}}>$1.00 per token</span>
-                </div>
-              </div>
             </div>
-          ))}
-        </div>
-      </div>
-      <div>
-        <div style={{fontSize:11,color:C.textMuted,fontFamily:FS,letterSpacing:"0.08em",fontWeight:500,marginBottom:16}}>FAQ</div>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {[
-            ["Can I exit before resolution?","Yes. STHS tokens trade on Jupiter. You can sell your position at the current market price at any time before the basket resolves."],
-            ["How is the issue price set?","Issue price is set within 1 cent of the basket's average implied probability across all legs. NAV updates in real time as markets move."],
-            ["What is Principal Protection?","Your deposit is split by our model based on current yield rates and the basket timeline. The majority goes into a Meteora yield vault, always redeemable. The rest is deployed directly into your chosen basket."],
-            ["What happens when a basket resolves?","USDC is sent directly to every token holder's wallet. Tokens are burned. Nothing to claim."],
-          ].map(([q,a])=>(
-            <div key={q as string} style={{background:C.card,border:`0.5px solid ${C.border}`,borderRadius:10,padding:"16px 18px"}}>
-              <div style={{fontSize:13,fontWeight:600,color:C.textPrimary,fontFamily:FD,marginBottom:6}}>{q as string}</div>
-              <div style={{fontSize:13,color:C.textSecondary,fontFamily:FS,lineHeight:1.65}}>{a as string}</div>
+          </div>
+        </section>
+
+        {/* SECTION 3 — Tiers */}
+        <section ref={el=>{chapterRefs.current[2]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 64px",display:"flex",alignItems:"center",position:"relative",pointerEvents:"auto"}}>
+          {isMobile && <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(5, 8, 12, 0.75) 60%, rgba(5, 8, 12, 0.95) 100%)",pointerEvents:"none",zIndex:2}} />}
+          <div style={{marginLeft:isMobile?0:"50%",maxWidth:580,position:"relative",zIndex:5}}>
+            <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+              <span style={{width:28,height:1,background:"currentColor"}} />
+              Chapter 02 · Risk tiers
             </div>
-          ))}
-        </div>
-      </div>
+            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(32px, 8vw, 44px)":"clamp(40px, 5vw, 58px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary}}>
+              Three orbits. Three <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>risk profiles</span>.
+            </h2>
+            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS}}>
+              Each constellation lives on one of three rings — defined by its weighted probability. Closer to the star means safer; further means bigger payout.
+            </p>
+            <div style={{display:"grid",gridTemplateColumns:"1fr",gap:14,marginTop:40}}>
+              {[
+                {tier:90,label:"Conservative",sub:"STHS-90",desc:"High-probability basket. Issue price around $0.90. Built for capital preservation with small upside.",color:C.tealLight},
+                {tier:70,label:"Balanced",sub:"STHS-70",desc:"Medium conviction. Issue price around $0.70. Meaningful payout with manageable downside.",color:"#fbbf24"},
+                {tier:50,label:"High conviction",sub:"STHS-50",desc:"Near even-odds. Issue price around $0.50. Maximum payout potential for directional views.",color:"#fb923c"},
+              ].map(t=>(
+                <div key={t.tier} style={{padding:isMobile?"18px 20px":"22px 24px",background:"rgba(15, 21, 32, 0.55)",border:"1px solid rgba(45, 212, 191, 0.08)",borderRadius:16,backdropFilter:"blur(10px)",position:"relative",overflow:"hidden",transition:`all 0.3s ${EASE}`}}
+                  onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.transform="translateX(6px)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.2)";}}
+                  onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.transform="translateX(0)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.08)";}}
+                >
+                  <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:t.color,opacity:0.7}} />
+                  <div style={{display:"flex",alignItems:"baseline",gap:14,marginBottom:8}}>
+                    <div style={{fontFamily:FD,fontSize:isMobile?30:38,fontWeight:300,color:t.color,letterSpacing:"-0.035em",lineHeight:1}}>{t.tier}%</div>
+                    <div style={{fontSize:isMobile?13:15,color:C.textPrimary,fontWeight:500,letterSpacing:"-0.005em",fontFamily:FD}}>{t.label}</div>
+                    <div style={{marginLeft:"auto",fontFamily:FM,fontSize:isMobile?10:11,color:C.textMuted,letterSpacing:"0.08em"}}>{t.sub}</div>
+                  </div>
+                  <p style={{fontSize:isMobile?12:13,color:C.textSecondary,lineHeight:1.55,fontFamily:FS}}>{t.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* SECTION 4 — Mechanics */}
+        <section ref={el=>{chapterRefs.current[3]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 64px",display:"flex",alignItems:"center",position:"relative",pointerEvents:"auto"}}>
+          {isMobile && <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(5, 8, 12, 0.75) 60%, rgba(5, 8, 12, 0.95) 100%)",pointerEvents:"none",zIndex:2}} />}
+          <div style={{marginLeft:isMobile?0:"50%",maxWidth:580,position:"relative",zIndex:5}}>
+            <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+              <span style={{width:28,height:1,background:"currentColor"}} />
+              Chapter 03 · Mechanics
+            </div>
+            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(32px, 8vw, 44px)":"clamp(40px, 5vw, 58px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary}}>
+              Deposit. Hold. <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Collect</span>.
+            </h2>
+            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:18,fontFamily:FS}}>
+              No claiming, no manual steps, no unwinding trades. The token is the position — and it auto-resolves.
+            </p>
+            <div style={{display:"flex",flexDirection:"column",gap:isMobile?22:28,marginTop:40}}>
+              {[
+                ["01","Pick a tier, deposit USDC","Choose your risk level. Your deposit buys the underlying prediction market positions at issuance. A 0.5% structuring fee is taken once."],
+                ["02","Receive an STHS token","One token lands in your wallet. It tracks the live net asset value of the constellation. You can sell it on Jupiter at any time — or hold through resolution."],
+                ["03","Collect when markets settle","When the last position resolves, USDC is sent directly to every holder's wallet. Tokens burn. Nothing to claim."],
+              ].map(([n,t,d],i)=>(
+                <div key={n} style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:isMobile?18:28,alignItems:"flex-start"}}>
+                  <div style={{width:isMobile?40:48,height:isMobile?40:48,borderRadius:"50%",border:"1px solid rgba(45, 212, 191, 0.3)",background:"rgba(45, 212, 191, 0.05)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:FM,fontSize:isMobile?12:13,color:C.tealLight,fontWeight:500,flexShrink:0,position:"relative"}}>
+                    {n}
+                    {i<2 && <div style={{position:"absolute",top:"100%",left:"50%",width:1,height:isMobile?30:40,background:`linear-gradient(to bottom, rgba(45, 212, 191, 0.3), transparent)`}} />}
+                  </div>
+                  <div>
+                    <h3 style={{fontSize:isMobile?16:19,fontWeight:500,marginBottom:8,letterSpacing:"-0.01em",color:C.textPrimary,fontFamily:FD}}>{t}</h3>
+                    <p style={{fontSize:isMobile?13:14,color:C.textSecondary,lineHeight:1.65,maxWidth:440,fontFamily:FS}}>{d}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* SECTION 5 — Launch */}
+        <section ref={el=>{chapterRefs.current[4]=el;}} style={{minHeight:"100vh",padding:isMobile?"80px 24px":"140px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+          {isMobile && <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(5, 8, 12, 0.75) 60%, rgba(5, 8, 12, 0.95) 100%)",pointerEvents:"none",zIndex:2}} />}
+          <div style={{margin:"0 auto",maxWidth:720,textAlign:"center",position:"relative",zIndex:5}}>
+            <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
+              <span style={{width:28,height:1,background:"currentColor"}} />
+              Final approach
+              <span style={{width:28,height:1,background:"currentColor"}} />
+            </div>
+            <h2 style={{fontFamily:FD,fontSize:isMobile?"clamp(36px, 9vw, 52px)":"clamp(48px, 6vw, 80px)",fontWeight:200,lineHeight:1.08,letterSpacing:"-0.025em",marginBottom:28,color:C.textPrimary,textAlign:"center"}}>
+              Your orbit starts <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>here</span>.
+            </h2>
+            <p style={{fontSize:isMobile?14:16,lineHeight:1.7,color:C.textSecondary,fontWeight:300,marginBottom:40,maxWidth:520,margin:"0 auto 40px",textAlign:"center",fontFamily:FS}}>
+              Five constellations live today. Three risk tiers. One token per basket.
+            </p>
+            <button onClick={onEnterApp} style={{
+              display:"inline-flex",alignItems:"center",gap:8,
+              padding:isMobile?"14px 26px":"16px 32px",borderRadius:100,
+              fontSize:isMobile?14:15,fontWeight:600,
+              background:`linear-gradient(135deg, ${C.teal} 0%, ${C.tealLight} 100%)`,
+              color:"#000",border:"none",cursor:"pointer",
+              letterSpacing:"0.01em",fontFamily:FD,
+              transition:`all 0.3s ${EASE}`,position:"relative",overflow:"hidden",
+              boxShadow:`0 0 0 1px rgba(45, 212, 191, 0.3), 0 8px 30px rgba(45, 212, 191, 0.3)`,
+            }}
+              onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.transform="translateY(-2px)";(e.currentTarget as HTMLElement).style.boxShadow=`0 0 0 1px rgba(45, 212, 191, 0.5), 0 14px 40px rgba(45, 212, 191, 0.5)`;}}
+              onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.transform="translateY(0)";(e.currentTarget as HTMLElement).style.boxShadow=`0 0 0 1px rgba(45, 212, 191, 0.3), 0 8px 30px rgba(45, 212, 191, 0.3)`;}}
+            >
+              Explore Markets →
+            </button>
+          </div>
+        </section>
+
+        {/* Footer */}
+        <footer style={{padding:isMobile?"24px 20px":"40px 64px",borderTop:"0.5px solid rgba(45, 212, 191, 0.08)",display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:"center",fontFamily:FM,fontSize:isMobile?10:11,color:C.textMuted,letterSpacing:"0.08em",gap:10,position:"relative",zIndex:10,background:"rgba(5, 8, 12, 0.7)",backdropFilter:"blur(12px)",pointerEvents:"auto"}}>
+          <div>SENTHOS © 2025 · STRUCTURED PREDICTIONS</div>
+          <div>SOLANA · v0.1.0</div>
+        </footer>
+
+      </main>
     </div>
   );
 }
 
-type TabId="markets"|"baskets"|"portfolio"|"about"|"detail";
+type TabId="home"|"markets"|"constellations"|"portfolio"|"detail";
 
 export default function App() {
-  const [tab,setTab]=useState<TabId>("markets");
+  const [tab,setTab]=useState<TabId>("home");
   const [selectedBundle,setSelectedBundle]=useState<Bundle|null>(null);
   const [fromTab,setFromTab]=useState("markets");
   const [walletConnected,setWalletConnected]=useState(false);
@@ -1358,12 +1693,13 @@ export default function App() {
     <MobileCtx.Provider value={isMobile}>
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap');
         *{margin:0;padding:0;box-sizing:border-box;}
         body{background:${C.bg};}
         input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
         input[type=range]{accent-color:${C.teal};}
-        ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${C.border};border-radius:2px;}
+        ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:rgba(45, 212, 191, 0.15);border-radius:2px;}
+        ::-webkit-scrollbar-thumb:hover{background:rgba(45, 212, 191, 0.3);}
         @keyframes tickerScroll {
           0% { transform: translateX(0); }
           100% { transform: translateX(-50%); }
@@ -1372,124 +1708,169 @@ export default function App() {
           from { opacity: 0; transform: translateY(2px); }
           to { opacity: 1; transform: translateY(0); }
         }
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateY(-8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes twinkle {
+          0%, 100% { opacity: 0.3; }
+          50% { opacity: 1; }
+        }
+        @keyframes ctaShine {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
       `}</style>
 
-      {/* Mobile overlay backdrop */}
-      {isMobile && sidebarOpen && (
-        <div onClick={()=>setSidebarOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:40,backdropFilter:"blur(2px)"}} />
-      )}
+      {/* Persistent subtle starfield — atmospheric reminder users are "in space" */}
+      <StarfieldBG />
 
-      {/* Mobile top bar */}
-      {isMobile && (
-        <div style={{position:"fixed",top:0,left:0,right:0,height:56,background:C.surface,borderBottom:`0.5px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",zIndex:30}}>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <img src="/senthos_appicon_256_full.png" alt="Senthos" style={{width:28,height:28,display:"block",borderRadius:6}} />
-            <div style={{fontSize:17,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.1em"}}>SENTHOS</div>
-          </div>
-          <button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{background:"none",border:`0.5px solid ${C.border}`,borderRadius:8,padding:"9px 14px",cursor:"pointer",color:C.textSecondary,fontSize:20,lineHeight:1,display:"flex",alignItems:"center",gap:6}}>
-            {sidebarOpen ? "✕" : "☰"}
-          </button>
+      {/* Top Nav — sticky, blurred, all-screens */}
+      <nav style={{
+        position:"fixed",top:0,left:0,right:0,zIndex:100,
+        padding: isMobile ? "14px 18px" : "16px 28px",
+        display:"flex",alignItems:"center",justifyContent:"space-between",
+        backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
+        background:"rgba(5, 8, 12, 0.65)",
+        borderBottom:`0.5px solid ${C.border}`,
+      }}>
+        {/* Logo — clickable, returns home */}
+        <div onClick={()=>{setTab("home");if(isMobile)setSidebarOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
+          <img src="/senthos_full.png" alt="Senthos" style={{width:isMobile?26:30,height:isMobile?26:30,display:"block",flexShrink:0}} />
+          <div style={{fontSize:isMobile?13:15,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.12em"}}>SENTHOS</div>
         </div>
-      )}
 
-      <div style={{display:"flex",minHeight:"100vh",background:C.bg}}>
-        <div style={{
-          width:220,
-          background:C.surface,
-          borderRight:`0.5px solid ${C.border}`,
-          padding:"24px 12px",
-          display:"flex",
-          flexDirection:"column",
-          flexShrink:0,
-          // Desktop: sticky sidebar. Mobile: fixed overlay sliding in from left
-          ...(isMobile ? {
-            position:"fixed",
-            top:0,
-            left:0,
-            height:"100vh",
-            zIndex:50,
-            transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)",
-            transition:`transform 0.3s ${EASE}`,
-            overflowY:"auto",
-          } : {
-            position:"sticky",
-            top:0,
-            height:"100vh",
-            overflowY:"auto",
-          })
-        }}>
-          <div style={{padding:"0 10px",marginBottom:32,display:"flex",alignItems:"center",gap:10}}>
-            <img src="/senthos_full.png" alt="Senthos" style={{width:38,height:38,display:"block",flexShrink:0}} />
-            <div>
-              <div style={{fontSize:18,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.08em",lineHeight:1}}>SENTHOS</div>
-              <div style={{fontSize:9,color:C.textMuted,fontFamily:FS,marginTop:4,letterSpacing:"0.06em"}}>STRUCTURED PREDICTIONS</div>
+        {/* Center: tab pills (desktop only) */}
+        {!isMobile && (
+          <ul style={{display:"flex",gap:4,listStyle:"none",margin:0,padding:0}}>
+            {[
+              {id:"home",label:"Home"},
+              {id:"markets",label:"Markets"},
+              {id:"constellations",label:"Constellations"},
+              {id:"portfolio",label:"Portfolio"},
+            ].map(n=>{
+              const isActive = tab===n.id || (tab==="detail" && fromTab===n.id);
+              return (
+                <li key={n.id}>
+                  <button onClick={()=>setTab(n.id as TabId)} style={{
+                    background: isActive ? "rgba(45, 212, 191, 0.1)" : "transparent",
+                    color: isActive ? C.tealLight : C.textSecondary,
+                    border:"none",padding:"8px 16px",borderRadius:100,
+                    fontSize:13,fontWeight:500,fontFamily:FD,letterSpacing:"0.01em",
+                    cursor:"pointer",transition:`all 0.3s ${EASE}`,
+                  }}
+                    onMouseEnter={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.color=C.textPrimary;(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.06)";}}}
+                    onMouseLeave={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.color=C.textSecondary;(e.currentTarget as HTMLElement).style.background="transparent";}}}
+                  >{n.label}</button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {/* Right: demo pill + wallet */}
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          {!isMobile && demoMode && (
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderRadius:100,background:"rgba(45, 212, 191, 0.08)",border:`0.5px solid rgba(45, 212, 191, 0.25)`}}>
+              <div style={{width:5,height:5,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 8px ${C.tealLight}`}} />
+              <span style={{fontSize:11,color:C.tealLight,fontFamily:FM,letterSpacing:"0.08em",fontWeight:500}}>DEMO</span>
+              <span style={{fontSize:11,color:C.textSecondary,fontFamily:FM}}>${demoUsdc.toFixed(0)}</span>
+              <button onClick={()=>setShowResetConfirm(true)} style={{background:"none",border:"none",color:C.textMuted,fontSize:10,fontFamily:FM,cursor:"pointer",letterSpacing:"0.08em",padding:0,marginLeft:2}}
+                onMouseEnter={e=>(e.currentTarget as HTMLElement).style.color=C.textSecondary}
+                onMouseLeave={e=>(e.currentTarget as HTMLElement).style.color=C.textMuted}
+              >↻</button>
             </div>
-          </div>
-          <div style={{display:"flex",flexDirection:"column",gap:2,flex:1}}>
-            {[{id:"markets",label:"Markets"},{id:"baskets",label:"Baskets"},{id:"portfolio",label:"Portfolio"},{id:"about",label:"About"}].map(n=>(
-              <NavItem key={n.id} label={n.label} active={tab===n.id||(tab==="detail"&&fromTab===n.id)} onClick={()=>{setTab(n.id as TabId);if(isMobile)setSidebarOpen(false);}} />
-            ))}
-          </div>
-
-          <div style={{borderTop:`0.5px solid ${C.border}`,paddingTop:14,marginTop:14}}>
-            <div style={{padding:"0 10px 10px"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <span style={{fontSize:11,color:C.textSecondary,fontFamily:FS,fontWeight:500,letterSpacing:"0.04em"}}>Demo mode</span>
-                <button onClick={()=>setDemoMode(!demoMode)} style={{width:32,height:18,borderRadius:9,border:"none",background:demoMode?C.teal:C.border,position:"relative",cursor:"pointer",transition:`background 0.3s ${EASE}`,padding:0}}>
-                  <div style={{position:"absolute",top:2,left:demoMode?16:2,width:14,height:14,borderRadius:"50%",background:"#fff",transition:`left 0.3s ${EASE}`}} />
-                </button>
-              </div>
-              {demoMode ? (
-                <>
-                  <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,lineHeight:1.5,marginBottom:10}}>
-                    <span style={{color:C.teal,fontWeight:600}}>${demoUsdc.toFixed(0)}</span> USDC · zero fees
-                  </div>
-                  <button onClick={()=>setShowResetConfirm(true)} style={{width:"100%",padding:"6px 0",borderRadius:6,border:`0.5px solid ${C.border}`,background:"transparent",color:C.textMuted,fontSize:10,fontFamily:FS,cursor:"pointer",letterSpacing:"0.06em",transition:`all 0.2s ${EASE}`}}
-                    onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color=C.textSecondary;(e.currentTarget as HTMLElement).style.borderColor=C.borderHover;}}
-                    onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color=C.textMuted;(e.currentTarget as HTMLElement).style.borderColor=C.border;}}
-                  >
-                    RESET DEMO
-                  </button>
-                </>
-              ) : (
-                <div style={{fontSize:10,color:C.textMuted,fontFamily:FS,lineHeight:1.5}}>
-                  Using example wallet
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div style={{borderTop:`0.5px solid ${C.border}`,paddingTop:14}}>
-            {walletConnected?(
-              <div style={{padding:"8px 10px",borderRadius:8,background:C.tealBg,border:`0.5px solid ${C.teal}44`,display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:28,height:28,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#000",flexShrink:0}}>Ph</div>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:12,fontWeight:500,color:C.textPrimary,fontFamily:FS}}>7xK9...mR4p</div>
-                  <div style={{fontSize:10,color:C.textSecondary,fontFamily:FS,marginTop:1}}>Phantom · devnet</div>
-                </div>
-                <div style={{width:6,height:6,borderRadius:"50%",background:C.green,flexShrink:0}} />
-              </div>
-            ):(
-              <button onClick={()=>setShowWalletModal(true)} style={{width:"100%",padding:"10px 0",borderRadius:8,border:`0.5px solid ${C.teal}`,background:"transparent",color:C.teal,fontSize:13,fontWeight:600,fontFamily:FD,cursor:"pointer",transition:`all 0.2s ${EASE}`}}
-                onMouseEnter={e=>(e.currentTarget as HTMLElement).style.background=C.tealBg}
-                onMouseLeave={e=>(e.currentTarget as HTMLElement).style.background="transparent"}
-              >
-                Connect wallet
-              </button>
-            )}
-            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,padding:"0 4px"}}>
+          )}
+          {walletConnected ? (
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderRadius:100,background:C.tealBg,border:`0.5px solid ${C.teal}44`}}>
               <div style={{width:6,height:6,borderRadius:"50%",background:C.green}} />
-              <span style={{fontSize:11,color:C.textMuted,fontFamily:FS}}>Solana devnet</span>
+              <span style={{fontSize:12,color:C.textPrimary,fontFamily:FM}}>7xK9...mR4p</span>
             </div>
+          ) : (
+            <button onClick={()=>setShowWalletModal(true)} style={{
+              display:"inline-flex",alignItems:"center",gap:6,
+              fontSize:isMobile?12:13,fontWeight:600,
+              padding: isMobile?"8px 14px":"10px 18px",
+              borderRadius:100,
+              background:`linear-gradient(135deg, ${C.teal} 0%, ${C.tealLight} 100%)`,
+              color:"#000",border:"none",cursor:"pointer",
+              letterSpacing:"0.01em",fontFamily:FD,
+              transition:`all 0.3s ${EASE}`,position:"relative",overflow:"hidden",
+              boxShadow:`0 0 0 1px rgba(45, 212, 191, 0.3), 0 4px 20px rgba(45, 212, 191, 0.2)`,
+            }}
+              onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.transform="translateY(-1px)";(e.currentTarget as HTMLElement).style.boxShadow=`0 0 0 1px rgba(45, 212, 191, 0.5), 0 8px 30px rgba(45, 212, 191, 0.4)`;}}
+              onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.transform="translateY(0)";(e.currentTarget as HTMLElement).style.boxShadow=`0 0 0 1px rgba(45, 212, 191, 0.3), 0 4px 20px rgba(45, 212, 191, 0.2)`;}}
+            >
+              {isMobile ? "Connect" : "Connect wallet"}
+            </button>
+          )}
+          {isMobile && (
+            <button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{
+              background:"none",border:`0.5px solid ${C.border}`,borderRadius:8,
+              padding:"8px 10px",cursor:"pointer",color:C.textSecondary,
+              fontSize:16,lineHeight:1,
+            }}>{sidebarOpen?"✕":"☰"}</button>
+          )}
+        </div>
+      </nav>
+
+      {/* Mobile tab sheet */}
+      {isMobile && sidebarOpen && (
+        <>
+          <div onClick={()=>setSidebarOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:90,backdropFilter:"blur(2px)"}} />
+          <div style={{
+            position:"fixed",top:58,right:12,left:12,zIndex:95,
+            background:"rgba(13, 19, 28, 0.95)",backdropFilter:"blur(16px)",
+            border:`0.5px solid ${C.border}`,borderRadius:14,
+            padding:"10px 8px",
+            animation:`slideDown 0.25s ${EASE}`,
+            boxShadow:"0 20px 60px rgba(0,0,0,0.5)",
+          }}>
+            {[
+              {id:"home",label:"Home"},
+              {id:"markets",label:"Markets"},
+              {id:"constellations",label:"Constellations"},
+              {id:"portfolio",label:"Portfolio"},
+            ].map(n=>{
+              const isActive = tab===n.id || (tab==="detail" && fromTab===n.id);
+              return (
+                <button key={n.id} onClick={()=>{setTab(n.id as TabId);setSidebarOpen(false);}} style={{
+                  display:"block",width:"100%",textAlign:"left",
+                  padding:"12px 14px",borderRadius:10,border:"none",background:isActive?"rgba(45,212,191,0.08)":"transparent",
+                  color:isActive?C.tealLight:C.textPrimary,
+                  fontSize:14,fontWeight:isActive?600:400,fontFamily:FD,letterSpacing:"0.01em",
+                  cursor:"pointer",marginBottom:2,
+                }}>{n.label}</button>
+              );
+            })}
+            {demoMode && (
+              <div style={{borderTop:`0.5px solid ${C.border}`,marginTop:8,paddingTop:10,padding:"10px 14px 4px"}}>
+                <div style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.08em",marginBottom:6}}>DEMO BALANCE</div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:14,color:C.tealLight,fontFamily:FM,fontWeight:500}}>${demoUsdc.toFixed(0)} USDC</span>
+                  <button onClick={()=>{setShowResetConfirm(true);setSidebarOpen(false);}} style={{background:"none",border:`0.5px solid ${C.border}`,borderRadius:6,padding:"4px 10px",color:C.textMuted,fontSize:10,fontFamily:FM,letterSpacing:"0.08em",cursor:"pointer"}}>RESET</button>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-        <div style={{flex:1,padding: isMobile ? "76px 16px 24px" : "32px 36px",overflowY:"auto"}}>
-          {tab==="markets"&&<MarketsPage onSelect={handleSelect} />}
-          {tab==="baskets"&&<BasketsPage onSelect={handleSelect} />}
-          {tab==="detail"&&selectedBundle&&<DetailPage bundle={selectedBundle} fromTab={fromTab} onBack={handleBack} demoMode={demoMode} demoUsdc={demoUsdc} onDemoDeposit={handleDemoDeposit} onDemoPpnDeposit={handleDemoPpnDeposit} />}
-          {tab==="portfolio"&&<PortfolioPage onSelect={handleSelect} portfolio={activePortfolio} vaultPositions={activeVaults} usdcBalance={activeUsdc} demoMode={demoMode} />}
-          {tab==="about"&&<AboutPage />}
-        </div>
+        </>
+      )}
+
+      {/* Main content — full width, top padding for nav */}
+      <div style={{
+        position:"relative",zIndex:1,
+        minHeight:"100vh",
+        paddingTop: tab==="home" ? 0 : (isMobile ? 70 : 78),
+      }}>
+        {tab==="home" && <LandingPage onEnterApp={()=>setTab("markets")} onNav={(t)=>setTab(t as TabId)} />}
+        {tab!=="home" && (
+          <div style={{maxWidth:1400,margin:"0 auto",padding: isMobile ? "8px 16px 24px" : "16px 36px 32px"}}>
+            {tab==="markets"&&<MarketsPage onSelect={handleSelect} />}
+            {tab==="constellations"&&<ConstellationsPage onSelect={handleSelect} />}
+            {tab==="detail"&&selectedBundle&&<DetailPage bundle={selectedBundle} fromTab={fromTab} onBack={handleBack} demoMode={demoMode} demoUsdc={demoUsdc} onDemoDeposit={handleDemoDeposit} onDemoPpnDeposit={handleDemoPpnDeposit} />}
+            {tab==="portfolio"&&<PortfolioPage onSelect={handleSelect} portfolio={activePortfolio} vaultPositions={activeVaults} usdcBalance={activeUsdc} demoMode={demoMode} />}
+          </div>
+        )}
       </div>
 
       {showWalletModal&&(
