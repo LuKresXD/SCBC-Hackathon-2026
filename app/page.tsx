@@ -1259,7 +1259,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
   const pc2Ref = useRef<HTMLDivElement>(null);
   const pc3Ref = useRef<HTMLDivElement>(null);
   const [activeChapter, setActiveChapter] = useState(0);
-  const chapterRefs = useRef<(HTMLDivElement|null)[]>([]);
+  const chapterRefs = useRef<(HTMLElement|null)[]>([]);
 
   // Scroll-driven orbit rotation
   useEffect(() => {
