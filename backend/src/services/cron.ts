@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { getAllBundles, createNAVSnapshot, getActiveAlertsByBundle, triggerAlert } from '../db/queries';
 import { getLiveNAV, checkAndUpdateResolutions } from './pricing';
+import { metrics } from './metrics';
 
 /**
  * Refresh probabilities for all active bundles.
@@ -8,13 +9,16 @@ import { getLiveNAV, checkAndUpdateResolutions } from './pricing';
  */
 async function refreshAllBundles(): Promise<void> {
   const startTime = Date.now();
+  let cronOk = true;
+  let cronError: string | undefined;
+  let activeBundlesCount = 0;
+  let totalLegsUpdated = 0;
+  let totalNewlyResolved = 0;
 
   try {
     const bundles = await getAllBundles();
     const activeBundles = bundles.filter((b) => b.status === 'active');
-
-    let totalLegsUpdated = 0;
-    let totalNewlyResolved = 0;
+    activeBundlesCount = activeBundles.length;
 
     for (const bundle of activeBundles) {
       try {
@@ -60,10 +64,22 @@ async function refreshAllBundles(): Promise<void> {
 
     const elapsed = Date.now() - startTime;
     console.log(
-      `[cron] Refreshed ${activeBundles.length} bundles, ${totalLegsUpdated} legs updated, ${totalNewlyResolved} newly resolved (${elapsed}ms)`
+      `[cron] Refreshed ${activeBundlesCount} bundles, ${totalLegsUpdated} legs updated, ${totalNewlyResolved} newly resolved (${elapsed}ms)`
     );
   } catch (err) {
+    cronOk = false;
+    cronError = err instanceof Error ? err.message : String(err);
     console.error('[cron] refreshAllBundles failed:', err);
+  } finally {
+    metrics.recordCron({
+      timestamp: Date.now(),
+      duration_ms: Date.now() - startTime,
+      bundles_refreshed: activeBundlesCount,
+      legs_updated: totalLegsUpdated,
+      newly_resolved: totalNewlyResolved,
+      ok: cronOk,
+      error: cronError,
+    });
   }
 }
 

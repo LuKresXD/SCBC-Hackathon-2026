@@ -8,6 +8,15 @@ import {
   getAllLegs,
   getTransactionStats,
 } from '../db/queries';
+import {
+  adminWithdrawFees,
+  getVaultState,
+} from '../services/solana';
+import {
+  finalizeBundleIfReady,
+  initializeOnchainVaultForBundle,
+  resolveLegOnchainMirror,
+} from '../services/onchain-bridge';
 
 const router = Router();
 
@@ -104,6 +113,105 @@ router.get('/transactions', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('GET /api/admin/transactions error:', err);
     res.status(500).json({ error: 'Failed to fetch transactions' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Onchain administration
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/admin/bundles/:id/init-onchain
+ * Initialize the onchain vault (traxis_vault) for an existing Supabase bundle.
+ * Idempotent — if the vault already exists, returns the current addresses.
+ */
+router.post('/bundles/:id/init-onchain', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const bundle = await getBundleById(id);
+    if (!bundle) return res.status(404).json({ error: `Bundle not found: ${id}` });
+
+    const result = await initializeOnchainVaultForBundle(id);
+    if (!result) return res.status(500).json({ error: 'Failed to initialize onchain vault' });
+
+    res.json({ bundle_id: id, ...result });
+  } catch (err) {
+    console.error('POST /api/admin/bundles/:id/init-onchain error:', err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+/**
+ * POST /api/admin/bundles/:id/resolve-leg
+ * Force-resolve a leg onchain (and mirror in DB). For demo / manual overrides
+ * when the webhook or cron hasn't fired yet.
+ * Body: { leg_id, outcome: "won" | "lost" }
+ */
+router.post('/bundles/:id/resolve-leg', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { leg_id, outcome } = req.body as { leg_id: string; outcome: 'won' | 'lost' };
+    if (!leg_id || !outcome) {
+      return res.status(400).json({ error: 'leg_id and outcome are required' });
+    }
+    const sig = await resolveLegOnchainMirror(id, leg_id, outcome);
+    await finalizeBundleIfReady(id);
+    res.json({ bundle_id: id, leg_id, outcome, tx_signature: sig });
+  } catch (err) {
+    console.error('POST /api/admin/bundles/:id/resolve-leg error:', err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+/**
+ * POST /api/admin/bundles/:id/finalize
+ * Manually trigger finalize_vault if all legs are resolved but the auto-path
+ * didn't fire (e.g. a historical cron miss).
+ */
+router.post('/bundles/:id/finalize', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const sig = await finalizeBundleIfReady(id);
+    if (!sig) {
+      return res
+        .status(400)
+        .json({ error: 'Bundle is not ready to finalize (legs unresolved or already finalized)' });
+    }
+    res.json({ bundle_id: id, tx_signature: sig });
+  } catch (err) {
+    console.error('POST /api/admin/bundles/:id/finalize error:', err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+/**
+ * POST /api/admin/bundles/:id/withdraw-fees
+ * Drain residual USDC from the vault to the fee recipient.
+ */
+router.post('/bundles/:id/withdraw-fees', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const sig = await adminWithdrawFees(id);
+    res.json({ bundle_id: id, tx_signature: sig });
+  } catch (err) {
+    console.error('POST /api/admin/bundles/:id/withdraw-fees error:', err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+/**
+ * GET /api/admin/bundles/:id/onchain
+ * Read the on-chain vault state. Useful for judging / debugging.
+ */
+router.get('/bundles/:id/onchain', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const state = await getVaultState(id);
+    if (!state) return res.status(404).json({ error: 'Onchain vault not initialized' });
+    res.json(state);
+  } catch (err) {
+    console.error('GET /api/admin/bundles/:id/onchain error:', err);
+    res.status(500).json({ error: String(err) });
   }
 });
 

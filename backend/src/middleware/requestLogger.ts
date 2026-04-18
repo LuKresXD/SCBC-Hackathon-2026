@@ -8,6 +8,9 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
   // Attach request ID to response header
   res.setHeader('X-Request-Id', requestId);
 
+  // Log request arrival immediately (debug)
+  console.log(`[${requestId}] -> ${req.method} ${req.path}`);
+
   // Log on response finish
   res.on('finish', () => {
     const duration = Date.now() - start;

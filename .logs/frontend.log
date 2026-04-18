@@ -1,0 +1,18 @@
+
+> lukres@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.4 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.8.135:3000
+✓ Ready in 384ms
+
+ GET /app 200 in 179ms (next.js: 91ms, application-code: 88ms)
+ GET /app 200 in 26ms (next.js: 2ms, application-code: 24ms)
+ GET /app 200 in 26ms (next.js: 2ms, application-code: 24ms)
+ GET /app 200 in 41ms (next.js: 6ms, application-code: 35ms)
+ GET / 200 in 495ms (next.js: 64ms, application-code: 431ms)
+ GET /app 200 in 39ms (next.js: 14ms, application-code: 25ms)
+ GET /app 200 in 63ms (next.js: 8ms, application-code: 54ms)
+✓ Compiled in 465ms
+✓ Compiled in 52ms

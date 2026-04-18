@@ -129,6 +129,7 @@ export interface AppConfig {
   port: number;
   supabaseUrl: string;
   supabaseAnonKey: string;
+  supabaseConfigured: boolean; // false when URL/key are placeholders; DB calls short-circuit
   polymarketApiUrl: string;
   structuringFee: number; // 0.005 = 0.5%
 }

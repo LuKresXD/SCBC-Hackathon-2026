@@ -10,9 +10,19 @@ import {
 } from '../db/queries';
 import { getLiveNAV } from '../services/pricing';
 import { calculateNAV, calculateIssuePrice } from '../services/nav';
-import { getMarketProbability } from '../services/polymarket';
+import { getMarketProbability, fetchMarketByConditionId } from '../services/polymarket';
 import { analyzeDiversification } from '../services/analytics';
-import { Bundle, BundleWithLegs } from '../types';
+import {
+  assessBasketRisk,
+  optimizeWeights,
+  LegMetadata,
+} from '../services/correlation';
+import {
+  gateCheckLeg,
+  FilterStage,
+} from '../services/market-filter';
+import { metrics } from '../services/metrics';
+import { Bundle, BundleWithLegs, PolymarketMarket } from '../types';
 import { validate, createBundleSchema } from '../utils/validation';
 
 const router = Router();
@@ -70,7 +80,7 @@ router.get('/', async (req: Request, res: Response) => {
 
 /**
  * GET /api/bundles/name/:name
- * Get bundle by name (e.g. "LK-90-0430").
+ * Get bundle by name (e.g. "STHS-90-0430").
  * Must be defined BEFORE /:id to avoid route conflict.
  */
 router.get('/name/:name', async (req: Request, res: Response) => {
@@ -343,38 +353,151 @@ router.post('/', validate(createBundleSchema), async (req: Request, res: Respons
   try {
     const { name, risk_tier, resolution_date, description, theme, legs } = req.body;
 
-    // Fetch live probabilities for each leg
-    const legProbabilities = await Promise.all(
+    // 1. Enrich legs with live Polymarket metadata (probability, tags, end_date)
+    //    in parallel. Everything feeds into the correlation service.
+    const enriched = await Promise.all(
       legs.map(async (leg: any) => {
-        const prob = await getMarketProbability(leg.market_id);
-        return prob ?? 0.5; // default to 0.5 if fetch fails
-      })
+        const [prob, market] = await Promise.all([
+          getMarketProbability(leg.market_id),
+          fetchMarketByConditionId(leg.market_id).catch(() => null),
+        ]);
+        return {
+          market_id: leg.market_id,
+          question: leg.question,
+          polymarket_url: leg.polymarket_url,
+          user_weight: typeof leg.weight === 'number' ? leg.weight : undefined,
+          probability: prob ?? 0.5,
+          end_date_iso: market?.end_date_iso ?? undefined,
+          tags: [] as string[],
+          market: market as PolymarketMarket | null,
+        };
+      }),
     );
 
-    // Assign equal weights if not specified
-    const defaultWeight = 1 / legs.length;
-    const legWeights = legs.map((leg: any) =>
-      leg.weight !== undefined ? leg.weight : defaultWeight
-    );
+    // 1b. Market-filter gate: run every leg through the bundle-gate
+    //     check. All three gate stages (activity/quality_nlp/time_window)
+    //     run independently so a failure in one doesn't hide failures in
+    //     the others, and the funnel counters see every check. Liquidity
+    //     volume, category, and dedupe are advisory at this level.
+    const GATE_STAGES: FilterStage[] = ['liquidity_floor', 'quality_nlp', 'time_window'];
+    const gateFailures: Array<{ market_id: string; stage: FilterStage; reasons: string[] }> = [];
+    for (const e of enriched) {
+      if (!e.market) {
+        gateFailures.push({
+          market_id: e.market_id,
+          stage: 'liquidity_floor',
+          reasons: ['market not found on Polymarket'],
+        });
+        continue;
+      }
 
-    // Calculate issue price from legs
-    const issueLegs = legs.map((leg: any, i: number) => ({
-      probability: legProbabilities[i],
-      weight: legWeights[i],
+      const question = e.question || e.market.question;
+      const { record } = gateCheckLeg(e.market, question);
+
+      // Record every stage as "entered" since gateCheckLeg does not short-circuit.
+      const stageCount = (stage: FilterStage): number => {
+        const s = record.stages.find((x) => x.stage === stage);
+        return s && !s.passed ? 1 : 0;
+      };
+      metrics.recordFilterRun({
+        timestamp: Date.now(),
+        source: 'bundle_gate' as const,
+        input_count: 1,
+        kept_count: record.droppedAt === null ? 1 : 0,
+        rejected_count: record.droppedAt === null ? 0 : 1,
+        per_stage: {
+          liquidity_floor: { entered: 1, rejected: stageCount('liquidity_floor') },
+          quality_nlp: { entered: 1, rejected: stageCount('quality_nlp') },
+          time_window: { entered: 1, rejected: stageCount('time_window') },
+          category_classify: { entered: 0, rejected: 0 },
+          diversity_prefilter: { entered: 0, rejected: 0 },
+        },
+      });
+
+      // Collect every failing gate stage (may be more than one)
+      for (const s of record.stages) {
+        if (!s.passed && GATE_STAGES.includes(s.stage)) {
+          gateFailures.push({
+            market_id: e.market_id,
+            stage: s.stage,
+            reasons: s.reasons,
+          });
+        }
+      }
+    }
+    if (gateFailures.length > 0) {
+      return res.status(422).json({
+        error: 'One or more legs rejected by market-filter gate',
+        failures: gateFailures,
+        gate_stages: GATE_STAGES,
+      });
+    }
+
+    // 2. Build LegMetadata[] for the correlation service.
+    const legMetadata: LegMetadata[] = enriched.map((e) => ({
+      id: e.market_id,
+      question: e.question,
+      end_date_iso: e.end_date_iso,
+      probability: e.probability,
+      tags: e.tags,
     }));
+
+    // 3. Run the correlation engine. If the caller supplied weights we
+    //    respect them but still assess risk; otherwise the model picks.
+    const userSupplied = enriched.every((e) => e.user_weight !== undefined);
+    const modelResult = optimizeWeights(legMetadata);
+    const finalWeights = userSupplied
+      ? enriched.map((e) => e.user_weight as number)
+      : modelResult.weights;
+
+    // 4. VaR guardrail: reject baskets whose projected tail risk exceeds the
+    //    audited envelope. Record the attempt on the metrics ring buffer
+    //    either way so the monitor shows rejection attempts.
+    const risk = assessBasketRisk(legMetadata, finalWeights);
+    metrics.recordModelUsage({
+      timestamp: Date.now(),
+      bundle_name: name,
+      leg_count: legs.length,
+      internal_corr: risk.internal_corr_mean,
+      cvar_99_projected: risk.cvar_99_projected,
+      accepted: risk.accepted,
+      reason: risk.reason,
+      model_version: modelResult.model_version,
+    });
+
+    if (!risk.accepted) {
+      return res.status(422).json({
+        error: 'Bundle rejected by correlation model risk gate',
+        detail: risk.reason,
+        projected: {
+          var_95: risk.var_95_projected,
+          var_99: risk.var_99_projected,
+          cvar_99: risk.cvar_99_projected,
+          internal_corr_mean: risk.internal_corr_mean,
+        },
+        audited_envelope: {
+          cvar_99: risk.audited_cvar_99,
+          tolerance_pct: 15,
+        },
+        model_version: modelResult.model_version,
+      });
+    }
+
+    // 5. Calculate issue price using the model weights + live probabilities.
     const issuePrice = calculateIssuePrice(
-      issueLegs.map((l: { probability: number; weight: number }, i: number) => ({
-        ...l,
+      enriched.map((e, i) => ({
         id: '',
         bundle_id: '',
-        market_id: legs[i].market_id,
-        question: legs[i].question,
+        market_id: e.market_id,
+        question: e.question,
+        probability: e.probability,
+        weight: finalWeights[i],
         status: 'active' as const,
         created_at: '',
-      }))
+      })),
     );
 
-    // Create bundle
+    // 6. Persist the bundle + legs.
     const bundle = await createBundle({
       name,
       risk_tier,
@@ -383,36 +506,55 @@ router.post('/', validate(createBundleSchema), async (req: Request, res: Respons
       description: description || undefined,
       theme: theme || undefined,
     });
+    if (!bundle) return res.status(500).json({ error: 'Failed to create bundle' });
 
-    if (!bundle) {
-      return res.status(500).json({ error: 'Failed to create bundle' });
-    }
-
-    // Create legs
     const createdLegs = await Promise.all(
-      legs.map(async (leg: any, i: number) => {
-        const created = await createLeg({
+      enriched.map(async (e, i) => {
+        return createLeg({
           bundle_id: bundle.id,
-          market_id: leg.market_id,
-          question: leg.question,
-          probability: legProbabilities[i],
-          weight: legWeights[i],
-          polymarket_url: leg.polymarket_url || undefined,
+          market_id: e.market_id,
+          question: e.question,
+          probability: e.probability,
+          weight: finalWeights[i],
+          polymarket_url: e.polymarket_url || undefined,
           resolution_value: undefined,
         });
-        return created;
-      })
+      }),
     );
-
-    const validLegs = createdLegs.filter((l) => l !== null);
+    const validLegs = createdLegs.filter((l): l is NonNullable<typeof l> => l !== null);
     const navResult = calculateNAV(validLegs, bundle.id);
 
-    const result: BundleWithLegs = {
+    const result: BundleWithLegs & {
+      model: {
+        version: string;
+        strategy: string;
+        internal_corr_mean: number;
+        used_model_weights: boolean;
+        risk: {
+          var_95_projected: number;
+          var_99_projected: number;
+          cvar_99_projected: number;
+          audited_cvar_99: number;
+        };
+      };
+    } = {
       ...bundle,
       legs: validLegs,
       nav: navResult.nav,
       num_legs: validLegs.length,
       resolved_legs: 0,
+      model: {
+        version: modelResult.model_version,
+        strategy: modelResult.strategy,
+        internal_corr_mean: risk.internal_corr_mean,
+        used_model_weights: !userSupplied,
+        risk: {
+          var_95_projected: risk.var_95_projected,
+          var_99_projected: risk.var_99_projected,
+          cvar_99_projected: risk.cvar_99_projected,
+          audited_cvar_99: risk.audited_cvar_99,
+        },
+      },
     };
 
     res.status(201).json(result);

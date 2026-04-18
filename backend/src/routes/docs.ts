@@ -3,7 +3,7 @@ import { Router, Request, Response } from 'express';
 const router = Router();
 
 const apiDocs = {
-  name: 'LuKres API',
+  name: 'Senthos / Traxis API',
   version: '1.0.0',
   description: 'Structured Prediction Market Products on Solana',
   base_url: '/api',
@@ -34,7 +34,7 @@ const apiDocs = {
     {
       method: 'GET',
       path: '/api/bundles/name/:name',
-      description: 'Get bundle by name (e.g. LK-90-0430). Includes legs and NAV.',
+      description: 'Get bundle by name (e.g. STHS-90-0430). Includes legs and NAV.',
       response: 'BundleWithLegs',
     },
     {
@@ -67,7 +67,7 @@ const apiDocs = {
       path: '/api/bundles',
       description: 'Create a new bundle with legs. Fetches live Polymarket probabilities, calculates issue price, assigns equal weights if not specified.',
       body: {
-        name: 'string (required) - e.g. LK-90-0430',
+        name: 'string (required) - e.g. STHS-90-0430',
         risk_tier: 'number (required) - 90 | 70 | 50',
         resolution_date: 'string (required) - ISO date',
         description: 'string (optional)',
@@ -333,6 +333,32 @@ const apiDocs = {
       path: '/api/alerts/:alertId',
       description: 'Delete a price alert by ID.',
       response: '{ deleted: true, alert_id: string }',
+    },
+    // On-chain
+    {
+      method: 'GET',
+      path: '/api/onchain/status',
+      description: 'Probes the Traxis vault and PPN programs on Solana devnet. Returns cluster slot/epoch plus per-program lamports, executable flag, owner (BPF upgradeable loader), and data size.',
+      response: '{ cluster, rpc_url, slot, epoch, programs: { vault: { program_id, deployed, executable, owner, lamports, data_size, latency_ms }, ppn: {...} }, total_latency_ms, timestamp }',
+    },
+    // ML model deliverables
+    {
+      method: 'GET',
+      path: '/api/ml/health',
+      description: 'Reports whether the traxis-correlation-deliverables folder is present and lists the files it contains.',
+      response: '{ status: "ok" | "missing", root?, file_count?, files? }',
+    },
+    {
+      method: 'GET',
+      path: '/api/ml/metrics',
+      description: 'Returns the final audit + walk-forward + Monte Carlo metrics for the Traxis correlation model (classifier precision, p-value, VaR, CVaR, etc.).',
+      response: '{ model, execution_status, all_checks_passed, metrics: {...}, artifacts: { summary, walkforward_step16, monte_carlo_step14, model_metrics_step12 } }',
+    },
+    {
+      method: 'GET',
+      path: '/api/ml/artifact/:name',
+      description: 'Serve a specific ML JSON artifact by filename. Restricted to .json files in the deliverables folder.',
+      response: 'Raw JSON artifact content',
     },
   ],
 };

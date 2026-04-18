@@ -1,0 +1,274 @@
+
+> lukres-backend@1.0.0 dev
+> tsx watch src/index.ts
+
+[config] Supabase credentials are missing or placeholder  -  DB queries will short-circuit and return empty. Set SUPABASE_URL + SUPABASE_ANON_KEY in backend/.env to enable full functionality.
+Senthos/Traxis backend running on port 3001
+[cron] Price refresh cron scheduled (every 2 minutes)
+Monitor server running on http://localhost:3002
+[94466676] -> POST /api/bundles
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa1
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa1
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa2
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa3
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa6
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa5
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa4
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa8
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa6
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa2
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa3
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa5
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa4
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa8
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa7
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xa7
+[94466676] POST / 500 802ms
+[d40dfcde] -> POST /api/bundles
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xc1
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xc2
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xc3
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xc2
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xc3
+Polymarket API 422: https://gamma-api.polymarket.com/markets/0xc1
+[d40dfcde] POST / 422 248ms
+[dc9de0e8] -> GET /api/metrics
+[dc9de0e8] GET / 200 148ms
+[27f44ace] -> GET /api/markets
+[27f44ace] GET / 200 185ms
+[a562032d] -> GET /api/markets
+[a562032d] GET / 200 75ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[f97c5c1c] -> GET /api/markets
+[f97c5c1c] GET / 200 102ms
+[36996aaf] -> GET /api/markets
+[36996aaf] GET / 200 100ms
+[9a286edd] -> GET /api/markets
+[9a286edd] GET / 200 216ms
+[ea83bf6e] -> GET /api/markets
+[ea83bf6e] GET / 200 72ms
+[ae108a13] -> GET /api/markets
+[ae108a13] GET / 200 67ms
+[8e9ac9d2] -> GET /api/markets
+[8e9ac9d2] GET / 200 112ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[79588639] -> GET /api/markets
+[79588639] GET / 200 70ms
+[0b7aed80] -> GET /api/markets
+[0b7aed80] GET / 200 111ms
+[17faf51b] -> GET /api/markets
+[17faf51b] GET / 200 159ms
+[54921194] -> GET /api/markets
+[54921194] GET / 200 75ms
+[2fadaf17] -> GET /api/markets
+[e3084616] -> GET /api/markets
+[e3084616] GET / 200 65ms
+[2fadaf17] GET / 200 69ms
+[da9b9354] -> GET /api/health
+[3e5f6c44] -> GET /api/onchain/status
+[be66f556] -> GET /api/ml/metrics
+[be66f556] GET /metrics 200 3ms
+[2b664563] -> GET /api/markets
+[da9b9354] GET /api/health 200 27ms
+[2b664563] GET / 200 146ms
+[3e5f6c44] GET /status 200 355ms
+[5069f610] -> GET /api/markets
+[5069f610] GET / 200 112ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[3508c166] -> GET /api/markets
+[3508c166] GET / 200 140ms
+[9448fae6] -> GET /api/markets
+[9448fae6] GET / 200 343ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[ee6e8dc3] -> GET /api/markets
+[ee6e8dc3] GET / 200 102ms
+[5a283145] -> GET /api/markets
+[5a283145] GET / 200 85ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[6c360995] -> GET /api/markets
+[6c360995] GET / 200 97ms
+1:57:16 AM [tsx] change in ./src/services/metrics.ts Restarting...
+c[config] Supabase credentials are missing or placeholder  -  DB queries will short-circuit and return empty. Set SUPABASE_URL + SUPABASE_ANON_KEY in backend/.env to enable full functionality.
+Senthos/Traxis backend running on port 3001
+[cron] Price refresh cron scheduled (every 2 minutes)
+Monitor server running on http://localhost:3002
+1:57:44 AM [tsx] change in ./src/routes/markets.ts Restarting...
+c[config] Supabase credentials are missing or placeholder  -  DB queries will short-circuit and return empty. Set SUPABASE_URL + SUPABASE_ANON_KEY in backend/.env to enable full functionality.
+Senthos/Traxis backend running on port 3001
+[cron] Price refresh cron scheduled (every 2 minutes)
+Monitor server running on http://localhost:3002
+[222c77aa] -> GET /api/markets
+[222c77aa] GET / 200 222ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (1ms)
+1:58:15 AM [tsx] change in ./src/routes/bundles.ts Restarting...
+c[config] Supabase credentials are missing or placeholder  -  DB queries will short-circuit and return empty. Set SUPABASE_URL + SUPABASE_ANON_KEY in backend/.env to enable full functionality.
+Senthos/Traxis backend running on port 3001
+[cron] Price refresh cron scheduled (every 2 minutes)
+Monitor server running on http://localhost:3002
+1:58:44 AM [tsx] change in ./src/monitor/server.ts Restarting...
+c[config] Supabase credentials are missing or placeholder  -  DB queries will short-circuit and return empty. Set SUPABASE_URL + SUPABASE_ANON_KEY in backend/.env to enable full functionality.
+Senthos/Traxis backend running on port 3001
+[cron] Price refresh cron scheduled (every 2 minutes)
+Monitor server running on http://localhost:3002
+[e310c347] -> GET /api/markets
+[e310c347] GET / 200 181ms
+[22bb7ff4] -> GET /api/markets
+[22bb7ff4] GET / 200 448ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[a801e896] -> GET /api/markets
+[a801e896] GET / 200 100ms
+2:09:01 AM [tsx] change in ./src/services/market-filter.ts Rerunning...
+c[config] Supabase credentials are missing or placeholder  -  DB queries will short-circuit and return empty. Set SUPABASE_URL + SUPABASE_ANON_KEY in backend/.env to enable full functionality.
+node:events:497
+      throw er; // Unhandled 'error' event
+      ^
+
+Error: listen EADDRINUSE: address already in use :::3001
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at Function.listen (/Users/tharunekambaram/coding-projects/SCBC-Hackathon-2026-combined/backend/node_modules/express/lib/application.js:635:24)
+    at rateLimit (/Users/tharunekambaram/coding-projects/SCBC-Hackathon-2026-combined/backend/src/index.ts:161:5)
+    at Object.<anonymous> (/Users/tharunekambaram/coding-projects/SCBC-Hackathon-2026-combined/backend/src/index.ts:167:16)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (/Users/tharunekambaram/coding-projects/SCBC-Hackathon-2026-combined/backend/node_modules/tsx/dist/register-D46fvsV_.cjs:3:1104)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+Emitted 'error' event on Server instance at:
+    at emitErrorNT (node:net:1976:8)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 3001
+}
+
+Node.js v22.19.0
+2:09:28 AM [tsx] change in ./src/routes/bundles.ts Rerunning...
+c[config] Supabase credentials are missing or placeholder  -  DB queries will short-circuit and return empty. Set SUPABASE_URL + SUPABASE_ANON_KEY in backend/.env to enable full functionality.
+node:events:497
+      throw er; // Unhandled 'error' event
+      ^
+
+Error: listen EADDRINUSE: address already in use :::3001
+    at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+    at listenInCluster (node:net:1997:12)
+    at Server.listen (node:net:2102:7)
+    at Function.listen (/Users/tharunekambaram/coding-projects/SCBC-Hackathon-2026-combined/backend/node_modules/express/lib/application.js:635:24)
+    at rateLimit (/Users/tharunekambaram/coding-projects/SCBC-Hackathon-2026-combined/backend/src/index.ts:161:5)
+    at Object.<anonymous> (/Users/tharunekambaram/coding-projects/SCBC-Hackathon-2026-combined/backend/src/index.ts:167:16)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (/Users/tharunekambaram/coding-projects/SCBC-Hackathon-2026-combined/backend/node_modules/tsx/dist/register-D46fvsV_.cjs:3:1104)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+Emitted 'error' event on Server instance at:
+    at emitErrorNT (node:net:1976:8)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 3001
+}
+
+Node.js v22.19.0
+2:13:01 AM [tsx] change in ./src/services/nlp.ts Rerunning...
+c[config] Supabase credentials are missing or placeholder  -  DB queries will short-circuit and return empty. Set SUPABASE_URL + SUPABASE_ANON_KEY in backend/.env to enable full functionality.
+Senthos/Traxis backend running on port 3001
+[cron] Price refresh cron scheduled (every 2 minutes)
+Monitor server running on http://localhost:3002
+[4012c2ae] -> GET /api/markets
+[4012c2ae] GET / 200 137ms
+[7bd48ac3] -> GET /api/markets/curated
+[7bd48ac3] GET /curated 200 62ms
+[049433b5] -> GET /api/markets/curated
+[049433b5] GET /curated 200 52ms
+[14a91751] -> GET /api/markets/curated
+[14a91751] GET /curated 400 0ms
+[b098f927] -> GET /api/markets/curated/stats
+[b098f927] GET /curated/stats 200 1ms
+[fc101c7f] -> POST /api/bundles
+[fc101c7f] POST / 422 74ms
+[766ae9ed] -> POST /api/bundles
+[766ae9ed] POST / 422 29ms
+[5b035f6e] -> GET /api/markets/curated/stats
+[5b035f6e] GET /curated/stats 200 0ms
+[9954bad5] -> GET /api/metrics
+[9954bad5] GET / 200 45ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (1ms)
+[be65035d] -> GET /api/markets
+[be65035d] GET / 200 77ms
+[84c8c80a] -> GET /api/markets
+[84c8c80a] GET / 200 167ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[cef27e96] -> GET /api/markets
+[cef27e96] GET / 200 88ms
+[c124c100] -> GET /api/markets
+[c124c100] GET / 200 179ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[44587412] -> GET /api/markets
+[4b97b05e] -> GET /api/markets
+[4b97b05e] GET / 200 79ms
+[44587412] GET / 200 87ms
+[fef0f28f] -> GET /api/markets
+[fef0f28f] GET / 200 108ms
+[4ad9a1bc] -> GET /api/markets
+[4ad9a1bc] GET / 200 112ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[359e9c06] -> GET /api/markets
+[359e9c06] GET / 200 122ms
+[1a5df30d] -> GET /api/markets
+[1a5df30d] GET / 200 87ms
+[8d917411] -> GET /api/markets
+[8d917411] GET / 200 26ms
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (1ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (1ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (1ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (1ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (3ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (1ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (0ms)
+2:46:21 AM [tsx] change in ./src/index.ts Restarting...
+c[config] Supabase credentials are missing or placeholder  -  DB queries will short-circuit and return empty. Set SUPABASE_URL + SUPABASE_ANON_KEY in backend/.env to enable full functionality.
+Senthos/Traxis backend running on port 3001
+[cron] Price refresh cron scheduled (every 2 minutes)
+Monitor server running on http://localhost:3002
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (1ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (1ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (1ms)
+[cron] Starting bundle refresh...
+[cron] Refreshed 0 bundles, 0 legs updated, 0 newly resolved (1ms)
