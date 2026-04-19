@@ -28,10 +28,18 @@ interface GammaEventResponse {
   markets: GammaMarketResponse[];
 }
 
+// Gamma caps per-page at 500. We paginate with offset when more are needed.
+const GAMMA_PAGE_MAX = 500;
+// Browser-style UA — some Polymarket edges 403 default User-Agents.
+const POLY_FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (compatible; senthos-backend/1.0)',
+  'Accept': 'application/json',
+};
+
 async function fetchWithRetry(url: string, retries = 1): Promise<Response | null> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { headers: POLY_FETCH_HEADERS });
       if (response.ok) return response;
       if (response.status >= 500 && attempt < retries) {
         await new Promise((r) => setTimeout(r, 1000));
@@ -87,22 +95,43 @@ function toPolymarketEvent(e: GammaEventResponse): PolymarketEvent {
   };
 }
 
+/**
+ * Fetch Polymarket markets. When the caller asks for more than Gamma's
+ * per-page cap (500), we paginate via `offset` until we have enough.
+ *
+ * Callers can pass limit up to ~5000 to retrieve the full live universe.
+ */
 export async function fetchMarkets(params: {
   limit?: number;
   active?: boolean;
   closed?: boolean;
 }): Promise<PolymarketMarket[]> {
-  const searchParams = new URLSearchParams();
-  if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
-  if (params.active !== undefined) searchParams.set('active', String(params.active));
-  if (params.closed !== undefined) searchParams.set('closed', String(params.closed));
+  const want = params.limit ?? GAMMA_PAGE_MAX;
+  const collected: GammaMarketResponse[] = [];
+  let offset = 0;
 
-  const url = `${GAMMA_API}/markets?${searchParams.toString()}`;
-  const res = await fetchWithRetry(url);
-  if (!res) return [];
+  while (collected.length < want) {
+    const pageSize = Math.min(GAMMA_PAGE_MAX, want - collected.length);
+    const searchParams = new URLSearchParams();
+    searchParams.set('limit', String(pageSize));
+    if (params.active !== undefined) searchParams.set('active', String(params.active));
+    if (params.closed !== undefined) searchParams.set('closed', String(params.closed));
+    searchParams.set('offset', String(offset));
 
-  const data = (await res.json()) as GammaMarketResponse[];
-  return data.map(toPolymarketMarket);
+    const url = `${GAMMA_API}/markets?${searchParams.toString()}`;
+    const res = await fetchWithRetry(url);
+    if (!res) break;
+
+    const batch = (await res.json()) as GammaMarketResponse[];
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    collected.push(...batch);
+
+    // Gamma signalled end-of-results by returning fewer than requested.
+    if (batch.length < pageSize) break;
+    offset += batch.length;
+  }
+
+  return collected.map(toPolymarketMarket);
 }
 
 export async function fetchMarketByConditionId(

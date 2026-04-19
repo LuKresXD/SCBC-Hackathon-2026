@@ -4,7 +4,6 @@ import React, { useEffect, useState } from "react";
 import { Header, PageFrame } from "../_components/Header";
 import { MetricTile } from "../_components/charts";
 import { C, FS, FD, BACKEND_URL } from "../_lib/tokens";
-import { useSandbox } from "../_lib/demo-state";
 
 type Market = { id: string; question: string; condition_id: string; yes_probability: number | null; volume_usd: number; category: string };
 
@@ -18,12 +17,8 @@ type AnalyzeResp = {
 };
 
 export default function HedgePage() {
-  const { dispatch } = useSandbox();
   const [markets, setMarkets] = useState<Market[]>([]);
   const [legs, setLegs] = useState<LegDraft[]>([]);
-  // `analyzeResult` holds the latest fetch outcome; `analyze` below is a
-  // derived value so a basket with <2 legs always displays as unanalysed
-  // without triggering a setState cascade inside useEffect.
   const [analyzeResult, setAnalyzeResult] = useState<AnalyzeResp | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const analyze = legs.length >= 2 ? analyzeResult : null;
@@ -36,7 +31,7 @@ export default function HedgePage() {
   }, []);
 
   useEffect(() => {
-    if (legs.length < 2) return; // derived `analyze` already returns null
+    if (legs.length < 2) return;
     let cancelled = false;
     fetch(`${BACKEND_URL}/api/hedge/analyze`, {
       method: "POST",
@@ -73,7 +68,7 @@ export default function HedgePage() {
 
   return (
     <>
-      <Header onResetClick={() => dispatch({ type: "reset" })} />
+      <Header />
       <PageFrame>
         <div style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: C.textPrimary, fontFamily: FD, marginBottom: 4, letterSpacing: "-0.01em" }}>Hedge Builder</div>

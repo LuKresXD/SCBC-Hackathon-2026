@@ -5,7 +5,6 @@ import Link from "next/link";
 import { Header, PageFrame } from "./_components/Header";
 import { PulseGauge } from "./_components/charts";
 import { C, FS, FD, FM, EASE, BACKEND_URL, fmtUsd } from "./_lib/tokens";
-import { useSandbox } from "./_lib/demo-state";
 
 type Curated = {
   id: string;
@@ -25,7 +24,6 @@ const PRODUCTS = [
 ];
 
 export default function MarketsPage() {
-  const { dispatch } = useSandbox();
   const [markets, setMarkets] = useState<Curated[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [cat, setCat] = useState<string>("all");
@@ -53,10 +51,8 @@ export default function MarketsPage() {
 
   return (
     <>
-      <Header onResetClick={() => dispatch({ type: "reset" })} />
+      <Header />
       <PageFrame>
-
-        {/* Page header */}
         <div style={{ marginBottom: 32, position: "relative", paddingBottom: 24, borderBottom: "0.5px solid rgba(45, 212, 191, 0.1)" }}>
           <div style={{ position: "absolute", top: 0, right: 0, width: 220, height: 140, background: "radial-gradient(ellipse at top right, rgba(45, 212, 191, 0.1) 0%, transparent 70%)", pointerEvents: "none" }} />
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -73,7 +69,6 @@ export default function MarketsPage() {
           </div>
         </div>
 
-        {/* Product cards */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 36 }}>
           {PRODUCTS.map((p) => (
             <Link
@@ -102,11 +97,8 @@ export default function MarketsPage() {
                 (e.currentTarget as HTMLElement).style.boxShadow = "none";
               }}
             >
-              {/* Top accent */}
               <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: p.color, opacity: 0.8 }} />
-              {/* Corner glow */}
               <div style={{ position: "absolute", top: -50, right: -50, width: 150, height: 150, background: `radial-gradient(circle, ${p.color}25 0%, transparent 65%)`, pointerEvents: "none" }} />
-              {/* Tag */}
               <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 8px", borderRadius: 100, background: p.color + "15", border: `0.5px solid ${p.color}40`, marginBottom: 12 }}>
                 <span style={{ width: 4, height: 4, borderRadius: "50%", background: p.color, boxShadow: `0 0 6px ${p.color}` }} />
                 <span style={{ fontSize: 9, color: p.color, fontFamily: FM, letterSpacing: "0.14em", fontWeight: 500 }}>{p.tag}</span>
@@ -117,7 +109,6 @@ export default function MarketsPage() {
           ))}
         </div>
 
-        {/* Category filters */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
           <span style={{ width: 14, height: 1, background: C.textMuted, opacity: 0.5 }} />
           <span style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.18em", marginRight: 4 }}>FILTER</span>
@@ -145,7 +136,6 @@ export default function MarketsPage() {
           ))}
         </div>
 
-        {/* Market feed */}
         {markets === null && !err && (
           <div style={{ color: C.textMuted, padding: "40px 0", fontSize: 13, fontFamily: FS, textAlign: "center" }}>
             Loading curated markets...

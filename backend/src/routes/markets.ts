@@ -25,8 +25,10 @@ const VALID_CATEGORIES: ReadonlyArray<Category> = [
  */
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const limit = parseInt(req.query.limit as string, 10) || 20;
-    const active = req.query.active !== 'false'; // default true
+    // Clamp to [1, 5000] — fetchMarkets auto-paginates past Gamma's 500/page cap.
+    const rawLimit = parseInt(req.query.limit as string, 10) || 20;
+    const limit = Math.max(1, Math.min(5000, rawLimit));
+    const active = req.query.active !== 'false';
 
     const markets = await fetchMarkets({
       limit,

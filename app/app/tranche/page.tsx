@@ -5,15 +5,13 @@ import { useRouter } from "next/navigation";
 import { Header, PageFrame } from "../_components/Header";
 import { C, FS, FD, EASE, trancheColor, tc } from "../_lib/tokens";
 import { BUNDLES } from "../_lib/bundles";
-import { useSandbox } from "../_lib/demo-state";
 import { quoteTranchesLocal, type TrancheQuote } from "./_quote";
 
 export default function TranchesPage() {
   const router = useRouter();
-  const { dispatch } = useSandbox();
   return (
     <>
-      <Header onResetClick={() => dispatch({ type: "reset" })} />
+      <Header />
       <PageFrame>
         <div style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 28, fontWeight: 700, color: C.textPrimary, fontFamily: FD, marginBottom: 4, letterSpacing: "-0.01em" }}>Tranches</div>
@@ -30,12 +28,14 @@ export default function TranchesPage() {
                 onClick={() => router.push(`/app/tranche/${b.id}`)}
                 style={{
                   background: C.card,
-                  border: `0.5px solid ${C.border}`,
+                  borderTop: `0.5px solid ${C.border}`,
+                  borderRight: `0.5px solid ${C.border}`,
+                  borderBottom: `0.5px solid ${C.border}`,
+                  borderLeft: `3px solid ${tc(b.tier)}`,
                   borderRadius: 14,
                   padding: "18px 20px",
                   cursor: "pointer",
                   transition: `all 0.15s ${EASE}`,
-                  borderLeft: `3px solid ${tc(b.tier)}`,
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>

@@ -1,3 +1,5 @@
+import { WalletProviders } from "./_providers/WalletProviders";
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
@@ -25,7 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           input[type=range] { accent-color: #0d9488; }
         `}</style>
       </head>
-      <body>{children}</body>
+      <body><WalletProviders>{children}</WalletProviders></body>
     </html>
   );
 }

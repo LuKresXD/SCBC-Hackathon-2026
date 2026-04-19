@@ -1771,203 +1771,770 @@ function cameraPath(progress: number) {
   };
 }
 
+/**
+ * Solid planet rendered on a canvas.
+ *
+ * Layers, painted each frame at the planet centre + scroll-driven radius:
+ *   1. Atmospheric halo — large soft teal glow behind the sphere.
+ *   2. Sphere body — radial gradient shaded as a 3D ball (light from top-left).
+ *   3. Terminator wash — cool dark blue on the night side for depth.
+ *   4. Surface texture — rotating procedural blotches clipped to the sphere.
+ *   5. Limb-darkening ring — thin darker edge giving the planet a real rim.
+ *   6. Specular highlight — crisp bloom toward the light source.
+ *   7. Faint rim halo — outer teal line that whispers "atmosphere".
+ */
+function ParticlePlanet({ scrollProgressRef }: { scrollProgressRef: React.MutableRefObject<number> }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Pre-bake surface features as unit-vector positions on a sphere so we
+    // can rotate them around a tilted axis every frame — proper 3D
+    // parallax instead of flat lat/lon stripes.
+    type Feature = {
+      x0: number; y0: number; z0: number; // static unit-sphere coords
+      r: number;                           // size in sphere-radius units
+      tint: string;
+      alpha: number;
+      driftSpeed: number;                  // scales with spin
+    };
+    const makeFeature = (size: [number, number], alpha: [number, number], drift: [number, number], tint: string): Feature => {
+      const lon = Math.random() * Math.PI * 2;
+      const lat = (Math.random() - 0.5) * Math.PI * 0.92;
+      return {
+        x0: Math.cos(lat) * Math.sin(lon),
+        y0: Math.sin(lat),
+        z0: Math.cos(lat) * Math.cos(lon),
+        r: size[0] + Math.random() * (size[1] - size[0]),
+        tint,
+        alpha: alpha[0] + Math.random() * (alpha[1] - alpha[0]),
+        driftSpeed: drift[0] + Math.random() * (drift[1] - drift[0]),
+      };
+    };
+    // More + larger continents in two tones gives the body real "land vs.
+    // ocean" contrast so it reads as a planet rather than a flat sphere.
+    const CONTINENTS: Feature[] = [
+      ...Array.from({ length: 14 }, () =>
+        makeFeature([0.28, 0.55], [0.7, 0.92], [1, 1], "#021412")
+      ),
+      ...Array.from({ length: 12 }, () =>
+        makeFeature([0.18, 0.34], [0.55, 0.78], [1, 1], "#0e7a70")
+      ),
+    ];
+    const CLOUDS: Feature[] = Array.from({ length: 14 }, () =>
+      makeFeature([0.08, 0.16], [0.18, 0.32], [1.2, 1.6], "#dffaf5")
+    );
+
+    let dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    let W = 0, H = 0;
+    const resize = () => {
+      dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      W = canvas.clientWidth;
+      H = canvas.clientHeight;
+      canvas.width = Math.floor(W * dpr);
+      canvas.height = Math.floor(H * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+
+    let raf = 0;
+    const t0 = performance.now();
+
+    const render = () => {
+      const now = performance.now();
+      const dt = (now - t0) / 1000;
+      const progress = Math.max(0, Math.min(1, scrollProgressRef.current));
+
+      ctx.clearRect(0, 0, W, H);
+
+      const minDim = Math.min(W, H);
+      // Sphere sits centered in the lower portion of the viewport with
+      // breathing room above and below — doesn't graze the footer.
+      const R = minDim * (0.26 + progress * 0.2);
+      const cx = W / 2;
+      const cy = H * 0.66;
+
+      // Spin around the tilted axis. Axial tilt stays fixed per frame — it's
+      // the rotation that sells the 3D effect, not the tilt itself.
+      const tilt = 0.38; // ~22° axial tilt, Earth-ish
+      const cosT = Math.cos(tilt), sinT = Math.sin(tilt);
+      const spin = dt * 0.22 + progress * 0.6;
+
+      // ---- 1. Atmospheric halo ----
+      const haloR = R * 2.4;
+      const halo = ctx.createRadialGradient(cx, cy, R * 0.95, cx, cy, haloR);
+      halo.addColorStop(0, "rgba(45, 212, 191, 0.22)");
+      halo.addColorStop(0.35, "rgba(45, 212, 191, 0.08)");
+      halo.addColorStop(1, "rgba(45, 212, 191, 0)");
+      ctx.fillStyle = halo;
+      ctx.fillRect(cx - haloR, cy - haloR, haloR * 2, haloR * 2);
+
+      // ---- 2. Sphere body (lit side: top-left) ----
+      const lightX = cx - R * 0.35;
+      const lightY = cy - R * 0.4;
+      const body = ctx.createRadialGradient(lightX, lightY, R * 0.05, cx, cy, R);
+      body.addColorStop(0, "#a5f3fc");
+      body.addColorStop(0.15, "#2dd4bf");
+      body.addColorStop(0.45, "#0d9488");
+      body.addColorStop(0.75, "#0a3a3a");
+      body.addColorStop(1, "#05080c");
+      ctx.fillStyle = body;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Clip subsequent drawing to the sphere so textures stay inside it.
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.clip();
+
+      // ---- 3. Terminator (dark side wash) ----
+      const termGrad = ctx.createLinearGradient(
+        cx - R * 0.5, cy - R * 0.5,
+        cx + R * 0.9, cy + R * 0.9,
+      );
+      termGrad.addColorStop(0, "rgba(0, 0, 0, 0)");
+      termGrad.addColorStop(0.55, "rgba(0, 0, 0, 0.15)");
+      termGrad.addColorStop(1, "rgba(0, 0, 0, 0.75)");
+      ctx.fillStyle = termGrad;
+      ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+
+      // Draws a feature using a proper tilted-axis 3D rotation so its path
+      // traces an ellipse across the sphere (foreshortened at the limbs).
+      const drawFeature = (f: Feature, extra = 0) => {
+        const s = spin * f.driftSpeed + extra;
+        const cS = Math.cos(s), sS = Math.sin(s);
+        // 1. Spin around Y axis (the planet's own rotation)
+        const x1 = f.x0 * cS + f.z0 * sS;
+        const y1 = f.y0;
+        const z1 = -f.x0 * sS + f.z0 * cS;
+        // 2. Axial tilt around Z axis (north pole leans)
+        const x2 = x1 * cosT - y1 * sinT;
+        const y2 = x1 * sinT + y1 * cosT;
+        const z2 = z1;
+        // Cull back hemisphere
+        if (z2 <= 0) return;
+        const sx = cx + x2 * R;
+        const sy = cy + y2 * R;
+        // Foreshortening + soft edge fade as it reaches the limb.
+        const edge = Math.min(1, z2 * 2.2);
+        const screenR = f.r * R * (0.35 + 0.65 * z2);
+        const a = f.alpha * edge;
+        const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, screenR);
+        const hex = (v: number) => Math.max(0, Math.min(255, Math.floor(v * 255))).toString(16).padStart(2, "0");
+        grad.addColorStop(0, f.tint + hex(a));
+        grad.addColorStop(0.7, f.tint + hex(a * 0.45));
+        grad.addColorStop(1, f.tint + "00");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(sx, sy, screenR, 0, Math.PI * 2);
+        ctx.fill();
+      };
+
+      // ---- 4a. Continents (dark landmasses) ----
+      for (const c of CONTINENTS) drawFeature(c);
+
+      // ---- 4b. Clouds (drift a touch faster than the surface) ----
+      for (const c of CLOUDS) drawFeature(c, dt * 0.05);
+
+      // ---- 4c. Polar ice caps ----
+      // North pole (top of sphere)
+      const northCap = ctx.createRadialGradient(cx, cy - R * 0.85, 0, cx, cy - R * 0.55, R * 0.55);
+      northCap.addColorStop(0, "rgba(233, 252, 255, 0.78)");
+      northCap.addColorStop(0.6, "rgba(180, 235, 245, 0.25)");
+      northCap.addColorStop(1, "rgba(233, 252, 255, 0)");
+      ctx.fillStyle = northCap;
+      ctx.fillRect(cx - R, cy - R, R * 2, R * 0.9);
+      // South pole (bottom)
+      const southCap = ctx.createRadialGradient(cx, cy + R * 0.85, 0, cx, cy + R * 0.55, R * 0.55);
+      southCap.addColorStop(0, "rgba(233, 252, 255, 0.55)");
+      southCap.addColorStop(0.6, "rgba(180, 235, 245, 0.18)");
+      southCap.addColorStop(1, "rgba(233, 252, 255, 0)");
+      ctx.fillStyle = southCap;
+      ctx.fillRect(cx - R, cy + R * 0.1, R * 2, R * 0.9);
+
+      // ---- 5. Limb darkening: subtle dark ring just inside the edge ----
+      const limb = ctx.createRadialGradient(cx, cy, R * 0.82, cx, cy, R);
+      limb.addColorStop(0, "rgba(0, 0, 0, 0)");
+      limb.addColorStop(1, "rgba(0, 0, 0, 0.5)");
+      ctx.fillStyle = limb;
+      ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+
+      // ---- 6. Specular highlight ----
+      const specR = R * 0.45;
+      const specX = cx - R * 0.3;
+      const specY = cy - R * 0.35;
+      const spec = ctx.createRadialGradient(specX, specY, 0, specX, specY, specR);
+      spec.addColorStop(0, "rgba(255, 255, 255, 0.35)");
+      spec.addColorStop(0.4, "rgba(165, 243, 252, 0.12)");
+      spec.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = spec;
+      ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+
+      ctx.restore();
+
+      // ---- 7. Outer rim halo (atmosphere) ----
+      ctx.strokeStyle = "rgba(165, 243, 252, 0.35)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R + 1, 0, Math.PI * 2);
+      ctx.stroke();
+
+      raf = requestAnimationFrame(render);
+    };
+    raf = requestAnimationFrame(render);
+
+    return () => {
+      window.removeEventListener("resize", resize);
+      cancelAnimationFrame(raf);
+    };
+  }, [scrollProgressRef]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+      }}
+    />
+  );
+}
+
+/**
+ * Occasional tiny meteor streaks across the whole viewport. One spawns
+ * every 10–15 seconds, lasts about a second, and is intentionally small so
+ * it reads as ambience instead of a UI element.
+ */
+function ShootingStars() {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = ref.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d"); if (!ctx) return;
+    let w = window.innerWidth, h = window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const resize = () => {
+      w = window.innerWidth; h = window.innerHeight;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      canvas.style.width = w + "px"; canvas.style.height = h + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+
+    type Star = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number };
+    const stars: Star[] = [];
+    let timer: number | null = null;
+
+    const spawn = () => {
+      const fromLeft = Math.random() < 0.5;
+      const speed = 7 + Math.random() * 3;
+      const slope = 0.35 + Math.random() * 0.25;
+      stars.push({
+        x: fromLeft ? -40 : w + 40,
+        y: Math.random() * h * 0.5,
+        vx: (fromLeft ? 1 : -1) * speed,
+        vy: slope * speed,
+        life: 0,
+        maxLife: 90 + Math.random() * 50,
+      });
+    };
+    const schedule = () => {
+      const delay = 10000 + Math.random() * 5000;
+      timer = window.setTimeout(() => { spawn(); schedule(); }, delay);
+    };
+    timer = window.setTimeout(() => { spawn(); schedule(); }, 4000 + Math.random() * 3000);
+
+    let raf = 0;
+    const render = () => {
+      ctx.clearRect(0, 0, w, h);
+      for (let i = stars.length - 1; i >= 0; i--) {
+        const s = stars[i];
+        s.x += s.vx; s.y += s.vy; s.life++;
+        if (s.life > s.maxLife || s.x < -200 || s.x > w + 200 || s.y > h + 200) {
+          stars.splice(i, 1);
+          continue;
+        }
+        const a = Math.min(1, s.life / 8) * Math.max(0, 1 - s.life / s.maxLife);
+        const tx = s.x - s.vx * 4;
+        const ty = s.y - s.vy * 4;
+        const grad = ctx.createLinearGradient(tx, ty, s.x, s.y);
+        grad.addColorStop(0, "rgba(165, 243, 252, 0)");
+        grad.addColorStop(1, `rgba(240, 255, 252, ${a})`);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.1;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(s.x, s.y);
+        ctx.stroke();
+        ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 1.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      raf = requestAnimationFrame(render);
+    };
+    raf = requestAnimationFrame(render);
+
+    return () => {
+      window.removeEventListener("resize", resize);
+      cancelAnimationFrame(raf);
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, []);
+  return (
+    <canvas
+      ref={ref}
+      aria-hidden
+      // Absolute + inset:0 so the canvas fills its parent (Layer A). That
+      // way the layer's scroll-driven opacity also fades the stars out
+      // along with the sphere.
+      style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2 }}
+    />
+  );
+}
+
+/**
+ * Slowly drifting starfield that fills its parent. Designed to live inside
+ * Layer A on the landing so it fades out together with the planet and hero
+ * copy as the user scrolls past the hero (the parent's opacity attenuates
+ * the canvas).
+ */
+function DriftingStars() {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current; if (!c) return;
+    const ctx = c.getContext("2d"); if (!ctx) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    type Star = { x: number; y: number; r: number; vx: number; vy: number; tw: number; speed: number };
+    let stars: Star[] = [];
+    let w = 0, h = 0;
+    const init = () => {
+      w = c.clientWidth; h = c.clientHeight;
+      c.width = Math.floor(w * dpr); c.height = Math.floor(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const count = Math.floor((w * h) / 7500);
+      stars = Array.from({ length: count }, () => ({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        r: Math.random() * 0.9 + 0.25,
+        vx: (Math.random() - 0.5) * 0.10,
+        vy: (Math.random() - 0.5) * 0.06,
+        tw: Math.random() * Math.PI * 2,
+        speed: Math.random() * 0.0028 + 0.0012,
+      }));
+    };
+    init();
+    window.addEventListener("resize", init);
+    let raf = 0;
+    const draw = () => {
+      ctx.clearRect(0, 0, w, h);
+      for (const s of stars) {
+        s.x += s.vx; s.y += s.vy; s.tw += s.speed;
+        if (s.x < -2) s.x = w + 2; else if (s.x > w + 2) s.x = -2;
+        if (s.y < -2) s.y = h + 2; else if (s.y > h + 2) s.y = -2;
+        const a = (Math.sin(s.tw) + 1) / 2 * 0.45 + 0.18;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(220, 235, 250, ${a})`;
+        ctx.fill();
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => {
+      window.removeEventListener("resize", init);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
+  return (
+    <canvas
+      ref={ref}
+      aria-hidden
+      style={{
+        position: "absolute", inset: 0, width: "100%", height: "100%",
+        pointerEvents: "none",
+      }}
+    />
+  );
+}
+
+/** Tiny line-glyph icons used in the footer's social row. Each icon is a
+ * minimal abstract suggestion of the platform (crossed strokes for X, an
+ * angled-bracket motif for GitHub, etc.) so they read as social links
+ * without bundling vendor brand assets. */
+function SocialIcon({ id }: { id: string }) {
+  const p = {
+    width: 14, height: 14, viewBox: "0 0 24 24", fill: "none",
+    stroke: "currentColor", strokeWidth: 1.6,
+    strokeLinecap: "round" as const, strokeLinejoin: "round" as const,
+  };
+  if (id === "twitter") return (
+    <svg {...p}><path d="M5 5l14 14M19 5L5 19" /></svg>
+  );
+  if (id === "github") return (
+    <svg {...p}><path d="M9 17l-3-2 3-3M15 17l3-2-3-3M14 7l-4 12" /></svg>
+  );
+  if (id === "discord") return (
+    <svg {...p}>
+      <path d="M5 6a2 2 0 012-2h10a2 2 0 012 2v9a2 2 0 01-2 2h-5l-4 3v-3H7a2 2 0 01-2-2V6z" />
+      <circle cx="9.5" cy="11" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="14.5" cy="11" r="0.9" fill="currentColor" stroke="none" />
+    </svg>
+  );
+  if (id === "docs") return (
+    <svg {...p}>
+      <path d="M7 4h7l4 4v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z" />
+      <path d="M14 4v4h4M9 13h6M9 17h4" />
+    </svg>
+  );
+  return null;
+}
+
+const SOCIALS: { id: string; label: string; href: string }[] = [
+  { id: "twitter", label: "X",       href: "https://x.com" },
+  { id: "github",  label: "GitHub",  href: "https://github.com/LuKresXD/SCBC-Hackathon-2026" },
+  { id: "discord", label: "Discord", href: "https://discord.com" },
+  { id: "docs",    label: "Docs",    href: "https://github.com/LuKresXD/SCBC-Hackathon-2026#readme" },
+];
+
+const FOOTER_LINKS: { label: string; href: string }[] = [
+  { label: "Markets",   href: "/app" },
+  { label: "Tranches",  href: "/app/tranche" },
+  { label: "Hedge",     href: "/app/hedge" },
+  { label: "Lending",   href: "/app/lending" },
+  { label: "PPN",       href: "/app/ppn" },
+];
+
 function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:string)=>void }) {
+  void onEnterApp; void onNav;
   const isMobile = useMobile();
-  const systemRef = useRef<HTMLDivElement>(null);
-  const orbit1Ref = useRef<HTMLDivElement>(null);
-  const orbit2Ref = useRef<HTMLDivElement>(null);
-  const orbit3Ref = useRef<HTMLDivElement>(null);
-  const pc1Ref = useRef<HTMLDivElement>(null);
-  const pc2Ref = useRef<HTMLDivElement>(null);
-  const pc3Ref = useRef<HTMLDivElement>(null);
-  const chapterRefs = useRef<(HTMLElement|null)[]>([]);
+  // Runway refs for the sticky crossfade hero (ported from laytus landing).
+  const wrapRef = useRef<HTMLDivElement|null>(null);
+  const layerARef = useRef<HTMLDivElement|null>(null);
+  const layerBRef = useRef<HTMLDivElement|null>(null);
+  // Post-runway section refs (Constellations → Risk Tiers → Mechanics → CTA).
+  const sectionRefs = useRef<(HTMLElement|null)[]>([]);
+  // Fed to ParticlePlanet so its scale/rotation tracks runway scroll.
   const scrollProgressRef = useRef(0);
 
-  // Scroll-driven 3D camera orbit + ring rotation
+  // Scroll orchestration:
+  //   1. A 220vh scroll runway contains a 100vh sticky frame with two absolute
+  //      layers. Layer A (sphere + hero copy) fades 1→0 over the first half of
+  //      the runway; Layer B (tagline) fades 0→1 over the second half. At
+  //      p=0.5 both are black, which is the moment the sphere disappears.
+  //   2. After the runway, post-runway sections fade in/out based on distance
+  //      of their center from the viewport center, with a small upward parallax.
   useEffect(() => {
     let raf = 0;
-    let t = 0;
-    let smoothProgress = 0;
-    const update = () => {
-      t += 0.12;
-      const y = window.scrollY;
-      const vh = window.innerHeight;
-      const targetProgress = y / vh; // 0..4 across 5 sections
-      // Smooth progress with lerp - camera eases toward scroll position
-      smoothProgress += (targetProgress - smoothProgress) * 0.08;
-      const progress = smoothProgress;
-      scrollProgressRef.current = progress;
+    const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-      const cam = cameraPath(progress);
-
-      // Apply camera transform to the star system (position + scale + subtle roll)
-      if (systemRef.current) {
-        const translateX = cam.x * 100; // vw
-        const translateY = cam.y * 100; // vh
-        systemRef.current.style.transform =
-          `translate(-50%, -50%) translate(${translateX}vw, ${translateY}vh) scale(${cam.scale}) rotate(${cam.rotZ}deg)`;
-        systemRef.current.style.filter = cam.blur > 0.1 ? `blur(${cam.blur}px)` : "none";
-        systemRef.current.style.opacity = String(cam.opacity);
+    const tick = () => {
+      const wrap = wrapRef.current;
+      const a = layerARef.current;
+      const b = layerBRef.current;
+      if (wrap && a && b) {
+        const rect = wrap.getBoundingClientRect();
+        const range = wrap.offsetHeight - window.innerHeight;
+        const p = range > 0 ? clamp(-rect.top / range, 0, 1) : 0;
+        scrollProgressRef.current = p;
+        a.style.opacity = String(Math.max(0, 1 - p * 2));
+        b.style.opacity = String(clamp((p - 0.5) * 2, 0, 1));
       }
 
-      // Ring rotations + 3D tilt (scaleY = view angle, perspective = plane rotation)
-      const ringTilt = cam.ringScaleY;
-      const ringPers = cam.ringPerspective;
-      if (orbit1Ref.current) orbit1Ref.current.style.transform = `translate(-50%, -50%) rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${progress*360*0.35}deg)`;
-      if (orbit2Ref.current) orbit2Ref.current.style.transform = `translate(-50%, -50%) rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${-progress*360*0.22}deg)`;
-      if (orbit3Ref.current) orbit3Ref.current.style.transform = `translate(-50%, -50%) rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${progress*360*0.15}deg)`;
-      // Planets track the ring plane
-      if (pc1Ref.current) pc1Ref.current.style.transform = `rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${progress*360*0.55 + 30 + t*0.35}deg)`;
-      if (pc2Ref.current) pc2Ref.current.style.transform = `rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${progress*360*0.32 + 120 + t*0.22}deg)`;
-      if (pc3Ref.current) pc3Ref.current.style.transform = `rotate(${ringPers}deg) scaleY(${ringTilt}) rotate(${progress*360*0.18 + 210 + t*0.15}deg)`;
+      const vh = window.innerHeight;
+      sectionRefs.current.forEach((sec) => {
+        if (!sec) return;
+        const rect = sec.getBoundingClientRect();
+        const center = rect.top + rect.height / 2;
+        const distFromCenter = Math.abs(center - vh / 2);
+        const falloff = clamp(1 - distFromCenter / (vh * 0.55), 0, 1);
+        sec.style.opacity = String(Math.pow(falloff, 1.15));
+        const parallax = (center - vh / 2) * 0.12;
+        sec.style.transform = `translateY(${parallax}px)`;
+      });
 
-      raf = requestAnimationFrame(update);
+      raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(update);
+    raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // Orbital sizing
-  const orbitalSize = isMobile ? 360 : 560;
-  const starSize = isMobile ? 120 : 150;
-  const r1 = isMobile ? 200 : 250;
-  const r2 = isMobile ? 300 : 400;
-  const r3 = isMobile ? 420 : 560;
-  const p1Dist = isMobile ? 100 : 125;
-  const p2Dist = isMobile ? 150 : 200;
-  const p3Dist = isMobile ? 210 : 280;
-
   return (
-    <div style={{position:"relative",overflow:"hidden",background:"transparent"}}>
-      <style>{`
-        @keyframes starPulse {
-          0%, 100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.08); opacity: 0.85; }
-        }
-        @keyframes flarePulse {
-          0%, 100% { opacity: 0.4; }
-          50% { opacity: 0.9; }
-        }
-        @keyframes landingBob {
-          0%, 100% { transform: translateX(-50%) translateY(0); }
-          50% { transform: translateX(-50%) translateY(6px); }
-        }
-      `}</style>
+    <div style={{position:"relative",background:"transparent"}}>
+      {/* ══ Scroll runway with sticky-frame crossfade ══
+           Layer A (sphere + hero copy + shooting stars) fades out;
+           Layer B (tagline) fades in. */}
+      <div ref={wrapRef} style={{position:"relative",height:"180vh"}}>
+        <div style={{position:"sticky",top:0,height:"100vh",overflow:"hidden"}}>
 
-      {/* Flyby canvas - planets + comets */}
-      {!isMobile && <FlybyCanvas scrollProgress={scrollProgressRef} />}
+          {/* Layer A — hero with drifting stars + sphere + meteors behind.
+               Order matters: stars first (back) → planet → shooting stars on top. */}
+          <div
+            ref={layerARef}
+            style={{position:"absolute",inset:0,zIndex:2,pointerEvents:"auto"}}
+          >
+            <DriftingStars />
+            <ParticlePlanet scrollProgressRef={scrollProgressRef} />
+            <ShootingStars />
+            {/* Soft teal glow sits inside layer A so it fades with the sphere. */}
+            <div
+              aria-hidden
+              style={{
+                position:"absolute",inset:0,pointerEvents:"none",
+                background:"radial-gradient(ellipse 60% 50% at 50% 50%, rgba(45, 212, 191, 0.06) 0%, transparent 65%)",
+              }}
+            />
+            {/* Heading block — anchored to top of the viewport, widened so
+                 the h1 breaks into at most two lines and never overlaps the
+                 sphere sitting in the lower portion of the frame. */}
+            <div style={{
+              position:"absolute",
+              top: isMobile ? 88 : 120,
+              left:"50%",
+              transform:"translateX(-50%)",
+              width:"100%",
+              maxWidth: isMobile ? 600 : 960,
+              padding: isMobile ? "0 24px" : "0 48px",
+              textAlign:"center",
+              zIndex:3,
+            }}>
+              <div style={{fontFamily:FM,fontSize: isMobile ? 9 : 10,letterSpacing:"0.26em",color:C.textMuted,marginBottom:isMobile?14:18,fontWeight:500}}>
+                STRUCTURED PREDICTION MARKETS · SOLANA
+              </div>
+              <h1 style={{fontFamily:FD,fontSize: isMobile ? "clamp(28px, 7vw, 36px)" : "clamp(36px, 3.6vw, 54px)", fontWeight:300, lineHeight:1.06, letterSpacing:"-0.025em", margin:0, color:C.textPrimary, whiteSpace:isMobile?"normal":"nowrap"}}>
+                Ten predictions, one token
+              </h1>
+              <p style={{fontSize: isMobile ? 13 : 15, lineHeight:1.55, color:C.textSecondary, fontWeight:300, maxWidth:isMobile?440:560, margin:isMobile?"14px auto 0":"18px auto 0", fontFamily:FS}}>
+                Senthos bundles ten Polymarket positions into a single token on Solana · Pick a risk tier, deposit USDC, and hold until the basket resolves
+              </p>
+            </div>
+          </div>
 
-      {/* Fixed orbital system - now driven by camera path */}
-      <div ref={systemRef} style={{
-        position:"fixed",
-        top:"50%",
-        left:"50%",
-        transform:"translate(-50%, -50%)",
-        width: orbitalSize,
-        height: orbitalSize,
-        zIndex:1,
-        pointerEvents:"none",
-        opacity: 1,
-        willChange: "transform, opacity, filter",
-        transition: "none",
-      }}>
-        {/* Rings */}
-        <div ref={orbit3Ref} style={{
-          position:"absolute",top:"50%",left:"50%",borderRadius:"50%",
-          border:`1px solid rgba(234, 88, 12, 0.22)`,
-          width:r3,height:r3,
-          marginTop:-r3/2,marginLeft:-r3/2,
-        }} />
-        <div ref={orbit2Ref} style={{
-          position:"absolute",top:"50%",left:"50%",borderRadius:"50%",
-          border:`1px solid rgba(217, 119, 6, 0.3)`,
-          boxShadow:"0 0 50px rgba(217, 119, 6, 0.1)",
-          width:r2,height:r2,
-          marginTop:-r2/2,marginLeft:-r2/2,
-        }} />
-        <div ref={orbit1Ref} style={{
-          position:"absolute",top:"50%",left:"50%",borderRadius:"50%",
-          border:`1px solid rgba(13, 148, 136, 0.4)`,
-          boxShadow:"0 0 40px rgba(13, 148, 136, 0.15), inset 0 0 40px rgba(13, 148, 136, 0.05)",
-          width:r1,height:r1,
-          marginTop:-r1/2,marginLeft:-r1/2,
-        }} />
+          {/* Layer B — tagline revealed as Layer A fades out */}
+          <div
+            ref={layerBRef}
+            style={{
+              position:"absolute",inset:0,zIndex:1,
+              opacity:0,
+              display:"flex",flexDirection:"column",
+              alignItems:"center",justifyContent:"center",
+              textAlign:"center",padding:"0 2rem",pointerEvents:"auto",
+            }}
+          >
+            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:isMobile?18:22,fontWeight:500}}>
+              POWERED BY SENTHOS
+            </div>
+            <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 68px)", fontWeight:300, lineHeight:1.05, letterSpacing:"-0.03em", margin:0, color:C.textPrimary, maxWidth:780}}>
+              One token for the whole <span style={{color:C.tealLight,fontWeight:500}}>thesis</span>
+            </h2>
+            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, maxWidth:520, margin:isMobile?"18px auto 0":"22px auto 0", fontFamily:FS}}>
+              Traders, funds, and curators use Senthos to take a structured view across correlated prediction markets with a single settlement and a capped downside
+            </p>
+          </div>
 
-        {/* Planets */}
-        <div ref={pc1Ref} style={{position:"absolute",top:"50%",left:"50%",transformOrigin:"0 0"}}>
-          <div style={{position:"absolute",width:14,height:14,borderRadius:"50%",top:"50%",left:"50%",marginTop:-7,marginLeft:-7,
-            transform:`translate(${p1Dist}px, 0)`,
-            background:C.tealLight,boxShadow:`0 0 20px ${C.tealLight}`,
-          }} />
-        </div>
-        <div ref={pc2Ref} style={{position:"absolute",top:"50%",left:"50%",transformOrigin:"0 0"}}>
-          <div style={{position:"absolute",width:14,height:14,borderRadius:"50%",top:"50%",left:"50%",marginTop:-7,marginLeft:-7,
-            transform:`translate(${p2Dist}px, 0)`,
-            background:"#fbbf24",boxShadow:"0 0 20px #fbbf24",
-          }} />
-        </div>
-        <div ref={pc3Ref} style={{position:"absolute",top:"50%",left:"50%",transformOrigin:"0 0"}}>
-          <div style={{position:"absolute",width:14,height:14,borderRadius:"50%",top:"50%",left:"50%",marginTop:-7,marginLeft:-7,
-            transform:`translate(${p3Dist}px, 0)`,
-            background:"#fb923c",boxShadow:"0 0 20px #fb923c",
-          }} />
-        </div>
-
-        {/* Central Star */}
-        <div style={{position:"absolute",top:"50%",left:"50%",width:starSize,height:starSize,marginTop:-starSize/2,marginLeft:-starSize/2}}>
-          <div style={{position:"absolute",inset:-100,borderRadius:"50%",
-            background:"radial-gradient(circle, rgba(45, 212, 191, 0.4) 0%, rgba(13, 148, 136, 0.2) 30%, transparent 70%)",
-            animation:"starPulse 4s ease-in-out infinite",
-          }} />
-          <div style={{position:"absolute",inset:-40,borderRadius:"50%",
-            background:"radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, rgba(45, 212, 191, 0.4) 20%, rgba(13, 148, 136, 0.2) 50%, transparent 75%)",
-            filter:"blur(10px)",
-            animation:"starPulse 3s ease-in-out infinite 0.5s",
-          }} />
-          <div style={{position:"absolute",inset:0,borderRadius:"50%",
-            background:"radial-gradient(circle at 40% 40%, #ffffff 0%, #a5f3fc 15%, #2dd4bf 35%, #0d9488 60%, #0a3a3a 100%)",
-            boxShadow:"inset -15px -15px 30px rgba(0, 0, 0, 0.4), inset 10px 10px 25px rgba(255, 255, 255, 0.2), 0 0 60px rgba(45, 212, 191, 0.5)",
-          }} />
-          <div style={{position:"absolute",top:"50%",left:"50%",width:3,height:starSize*1.8,marginTop:-starSize*0.9,marginLeft:-1.5,
-            background:"linear-gradient(to bottom, transparent 0%, rgba(255, 255, 255, 0.9) 50%, transparent 100%)",
-            filter:"blur(1px)",animation:"flarePulse 3s ease-in-out infinite",
-          }} />
-          <div style={{position:"absolute",top:"50%",left:"50%",width:starSize*1.8,height:3,marginTop:-1.5,marginLeft:-starSize*0.9,
-            background:"linear-gradient(to right, transparent 0%, rgba(255, 255, 255, 0.9) 50%, transparent 100%)",
-            filter:"blur(1px)",animation:"flarePulse 3s ease-in-out infinite 0.8s",
-          }} />
         </div>
       </div>
 
-      {/* Content sections - ALL CENTERED */}
-      <main style={{position:"relative",zIndex:10,pointerEvents:"none"}}>
-
-        {/* SECTION 1 - Arrival */}
-        <section ref={el=>{chapterRefs.current[0]=el;}} style={{minHeight:"100vh",padding:isMobile?"120px 24px 80px":"140px 40px 80px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
-          {/* Readability vignette - darker center so text reads on top of star */}
-          <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 55% 50% at 50% 50%, rgba(5, 8, 12, 0.78) 0%, rgba(5, 8, 12, 0.45) 45%, transparent 80%)",pointerEvents:"none",zIndex:2}} />
-          <div style={{margin:"0 auto",maxWidth:760,position:"relative",zIndex:5,textAlign:"center"}}>
-            <div style={{display:"inline-flex",alignItems:"center",gap:10,fontFamily:FM,fontSize:isMobile?10:11,fontWeight:500,color:C.tealLight,letterSpacing:"0.2em",marginBottom:32,padding:"6px 12px",border:"1px solid rgba(45, 212, 191, 0.3)",borderRadius:100,background:"rgba(45, 212, 191, 0.08)",backdropFilter:"blur(8px)"}}>
-              <span style={{width:6,height:6,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 10px ${C.tealLight}`,animation:"starPulse 2s ease-in-out infinite"}} />
-              LIVE ON SOLANA
+      {/* Post-runway sections (Constellations → Risk Tiers → Mechanics → CTA).
+           Negative top margin pulls section 01 up so its centred-in-viewport
+           moment lands ~72vh after Layer B's centred moment, matching the
+           gap between subsequent sections. The per-section opacity falloff
+           handles the brief overlap (Layer B exits the viewport top while
+           section 01 enters from the bottom). */}
+      <main style={{position:"relative",zIndex:10,pointerEvents:"none",marginTop:"-14vh"}}>
+        <section
+          ref={el=>{sectionRefs.current[0]=el;}}
+          style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+        >
+          <div style={{margin:"0 auto",maxWidth:700,textAlign:"center"}}>
+            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
+              01 · CONSTELLATIONS
             </div>
-            <h1 style={{fontFamily:FD,fontSize:isMobile?"clamp(44px, 10vw, 60px)":"clamp(56px, 7vw, 96px)",fontWeight:200,lineHeight:1.02,letterSpacing:"-0.035em",marginBottom:32,color:C.textPrimary}}>
-              Prediction markets, <span style={{fontWeight:500,background:`linear-gradient(90deg, ${C.tealLight} 0%, #a5f3fc 100%)`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>structured</span>.
-            </h1>
-            <p style={{fontSize:isMobile?16:19,lineHeight:1.65,color:C.textSecondary,fontWeight:300,maxWidth:560,margin:"0 auto",fontFamily:FS}}>
-              One deposit. Ten curated positions. A single token that tracks the whole constellation, and pays out when markets settle.
+            <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 72px)", fontWeight:200, lineHeight:1.08, letterSpacing:"-0.03em", marginBottom:24, color:C.textPrimary}}>
+              A basket, not a bet
+            </h2>
+            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:520, margin:"0 auto"}}>
+              Each basket holds ten high-liquidity prediction markets in one token · You choose the risk tier and curators choose the legs
             </p>
           </div>
-          {!isMobile && (
-            <div style={{position:"absolute",bottom:40,left:"50%",transform:"translateX(-50%)",fontFamily:FM,fontSize:10,letterSpacing:"0.22em",color:C.textMuted,display:"flex",flexDirection:"column",alignItems:"center",gap:10,animation:"landingBob 2s ease-in-out infinite",zIndex:5}}>
-              <span>SCROLL</span>
-              <div style={{width:1,height:30,background:`linear-gradient(to bottom, ${C.textMuted}, transparent)`}} />
-            </div>
-          )}
         </section>
+        <section
+          ref={el=>{sectionRefs.current[1]=el;}}
+          style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+        >
+          <div style={{margin:"0 auto",maxWidth:720,textAlign:"center"}}>
+            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
+              02 · RISK TIERS
+            </div>
+            <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 72px)", fontWeight:200, lineHeight:1.08, letterSpacing:"-0.03em", marginBottom:24, color:C.textPrimary}}>
+              Three tiers, three prices
+            </h2>
+            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:520, margin:"0 auto 32px"}}>
+              Conservative, balanced, or high conviction · Each tier prices the same basket differently so you can trade capital preservation for upside
+            </p>
+            <div style={{display:"inline-flex",alignItems:"baseline",gap: isMobile ? 20 : 36, fontFamily:FD}}>
+              {[
+                {tier:"90", label:"Conservative", color:C.tealLight},
+                {tier:"70", label:"Balanced",     color:"#fbbf24"},
+                {tier:"50", label:"High conv.",   color:"#fb923c"},
+              ].map(t=>(
+                <div key={t.tier} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+                  <span style={{fontSize: isMobile ? 28 : 40, fontWeight:300, color:t.color, letterSpacing:"-0.035em", lineHeight:1}}>{t.tier}%</span>
+                  <span style={{fontFamily:FM, fontSize:10, letterSpacing:"0.14em", color:C.textMuted, textTransform:"uppercase"}}>{t.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+        <section
+          ref={el=>{sectionRefs.current[2]=el;}}
+          style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+        >
+          <div style={{margin:"0 auto",maxWidth:700,textAlign:"center"}}>
+            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
+              03 · MECHANICS
+            </div>
+            <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 72px)", fontWeight:200, lineHeight:1.08, letterSpacing:"-0.03em", marginBottom:24, color:C.textPrimary}}>
+              Deposit, hold, auto-settle
+            </h2>
+            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:520, margin:"0 auto"}}>
+              USDC goes in, STHS tokens come out · Once the last leg resolves on-chain, payouts stream to every holder and the tokens burn · No claims, no manual unwind
+            </p>
+          </div>
+        </section>
+        <section
+          ref={el=>{sectionRefs.current[3]=el;}}
+          style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+        >
+          <div style={{margin:"0 auto",maxWidth:720,textAlign:"center"}}>
+            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
+              04 · ENTER
+            </div>
+            <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(36px, 9vw, 56px)" : "clamp(56px, 5.6vw, 88px)", fontWeight:200, lineHeight:1.02, letterSpacing:"-0.04em", marginBottom:isMobile?20:24, color:C.textPrimary}}>
+              Open <span style={{fontWeight:500, color:C.tealLight}}>Senthos</span>
+            </h2>
+            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.6, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:520, margin:isMobile?"0 auto 28px":"0 auto 36px"}}>
+              Pick a basket, deposit USDC, and watch it settle on-chain
+            </p>
+            <a href="/app" style={{
+              display:"inline-flex", alignItems:"center", gap:8,
+              padding: isMobile ? "13px 26px" : "15px 32px",
+              borderRadius:10,
+              fontSize: isMobile ? 14 : 15, fontWeight:600,
+              background:C.tealLight, color:"#001814",
+              textDecoration:"none",
+              letterSpacing:"0.02em", fontFamily:FD,
+              boxShadow:`0 0 0 1px ${C.tealLight}, 0 14px 40px rgba(45, 212, 191, 0.18)`,
+              transition:`transform 0.2s ${EASE}, background 0.2s ${EASE}, box-shadow 0.2s ${EASE}`,
+            }}
+              onMouseEnter={e=>{
+                (e.currentTarget as HTMLElement).style.background = C.teal;
+                (e.currentTarget as HTMLElement).style.transform = "translateY(-1px)";
+                (e.currentTarget as HTMLElement).style.boxShadow = `0 0 0 1px ${C.tealLight}, 0 18px 48px rgba(45, 212, 191, 0.28)`;
+              }}
+              onMouseLeave={e=>{
+                (e.currentTarget as HTMLElement).style.background = C.tealLight;
+                (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
+                (e.currentTarget as HTMLElement).style.boxShadow = `0 0 0 1px ${C.tealLight}, 0 14px 40px rgba(45, 212, 191, 0.18)`;
+              }}
+            >
+              Launch app →
+            </a>
+          </div>
+        </section>
+        <footer style={{
+          padding: isMobile ? "16px 20px" : "18px 32px",
+          borderTop:`0.5px solid ${C.border}`,
+          display:"flex",
+          flexDirection: isMobile ? "column" : "row",
+          alignItems: isMobile ? "flex-start" : "center",
+          justifyContent:"space-between",
+          gap: isMobile ? 14 : 20,
+          flexWrap:"wrap",
+          position:"relative", zIndex:10,
+          background:"rgba(5, 8, 12, 0.72)", backdropFilter:"blur(12px)",
+          pointerEvents:"auto",
+        }}>
+          {/* Left: brand + social icon row */}
+          <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+            <span style={{fontFamily:FD,fontSize:13,fontWeight:600,color:C.textPrimary,letterSpacing:"0.04em"}}>
+              SENTHOS
+            </span>
+            <span style={{fontFamily:FM,fontSize:10,color:C.textMuted,letterSpacing:"0.14em"}}>
+              SOLANA DEVNET
+            </span>
+            <div style={{display:"flex",alignItems:"center",gap:2,marginLeft:isMobile?0:6}}>
+              {SOCIALS.map(s => (
+                <a
+                  key={s.id}
+                  href={s.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={s.label}
+                  title={s.label}
+                  style={{
+                    display:"inline-flex",alignItems:"center",justifyContent:"center",
+                    width:28,height:28,borderRadius:999,
+                    color:C.textSecondary,textDecoration:"none",
+                    transition:`color 0.15s ${EASE}, background 0.15s ${EASE}`,
+                  }}
+                  onMouseEnter={e=>{
+                    (e.currentTarget as HTMLElement).style.color = C.textPrimary;
+                    (e.currentTarget as HTMLElement).style.background = "rgba(45, 212, 191, 0.08)";
+                  }}
+                  onMouseLeave={e=>{
+                    (e.currentTarget as HTMLElement).style.color = C.textSecondary;
+                    (e.currentTarget as HTMLElement).style.background = "transparent";
+                  }}
+                >
+                  <SocialIcon id={s.id} />
+                </a>
+              ))}
+            </div>
+          </div>
 
-        {/* SECTION 2 - Constellations */}
-        <section ref={el=>{chapterRefs.current[1]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+          {/* Right: product nav pills */}
+          <nav aria-label="Footer navigation" style={{display:"flex",alignItems:"center",gap:2,flexWrap:"wrap"}}>
+            {FOOTER_LINKS.map(l => (
+              <a
+                key={l.label}
+                href={l.href}
+                style={{
+                  display:"inline-flex",alignItems:"center",height:26,
+                  padding:"0 12px",borderRadius:999,
+                  fontFamily:FM,fontSize:11,fontWeight:500,letterSpacing:"0.04em",
+                  color:C.textSecondary,textDecoration:"none",
+                  transition:`color 0.15s ${EASE}, background 0.15s ${EASE}`,
+                }}
+                onMouseEnter={e=>{
+                  (e.currentTarget as HTMLElement).style.color = C.textPrimary;
+                  (e.currentTarget as HTMLElement).style.background = "rgba(255, 255, 255, 0.04)";
+                }}
+                onMouseLeave={e=>{
+                  (e.currentTarget as HTMLElement).style.color = C.textSecondary;
+                  (e.currentTarget as HTMLElement).style.background = "transparent";
+                }}
+              >
+                {l.label}
+              </a>
+            ))}
+          </nav>
+        </footer>
+      </main>
+      {/* STALE_OLD_SECTIONS_START */}
+      <div style={{display:"none"}}>
+        <section style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
             <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
@@ -2007,7 +2574,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
 
         {/* SECTION 3 - Tiers */}
-        <section ref={el=>{chapterRefs.current[2]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+        <section style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
             <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
@@ -2045,7 +2612,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
 
         {/* SECTION 4 - Mechanics */}
-        <section ref={el=>{chapterRefs.current[3]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+        <section style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
             <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
@@ -2081,7 +2648,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
 
         {/* SECTION 5 - Launch */}
-        <section ref={el=>{chapterRefs.current[4]=el;}} style={{minHeight:"100vh",padding:isMobile?"80px 24px":"140px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+        <section style={{minHeight:"100vh",padding:isMobile?"80px 24px":"140px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:720,textAlign:"center",position:"relative",zIndex:5}}>
             <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
@@ -2119,7 +2686,8 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
           <div>SOLANA · v0.1.0</div>
         </footer>
 
-      </main>
+      </div>
+      {/* STALE_OLD_SECTIONS_END */}
     </div>
   );
 }
@@ -2250,47 +2818,57 @@ export default function App() {
         .senthos-orbit-fast { animation: senthosOrbitSlow 160s linear infinite; }
       `}</style>
 
-      {/* Persistent subtle starfield */}
-      <StarfieldBG />
+      {/* Persistent subtle starfield — only on app/dashboard tabs. The
+           landing tab uses its own drifting starfield inside Layer A so it
+           fades together with the sphere when the user scrolls past the hero. */}
+      {tab !== "home" && <StarfieldBG />}
 
-      {/* Top Nav */}
+      {/* Top Nav — Aave/Lido-style: flat, well-spaced, single CTA. */}
       <nav style={{
         position:"fixed",top:0,left:0,right:0,zIndex:100,
-        padding: isMobile ? "14px 18px" : "16px 28px",
+        height: isMobile ? 58 : 64,
+        padding: isMobile ? "0 18px" : "0 32px",
         display:"flex",alignItems:"center",justifyContent:"space-between",
         backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",
-        background:"rgba(5, 8, 12, 0.65)",
+        background:"rgba(5, 8, 12, 0.72)",
         borderBottom:`0.5px solid ${C.border}`,
       }}>
-        {/* LEFT: logo + nav tabs (desktop) */}
-        <div style={{display:"flex",alignItems:"center",gap:isMobile?0:28}}>
-          <div onClick={()=>{setTab("home");if(isMobile)setSidebarOpen(false);}} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
-            <img src="/senthos_full.png" alt="Senthos" style={{width:isMobile?26:30,height:isMobile?26:30,display:"block",flexShrink:0}} />
-            <div style={{fontSize:isMobile?13:15,fontWeight:700,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.12em"}}>SENTHOS</div>
+        {/* LEFT: logo + nav links */}
+        <div style={{display:"flex",alignItems:"center",gap:isMobile?0:36}}>
+          <div onClick={()=>{setTab("home");if(isMobile)setSidebarOpen(false);}} style={{display:"flex",alignItems:"center",gap:9,cursor:"pointer"}}>
+            <img src="/senthos_full.png" alt="Senthos" style={{width:isMobile?24:26,height:isMobile?24:26,display:"block",flexShrink:0}} />
+            <div style={{fontSize:isMobile?12:14,fontWeight:600,color:C.textPrimary,fontFamily:FD,letterSpacing:"0.14em"}}>SENTHOS</div>
           </div>
 
           {!isMobile && (
-            <ul style={{display:"flex",gap:4,listStyle:"none",margin:0,padding:0}}>
+            <ul style={{display:"flex",gap:28,listStyle:"none",margin:0,padding:0,alignItems:"center"}}>
               {[
-                {id:"home",label:"Home", href:"/"},
-                {id:"markets",label:"Markets", href:"/app"},
-                {id:"constellations",label:"Constellations", href:"/app/basket"},
+                {id:"home",    label:"Home",    href:"/"},
+                {id:"markets", label:"Markets", href:"/app"},
+                {id:"tranches",label:"Tranches",href:"/app/tranche"},
+                {id:"hedge",   label:"Hedge",   href:"/app/hedge"},
               ].map(n=>{
-                const isActive = tab===n.id || (tab==="detail" && fromTab===n.id);
+                const isActive = n.id === "home" && tab === "home";
                 return (
                   <li key={n.id}>
                     <button onClick={()=>{ if(n.href==="/") setTab("home"); else window.location.href=n.href; }} style={{
-                      background: isActive ? "rgba(45, 212, 191, 0.1)" : "transparent",
-                      color: isActive ? C.tealLight : C.textSecondary,
-                      border: isActive ? "0.5px solid rgba(45, 212, 191, 0.25)" : "0.5px solid transparent",
-                      padding:"8px 16px",borderRadius:100,
-                      fontSize:13,fontWeight:500,fontFamily:FD,letterSpacing:"0.01em",
-                      cursor:"pointer",transition:`all 0.3s ${EASE}`,
-                      boxShadow: isActive ? "0 0 20px rgba(45, 212, 191, 0.12)" : "none",
+                      background:"transparent",
+                      color: isActive ? C.textPrimary : C.textSecondary,
+                      border:"none",
+                      padding:"6px 0",
+                      fontSize:13, fontWeight:400, fontFamily:FD, letterSpacing:"0.01em",
+                      cursor:"pointer",
+                      transition:`color 0.15s ${EASE}`,
+                      position:"relative",
                     }}
-                      onMouseEnter={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.color=C.textPrimary;(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.06)";}}}
-                      onMouseLeave={e=>{if(!isActive){(e.currentTarget as HTMLElement).style.color=C.textSecondary;(e.currentTarget as HTMLElement).style.background="transparent";}}}
-                    >{n.label}</button>
+                      onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color=C.textPrimary;}}
+                      onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color=isActive?C.textPrimary:C.textSecondary;}}
+                    >
+                      {n.label}
+                      {isActive && (
+                        <span style={{position:"absolute",left:0,right:0,bottom:-4,height:1,background:C.tealLight}} />
+                      )}
+                    </button>
                   </li>
                 );
               })}
@@ -2298,70 +2876,37 @@ export default function App() {
           )}
         </div>
 
-        {/* RIGHT: Portfolio tab + demo + wallet + mobile hamburger */}
-        <div style={{display:"flex",alignItems:"center",gap:isMobile?10:14}}>
-          {!isMobile && (() => {
-            const isActive = false;
-            return (
-              <button onClick={()=>{ window.location.href="/app/portfolio"; }} style={{
-                display:"flex",alignItems:"center",gap:8,
-                background: "rgba(45, 212, 191, 0.08)",
-                color: C.tealLight,
-                border: "0.5px solid rgba(45, 212, 191, 0.3)",
-                padding: "7px 16px 7px 14px",
-                borderRadius:100,
-                fontSize:13, fontWeight: 500,
-                fontFamily:FD, letterSpacing:"0.01em",
-                cursor:"pointer", transition:`all 0.3s ${EASE}`,
-                boxShadow: `0 0 16px rgba(45, 212, 191, 0.08)`,
-              }}
-                onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.15)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.5)";(e.currentTarget as HTMLElement).style.boxShadow="0 0 22px rgba(45, 212, 191, 0.2)";}}
-                onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background="rgba(45, 212, 191, 0.08)";(e.currentTarget as HTMLElement).style.borderColor="rgba(45, 212, 191, 0.3)";(e.currentTarget as HTMLElement).style.boxShadow="0 0 16px rgba(45, 212, 191, 0.08)";}}
-              >
-                <span style={{width:6,height:6,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 6px ${C.tealLight}`,flexShrink:0}} />
-                Portfolio
-              </button>
-            );
-          })()}
-          {!isMobile && demoMode && (
-            <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderRadius:100,background:"rgba(45, 212, 191, 0.08)",border:`0.5px solid rgba(45, 212, 191, 0.25)`}}>
-              <div style={{width:5,height:5,borderRadius:"50%",background:C.tealLight,boxShadow:`0 0 8px ${C.tealLight}`}} />
-              <span style={{fontSize:11,color:C.tealLight,fontFamily:FM,letterSpacing:"0.08em",fontWeight:500}}>DEMO</span>
-              <span style={{fontSize:11,color:C.textSecondary,fontFamily:FM}}>${demoUsdc.toFixed(0)}</span>
-              <button onClick={()=>setShowResetConfirm(true)} style={{background:"none",border:"none",color:C.textMuted,fontSize:10,fontFamily:FM,cursor:"pointer",letterSpacing:"0.08em",padding:0,marginLeft:2}}
-                onMouseEnter={e=>(e.currentTarget as HTMLElement).style.color=C.textSecondary}
-                onMouseLeave={e=>(e.currentTarget as HTMLElement).style.color=C.textMuted}
-              >↻</button>
-            </div>
-          )}
-          {walletConnected ? (
-            <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 12px",borderRadius:100,background:C.tealBg,border:`0.5px solid ${C.teal}44`}}>
-              <div style={{width:6,height:6,borderRadius:"50%",background:C.green}} />
-              <span style={{fontSize:12,color:C.textPrimary,fontFamily:FM}}>7xK9...mR4p</span>
-            </div>
-          ) : (
-            <button onClick={()=>setShowWalletModal(true)} style={{
+        {/* RIGHT: single Launch app CTA + mobile hamburger */}
+        <div style={{display:"flex",alignItems:"center",gap:isMobile?8:12}}>
+          <a
+            href="/app"
+            style={{
               display:"inline-flex",alignItems:"center",gap:6,
-              fontSize:isMobile?12:13,fontWeight:600,
-              padding: isMobile?"8px 14px":"10px 18px",
-              borderRadius:100,
-              background:`linear-gradient(135deg, ${C.teal} 0%, ${C.tealLight} 100%)`,
-              color:"#000",border:"none",cursor:"pointer",
-              letterSpacing:"0.01em",fontFamily:FD,
-              transition:`all 0.3s ${EASE}`,position:"relative",overflow:"hidden",
-              boxShadow:`0 0 0 1px rgba(45, 212, 191, 0.3), 0 4px 20px rgba(45, 212, 191, 0.2)`,
+              fontSize: isMobile ? 12 : 13, fontWeight: 600,
+              padding: isMobile ? "8px 14px" : "9px 18px",
+              borderRadius: 8,
+              background: C.tealLight,
+              color: "#001814",
+              border: "none",
+              textDecoration: "none",
+              letterSpacing: "0.01em", fontFamily: FD,
+              transition: `background 0.15s ${EASE}`,
             }}
-              onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.transform="translateY(-1px)";(e.currentTarget as HTMLElement).style.boxShadow=`0 0 0 1px rgba(45, 212, 191, 0.5), 0 8px 30px rgba(45, 212, 191, 0.4)`;}}
-              onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.transform="translateY(0)";(e.currentTarget as HTMLElement).style.boxShadow=`0 0 0 1px rgba(45, 212, 191, 0.3), 0 4px 20px rgba(45, 212, 191, 0.2)`;}}
-            >
-              {isMobile ? "Connect" : "Connect wallet"}
-            </button>
-          )}
+            onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=C.teal;}}
+            onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background=C.tealLight;}}
+          >
+            Launch app
+          </a>
           {isMobile && (
             <button onClick={()=>setSidebarOpen(!sidebarOpen)} aria-label="menu" style={{
-              background:"rgba(45, 212, 191, 0.06)",border:`0.5px solid rgba(45, 212, 191, 0.2)`,borderRadius:10,
-              padding:"10px 12px",cursor:"pointer",color:C.tealLight,
-              fontSize:20,lineHeight:1,minWidth:44,display:"flex",alignItems:"center",justifyContent:"center",
+              background:"transparent",
+              borderTop:`0.5px solid ${C.border}`,
+              borderRight:`0.5px solid ${C.border}`,
+              borderBottom:`0.5px solid ${C.border}`,
+              borderLeft:`0.5px solid ${C.border}`,
+              borderRadius:8,
+              padding:"8px 10px",cursor:"pointer",color:C.textPrimary,
+              fontSize:16,lineHeight:1,minWidth:38,display:"flex",alignItems:"center",justifyContent:"center",
             }}>{sidebarOpen?"✕":"☰"}</button>
           )}
         </div>
@@ -2379,31 +2924,19 @@ export default function App() {
             boxShadow:"0 20px 60px rgba(0,0,0,0.5)",
           }}>
             {[
-              {id:"home",label:"Home"},
-              {id:"markets",label:"Markets"},
-              {id:"constellations",label:"Constellations"},
-              {id:"portfolio",label:"Portfolio"},
-            ].map(n=>{
-              const isActive = tab===n.id || (tab==="detail" && fromTab===n.id);
-              return (
-                <button key={n.id} onClick={()=>{setTab(n.id as TabId);setSidebarOpen(false);}} style={{
-                  display:"block",width:"100%",textAlign:"left",
-                  padding:"12px 14px",borderRadius:10,border:"none",background:isActive?"rgba(45,212,191,0.08)":"transparent",
-                  color:isActive?C.tealLight:C.textPrimary,
-                  fontSize:14,fontWeight:isActive?600:400,fontFamily:FD,letterSpacing:"0.01em",
-                  cursor:"pointer",marginBottom:2,
-                }}>{n.label}</button>
-              );
-            })}
-            {demoMode && (
-              <div style={{borderTop:`0.5px solid ${C.border}`,marginTop:8,paddingTop:10,padding:"10px 14px 4px"}}>
-                <div style={{fontSize:10,color:C.textMuted,fontFamily:FM,letterSpacing:"0.08em",marginBottom:6}}>DEMO BALANCE</div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:14,color:C.tealLight,fontFamily:FM,fontWeight:500}}>${demoUsdc.toFixed(0)} USDC</span>
-                  <button onClick={()=>{setShowResetConfirm(true);setSidebarOpen(false);}} style={{background:"none",border:`0.5px solid ${C.border}`,borderRadius:6,padding:"4px 10px",color:C.textMuted,fontSize:10,fontFamily:FM,letterSpacing:"0.08em",cursor:"pointer"}}>RESET</button>
-                </div>
-              </div>
-            )}
+              {id:"home",    label:"Home",    href:"/"},
+              {id:"markets", label:"Markets", href:"/app"},
+              {id:"tranches",label:"Tranches",href:"/app/tranche"},
+              {id:"hedge",   label:"Hedge",   href:"/app/hedge"},
+            ].map(n=>(
+              <a key={n.id} href={n.href} onClick={()=>setSidebarOpen(false)} style={{
+                display:"block",width:"100%",textAlign:"left",
+                padding:"12px 14px",borderRadius:10,textDecoration:"none",
+                color:C.textPrimary,
+                fontSize:14,fontWeight:400,fontFamily:FD,letterSpacing:"0.01em",
+                marginBottom:2,
+              }}>{n.label}</a>
+            ))}
           </div>
         </>
       )}

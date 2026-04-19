@@ -4,24 +4,23 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Header, PageFrame } from "../../_components/Header";
+import { ConnectWalletCard } from "../../_components/ConnectWalletCard";
 import { MetricTile } from "../../_components/charts";
-import { C, FS, FD, EASE, trancheColor, tc, fmtUsd } from "../../_lib/tokens";
+import { C, FS, FD, EASE, trancheColor, tc } from "../../_lib/tokens";
 import { bundleById } from "../../_lib/bundles";
-import { useSandbox, TrancheKind } from "../../_lib/demo-state";
 import { quoteTranchesLocal } from "../_quote";
+
+type TrancheKind = "senior" | "mezzanine" | "junior";
 
 export default function TrancheDetail() {
   const params = useParams<{ id: string }>();
-  const { state, dispatch } = useSandbox();
   const bundle = bundleById(params.id);
   const [kind, setKind] = useState<TrancheKind>("senior");
-  const [amt, setAmt] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
 
   if (!bundle) {
     return (
       <>
-        <Header onResetClick={() => dispatch({ type: "reset" })} />
+        <Header />
         <PageFrame>
           <div style={{ padding: 48, textAlign: "center", color: C.textMuted, fontFamily: FS }}>
             Bundle not found. <Link href="/app/tranche" style={{ color: C.teal }}>Back to tranches</Link>
@@ -33,29 +32,10 @@ export default function TrancheDetail() {
 
   const quotes = quoteTranchesLocal(bundle.nav, bundle.totalLegs, bundle.daysLeft);
   const q = quotes.find((x) => x.kind === kind)!;
-  const dep = parseFloat(amt) || 0;
-  const tokens = dep > 0 ? dep / q.pricePerToken : 0;
-  const insufficient = dep > state.usdc;
-
-  function handleConfirm() {
-    if (dep <= 0 || insufficient) return;
-    dispatch({
-      type: "tranche/deposit",
-      bundleId: bundle!.id,
-      kind,
-      usdcAmount: dep,
-      pricePerToken: q.pricePerToken,
-    });
-    setConfirmed(true);
-    setTimeout(() => {
-      setAmt("");
-      setConfirmed(false);
-    }, 1200);
-  }
 
   return (
     <>
-      <Header onResetClick={() => dispatch({ type: "reset" })} />
+      <Header />
       <PageFrame>
         <Link href="/app/tranche" style={{ fontSize: 13, color: C.textSecondary, textDecoration: "none", fontFamily: FS, marginBottom: 20, display: "inline-block" }}>
           ← Back to tranches
@@ -81,12 +61,14 @@ export default function TrancheDetail() {
                   onClick={() => setKind(tq.kind)}
                   style={{
                     background: C.card,
-                    border: `0.5px solid ${kind === tq.kind ? trancheColor(tq.kind) : C.border}`,
+                    borderTop: `2px solid ${trancheColor(tq.kind)}`,
+                    borderRight: `0.5px solid ${kind === tq.kind ? trancheColor(tq.kind) : C.border}`,
+                    borderBottom: `0.5px solid ${kind === tq.kind ? trancheColor(tq.kind) : C.border}`,
+                    borderLeft: `0.5px solid ${kind === tq.kind ? trancheColor(tq.kind) : C.border}`,
                     borderRadius: 14,
                     padding: "16px 18px",
                     cursor: "pointer",
                     transition: `all 0.2s ${EASE}`,
-                    borderTop: `2px solid ${trancheColor(tq.kind)}`,
                     position: "relative",
                   }}
                 >
@@ -138,62 +120,11 @@ export default function TrancheDetail() {
             </div>
           </div>
 
-          <div style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary, fontFamily: FD, marginBottom: 16 }}>
-              Deposit USDC · <span style={{ color: trancheColor(kind), textTransform: "capitalize" }}>{kind}</span>
-            </div>
-            <input
-              type="number"
-              placeholder="0"
-              value={amt}
-              onChange={(e) => setAmt(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "12px 14px",
-                fontSize: 16,
-                fontFamily: FD,
-                background: C.surface,
-                border: `0.5px solid ${C.border}`,
-                borderRadius: 10,
-                color: C.textPrimary,
-                marginBottom: 14,
-              }}
-            />
-            <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginBottom: 14 }}>Wallet: ${state.usdc.toLocaleString()}</div>
-            <div style={{ background: C.surface, borderRadius: 10, padding: "12px 14px", marginBottom: 14, fontSize: 12, fontFamily: FS }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ color: C.textSecondary }}>Tranche tokens</span>
-                <span style={{ color: C.textPrimary }}>{dep > 0 ? tokens.toFixed(2) : "-"}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ color: C.textSecondary }}>Issue price</span>
-                <span style={{ color: trancheColor(kind) }}>${q.pricePerToken.toFixed(2)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: C.textSecondary }}>Max payout</span>
-                <span style={{ color: C.green }}>{dep > 0 ? fmtUsd(tokens, 2) : "-"}</span>
-              </div>
-            </div>
-            <button
-              onClick={handleConfirm}
-              disabled={insufficient || dep <= 0}
-              style={{
-                width: "100%",
-                padding: "12px 0",
-                borderRadius: 10,
-                border: "none",
-                background: confirmed ? C.green : insufficient || dep <= 0 ? C.border : trancheColor(kind),
-                color: insufficient || dep <= 0 ? C.textMuted : "#001814",
-                fontSize: 14,
-                fontWeight: 700,
-                fontFamily: FD,
-                cursor: insufficient || dep <= 0 ? "not-allowed" : "pointer",
-                transition: `all 0.2s ${EASE}`,
-              }}
-            >
-              {confirmed ? "✓ Deposited" : insufficient ? "Insufficient USDC" : `Deposit into ${kind}`}
-            </button>
-          </div>
+          <ConnectWalletCard
+            title={`Buy ${kind} tranche`}
+            subtitle={`Issue price $${q.pricePerToken.toFixed(2)} · ${q.expectedYieldPct.toFixed(1)}% expected APY. Connect a Solana wallet to deposit USDC into the ${kind} tranche.`}
+            accent={trancheColor(kind)}
+          />
         </div>
       </PageFrame>
     </>
