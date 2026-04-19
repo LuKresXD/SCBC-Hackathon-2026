@@ -1943,7 +1943,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
       <main style={{position:"relative",zIndex:10,pointerEvents:"none"}}>
 
         {/* SECTION 1 - Arrival */}
-        <section ref={el=>{chapterRefs.current[0]=el;}} style={{minHeight:"100vh",padding:isMobile?"120px 24px 80px":"140px 40px 80px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+        <section ref={el=>{chapterRefs.current[0]=el as HTMLElement|null;}} style={{minHeight:"100vh",padding:isMobile?"120px 24px 80px":"140px 40px 80px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           {/* Readability vignette - darker center so text reads on top of star */}
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 55% 50% at 50% 50%, rgba(5, 8, 12, 0.78) 0%, rgba(5, 8, 12, 0.45) 45%, transparent 80%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:760,position:"relative",zIndex:5,textAlign:"center"}}>
@@ -1967,7 +1967,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
 
         {/* SECTION 2 - Constellations */}
-        <section ref={el=>{chapterRefs.current[1]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+        <section ref={el=>{chapterRefs.current[1]=el as HTMLElement|null;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
             <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
@@ -2007,7 +2007,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
 
         {/* SECTION 3 - Tiers */}
-        <section ref={el=>{chapterRefs.current[2]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+        <section ref={el=>{chapterRefs.current[2]=el as HTMLElement|null;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
             <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
@@ -2045,7 +2045,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
 
         {/* SECTION 4 - Mechanics */}
-        <section ref={el=>{chapterRefs.current[3]=el;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+        <section ref={el=>{chapterRefs.current[3]=el as HTMLElement|null;}} style={{minHeight:"100vh",padding:isMobile?"100px 24px 80px":"120px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:680,position:"relative",zIndex:5,textAlign:"center"}}>
             <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
@@ -2081,7 +2081,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
 
         {/* SECTION 5 - Launch */}
-        <section ref={el=>{chapterRefs.current[4]=el;}} style={{minHeight:"100vh",padding:isMobile?"80px 24px":"140px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
+        <section ref={el=>{chapterRefs.current[4]=el as HTMLElement|null;}} style={{minHeight:"100vh",padding:isMobile?"80px 24px":"140px 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto"}}>
           <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 55% at 50% 50%, rgba(5, 8, 12, 0.82) 0%, rgba(5, 8, 12, 0.5) 50%, transparent 85%)",pointerEvents:"none",zIndex:2}} />
           <div style={{margin:"0 auto",maxWidth:720,textAlign:"center",position:"relative",zIndex:5}}>
             <div style={{fontFamily:FM,fontSize:isMobile?10:11,letterSpacing:"0.22em",color:C.textMuted,marginBottom:16,display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
