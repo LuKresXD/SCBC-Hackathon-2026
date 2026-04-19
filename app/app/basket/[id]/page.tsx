@@ -3,13 +3,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Header, PageFrame } from "../../_components/Header";
-import { ConnectWalletCard } from "../../_components/ConnectWalletCard";
 import { MetricTile } from "../../_components/charts";
 import { C, FS, FD, FM, EASE, tc } from "../../_lib/tokens";
 import { bundleById, type Bundle } from "../../_lib/bundles";
 import type { LiveBasket, LiveMarket, WindowKey } from "../../_lib/live-baskets";
 import { useLiveBaskets } from "../../_lib/use-live-baskets";
+import { useSandbox } from "../../_lib/demo-state";
 
 type ResolvedBasket =
   | { kind: "live"; basket: LiveBasket }
@@ -198,10 +200,13 @@ export default function BasketDetail() {
             display: "grid",
             // minmax(0, 1fr) on the left lets long questions wrap instead
             // of blowing out the grid; the right column collapses to full
-            // width below 900px via the media query in basket-detail.css
-            // so the deposit card doesn't get squeezed at high zoom.
-            gridTemplateColumns: "minmax(0, 1fr) 340px",
-            alignItems: "start",
+            // width below 900px via the media query below. The right
+            // column is NOT pinned to the top anymore — the BasketBuyPanel
+            // stretches to match the combined height of chart + metrics
+            // + constituents so its bottom edge aligns with the bottom of
+            // the left column. No more dark void under the deposit card.
+            gridTemplateColumns: "minmax(0, 1fr) 360px",
+            alignItems: "stretch",
             gap: 20,
           }}
         >
@@ -261,17 +266,7 @@ export default function BasketDetail() {
             )}
           </div>
 
-          {/* alignSelf:start pins the deposit card to the top of the
-              right column so it doesn't stretch to match the (much
-              taller) constituent table on the left — which used to
-              leave a huge dark void below the wallet button. */}
-          <div style={{ alignSelf: "start", position: "sticky", top: 72 }}>
-            <ConnectWalletCard
-              title={`Deposit into ${bundle.id}`}
-              subtitle="Connect a Solana wallet to buy STHS at live NAV. USDC is deposited into the traxis_vault program for this bundle."
-              accent={color}
-            />
-          </div>
+          <BasketBuyPanel bundle={bundle} accent={color} />
         </div>
         <style>{BASKET_DETAIL_CSS}</style>
       </PageFrame>
@@ -279,19 +274,489 @@ export default function BasketDetail() {
   );
 }
 
-// Media-query overrides for the detail grid. Stacks the deposit card
-// below the main column once the viewport drops under 900px (which
-// matches what happens at high browser zoom on a standard 14" laptop).
+// Media-query overrides for the detail grid. Stacks the buy panel below
+// the main column once the viewport drops under 900px (which matches
+// what happens at high browser zoom on a standard 14" laptop).
 const BASKET_DETAIL_CSS = `
   @media (max-width: 900px) {
     .basket-detail-grid {
       grid-template-columns: minmax(0, 1fr) !important;
-    }
-    .basket-detail-grid > div[style*="position: sticky"] {
-      position: static !important;
+      align-items: start !important;
     }
   }
 `;
+
+/* ---------- Buy panel ----------
+ *
+ * Full-height right-column action card. Top half is the wallet-aware
+ * buy flow (connect → quote → submit). Bottom half is a three-step
+ * "how it works" explainer that reads as product copy, not a placeholder.
+ *
+ * The panel is rendered inside a grid cell with `align-items: stretch`,
+ * so `height: 100%` on the outer div makes the card span the combined
+ * height of the chart + metrics + constituents table on the left. The
+ * two inner sections are laid out with `justify-content: space-between`
+ * so the buy section pins to the top and the explainer pins to the
+ * bottom — empty space (if any) goes between them, not under the card.
+ */
+
+const HOW_IT_WORKS: Array<{ num: string; title: string; body: string }> = [
+  {
+    num: "01",
+    title: "Quote assembly",
+    body:
+      "Every basket is priced as the weighted sum of its legs’ current Polymarket probabilities. Market makers quote off that live NAV, less a thin execution margin for slippage and listing risk.",
+  },
+  {
+    num: "02",
+    title: "On-chain settlement",
+    body:
+      "Your order is signed locally and broadcast to Solana. Once confirmed, the traxis_vault program mints a single STHS token into your wallet — one token, one on-chain entry, full basket exposure.",
+  },
+  {
+    num: "03",
+    title: "Exit on your terms",
+    body:
+      "Redeem STHS back into the basket at live NAV, or route it through Tranches, PPN, or Lending to carve out senior/junior risk, add protection, or borrow USDC without unwinding the legs.",
+  },
+];
+
+/**
+ * Cost breakdown for a buy order. The three fees are intentionally split
+ * out so the user can see "what the protocol is charging, what MMs are
+ * charging, what slippage is". Slippage scales with order size using a
+ * sqrt curve — real basket depth will be plugged in when the on-chain
+ * leg is wired up. Protocol + MM fees are flat placeholders for now.
+ *
+ * Returned values are in **basis points** (1 bp = 0.01%). `slippageBps`
+ * is clamped to [5, 150] so tiny orders don’t show suspiciously-round
+ * zero, and huge orders don’t explode past 1.5%.
+ */
+function quoteFeesBps(usdcAmount: number): {
+  protocolBps: number;
+  mmSpreadBps: number;
+  slippageBps: number;
+  totalBps: number;
+} {
+  const protocolBps = 5;   // flat 0.05%
+  const mmSpreadBps = 20;  // flat 0.20%
+  const size = Math.max(1, usdcAmount);
+  // Sqrt curve: doubles in slippage every 4× in size.
+  const raw = 5 + Math.sqrt(size / 100) * 8;
+  const slippageBps = Math.max(5, Math.min(150, raw));
+  return {
+    protocolBps,
+    mmSpreadBps,
+    slippageBps,
+    totalBps: protocolBps + mmSpreadBps + slippageBps,
+  };
+}
+
+function BasketBuyPanel({
+  bundle,
+  accent,
+}: {
+  bundle: Bundle;
+  accent: string;
+}) {
+  const { connected } = useWallet();
+  const { setVisible: setWalletModalVisible } = useWalletModal();
+  const { state, dispatch } = useSandbox();
+  const [amount, setAmount] = useState<string>("100");
+
+  const usdcAmount = Math.max(0, Number.parseFloat(amount) || 0);
+  const navPrice = bundle.nav > 0 ? bundle.nav : 1;
+  const fees = useMemo(() => quoteFeesBps(usdcAmount), [usdcAmount]);
+  const netUsdc = usdcAmount * (1 - fees.totalBps / 10_000);
+  const tokensOut = netUsdc / navPrice;
+
+  const hasAmount = usdcAmount > 0;
+  const insufficient = connected && hasAmount && usdcAmount > state.usdc;
+  const canSubmit = connected && hasAmount && !insufficient;
+
+  // The button is ALWAYS actionable — users should be able to simulate
+  // the trade (amount + fees + quote) without wallet friction. We only
+  // open the wallet picker when they actually try to buy.
+  function handlePrimary() {
+    if (!connected) {
+      setWalletModalVisible(true);
+      return;
+    }
+    if (!canSubmit) return;
+    dispatch({
+      type: "basket/deposit",
+      bundleId: bundle.id,
+      usdcAmount,
+    });
+  }
+
+  // Button label reacts to state without ever showing "Connect Wallet"
+  // in the primary slot — the wallet step is implicit under "Buy".
+  const buttonLabel = !hasAmount
+    ? "Enter an amount"
+    : insufficient
+      ? "Insufficient USDC"
+      : !connected
+        ? "Buy position"
+        : "Buy position";
+  const buttonActive = hasAmount && !insufficient;
+
+  return (
+    <div
+      className="basket-buy-panel"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
+        gap: 24,
+        height: "100%",
+        minHeight: 520,
+        background: C.card,
+        border: `0.5px solid ${C.border}`,
+        borderRadius: 14,
+        padding: "22px 22px 24px",
+      }}
+    >
+      {/* ---- Buy section ---- */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div
+          style={{
+            fontFamily: FD,
+            fontSize: 17,
+            fontWeight: 500,
+            color: C.textPrimary,
+            letterSpacing: "-0.005em",
+            textAlign: "center",
+          }}
+        >
+          Buy {bundle.id}
+        </div>
+        <div
+          style={{
+            fontFamily: FS,
+            fontSize: 12,
+            color: C.textSecondary,
+            lineHeight: 1.55,
+            textAlign: "center",
+            fontWeight: 300,
+          }}
+        >
+          Live NAV ${bundle.nav.toFixed(3)} · {bundle.totalLegs}-leg basket · simulate the
+          order below, wallet connects on submit.
+        </div>
+
+        {/* Amount input (always enabled) */}
+        <div
+          style={{
+            background: C.surface,
+            border: `0.5px solid ${C.border}`,
+            borderRadius: 12,
+            padding: "12px 14px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontFamily: FM,
+              fontSize: 10,
+              letterSpacing: "0.14em",
+              color: C.textMuted,
+              textTransform: "uppercase",
+              fontWeight: 500,
+            }}
+          >
+            <span>Amount</span>
+            <span>
+              Balance{" "}
+              <span style={{ color: connected ? C.textSecondary : C.textMuted }}>
+                {connected ? `$${state.usdc.toFixed(2)}` : "sim"}
+              </span>
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <input
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+              placeholder="0.00"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                color: C.textPrimary,
+                fontFamily: FD,
+                fontSize: 22,
+                fontWeight: 400,
+                letterSpacing: "-0.01em",
+                padding: 0,
+              }}
+            />
+            <span
+              style={{
+                fontFamily: FM,
+                fontSize: 11,
+                color: C.textSecondary,
+                letterSpacing: "0.06em",
+                fontWeight: 400,
+              }}
+            >
+              USDC
+            </span>
+          </div>
+        </div>
+
+        {/* Fee breakdown — dynamic, appears only when there's an amount */}
+        {hasAmount && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              padding: "10px 14px",
+              background: "rgba(10, 15, 24, 0.45)",
+              borderRadius: 10,
+              border: `0.5px solid ${C.border}`,
+            }}
+          >
+            <FeeRow
+              label="Protocol fee"
+              bps={fees.protocolBps}
+              usd={usdcAmount * fees.protocolBps / 10_000}
+            />
+            <FeeRow
+              label="Market-maker spread"
+              bps={fees.mmSpreadBps}
+              usd={usdcAmount * fees.mmSpreadBps / 10_000}
+            />
+            <FeeRow
+              label="Slippage"
+              bps={fees.slippageBps}
+              usd={usdcAmount * fees.slippageBps / 10_000}
+              hint="scales with order size"
+            />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontFamily: FM,
+                fontSize: 11,
+                color: C.textSecondary,
+                fontWeight: 500,
+                borderTop: `0.5px solid ${C.border}`,
+                paddingTop: 8,
+                marginTop: 2,
+                letterSpacing: "0.02em",
+              }}
+            >
+              <span>You receive</span>
+              <span style={{ color: accent, fontWeight: 600 }}>
+                {tokensOut.toFixed(2)} STHS
+              </span>
+            </div>
+            <div
+              style={{
+                fontFamily: FS,
+                fontSize: 10,
+                color: C.textMuted,
+                letterSpacing: "0.02em",
+                fontWeight: 300,
+                marginTop: 2,
+              }}
+            >
+              Placeholder fee surface — the live feed will plug into basket
+              depth + market-maker quotes once on-chain settlement ships.
+            </div>
+          </div>
+        )}
+
+        {/* Single primary action. Wallet connection is implicit: the
+            button triggers the picker only when the user actually tries
+            to submit. No "Connect Wallet" label in sight until needed. */}
+        <button
+          type="button"
+          onClick={handlePrimary}
+          disabled={!buttonActive}
+          style={{
+            width: "100%",
+            height: 44,
+            padding: "0 16px",
+            borderRadius: 10,
+            border: "none",
+            background: buttonActive
+              ? `linear-gradient(135deg, ${accent} 0%, ${accent}dd 100%)`
+              : `${accent}22`,
+            color: buttonActive ? "#001814" : C.textMuted,
+            fontFamily: FD,
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: "0.04em",
+            cursor: buttonActive ? "pointer" : "not-allowed",
+            transition: `transform 0.15s ${EASE}, box-shadow 0.15s ${EASE}`,
+            boxShadow: buttonActive
+              ? `0 10px 24px ${accent}33, inset 0 0 0 1px ${accent}55`
+              : "none",
+          }}
+          onMouseEnter={(e) => {
+            if (!buttonActive) return;
+            (e.currentTarget as HTMLElement).style.transform = "translateY(-1px)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
+          }}
+        >
+          {buttonLabel}
+        </button>
+      </div>
+
+      {/* ---- How it works ---- */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span
+            style={{
+              fontFamily: FM,
+              fontSize: 10,
+              letterSpacing: "0.18em",
+              color: C.textMuted,
+              fontWeight: 500,
+              textTransform: "uppercase",
+            }}
+          >
+            How it works
+          </span>
+          <span style={{ flex: 1, height: 1, background: C.border }} />
+        </div>
+        <ol
+          style={{
+            listStyle: "none",
+            margin: 0,
+            padding: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 14,
+          }}
+        >
+          {HOW_IT_WORKS.map((step) => (
+            <li
+              key={step.num}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "24px 1fr",
+                columnGap: 12,
+                rowGap: 3,
+                alignItems: "baseline",
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: FM,
+                  fontSize: 10,
+                  fontWeight: 500,
+                  letterSpacing: "0.1em",
+                  color: accent,
+                  paddingTop: 2,
+                  opacity: 0.85,
+                }}
+              >
+                {step.num}
+              </div>
+              <div
+                style={{
+                  fontFamily: FD,
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  color: C.textPrimary,
+                  letterSpacing: "-0.002em",
+                }}
+              >
+                {step.title}
+              </div>
+              <div />
+              <div
+                style={{
+                  fontFamily: FS,
+                  fontSize: 11.5,
+                  lineHeight: 1.55,
+                  color: C.textMuted,
+                  fontWeight: 300,
+                }}
+              >
+                {step.body}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Single line in the cost breakdown. `bps` is shown as a percentage with
+ * adaptive precision; `usd` is the dollar equivalent for the current
+ * order size. `hint` is an optional subtitle (used to flag the slippage
+ * row as size-dependent).
+ */
+function FeeRow({
+  label,
+  bps,
+  usd,
+  hint,
+}: {
+  label: string;
+  bps: number;
+  usd: number;
+  hint?: string;
+}) {
+  const pctText = bps >= 100 ? `${(bps / 100).toFixed(2)}%` : `${(bps / 100).toFixed(3)}%`;
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+      <span
+        style={{
+          fontFamily: FS,
+          fontSize: 11.5,
+          color: C.textSecondary,
+          fontWeight: 300,
+          letterSpacing: "0.01em",
+        }}
+      >
+        {label}
+        {hint && (
+          <span
+            style={{
+              fontFamily: FS,
+              fontSize: 10,
+              color: C.textMuted,
+              marginLeft: 6,
+              fontWeight: 300,
+            }}
+          >
+            {hint}
+          </span>
+        )}
+      </span>
+      <span
+        style={{
+          fontFamily: FM,
+          fontSize: 11,
+          color: C.textSecondary,
+          letterSpacing: "0.02em",
+          fontWeight: 400,
+        }}
+      >
+        {pctText}
+        <span style={{ color: C.textMuted, marginLeft: 6 }}>
+          ${usd.toFixed(2)}
+        </span>
+      </span>
+    </div>
+  );
+}
 
 /* ---------- Constituents ---------- */
 

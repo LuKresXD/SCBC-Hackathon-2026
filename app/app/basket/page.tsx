@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Header, PageFrame } from "../_components/Header";
 import { Sparkline } from "../_components/charts";
@@ -153,33 +153,51 @@ export default function BasketsPage() {
       <Header />
       <style>{BASKET_CSS}</style>
       <PageFrame>
-        {/* Hero */}
-        <section style={{ marginBottom: 32 }}>
-          <h1
-            style={{
-              fontFamily: FD,
-              fontSize: "clamp(32px, 3.6vw, 44px)",
-              lineHeight: 1.05,
-              letterSpacing: "-0.028em",
-              fontWeight: 400,
-              color: C.textPrimary,
-              margin: 0,
-            }}
-          >
-            Baskets
-          </h1>
-          <p
-            style={{
-              fontFamily: FS,
-              fontSize: 14,
-              lineHeight: 1.5,
-              color: C.textSecondary,
-              maxWidth: 540,
-              margin: "10px 0 0",
-            }}
-          >
-            Buy a basket of prediction markets as one token
-          </p>
+        {/* Hero + live-status bar.
+            The status bar used to live as a footer strip under the grid,
+            but that's (a) easy to miss and (b) visually redundant with
+            the "Live feed unavailable" warning banner that slots in when
+            things break. Promoting it to the top as a compact pill next
+            to the title makes the data-source + freshness obvious on
+            first read. */}
+        <section
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 18,
+            marginBottom: 18,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <h1
+              style={{
+                fontFamily: FD,
+                fontSize: "clamp(28px, 3vw, 38px)",
+                lineHeight: 1.05,
+                letterSpacing: "-0.028em",
+                fontWeight: 400,
+                color: C.textPrimary,
+                margin: 0,
+              }}
+            >
+              Baskets
+            </h1>
+            <p
+              style={{
+                fontFamily: FS,
+                fontSize: 13,
+                lineHeight: 1.5,
+                color: C.textSecondary,
+                maxWidth: 540,
+                margin: "6px 0 0",
+              }}
+            >
+              Buy a basket of prediction markets as one token
+            </p>
+          </div>
+          {data.status === "ok" && <LiveStatusPill at={data.at} />}
         </section>
 
         {/* Toolbar */}
@@ -189,7 +207,7 @@ export default function BasketsPage() {
             flexWrap: "wrap",
             alignItems: "center",
             gap: 10,
-            marginBottom: 20,
+            marginBottom: 14,
           }}
         >
           <PillGroup<TierFilter>
@@ -241,14 +259,16 @@ export default function BasketsPage() {
           <EmptyState onReset={() => { setTier("all"); setWin("all"); setQuery(""); }} />
         ) : (
           <div
+            className="basket-grid"
             style={{
               display: "grid",
-              // auto-fit collapses empty tracks so the visible cards always
-              // stretch to fill the row evenly (no phantom 4th column on
-              // wide monitors where 3 cards otherwise leave a gap on the
-              // right). minmax keeps a sensible min so cards don’t squish.
-              gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-              gap: 20,
+              // Locked to 3 columns (the product is a 3-tier × 3-window
+              // grid by design — a 4th column only emerges on wide
+              // monitors from auto-fit and breaks the mental model).
+              // Narrow viewports collapse to 2 / 1 columns via the
+              // BASKET_CSS media queries.
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: 14,
               alignItems: "stretch",
             }}
           >
@@ -266,39 +286,73 @@ export default function BasketsPage() {
             )}
           </div>
         )}
-
-        {data.status === "ok" && (
-          <div
-            style={{
-              marginTop: 18,
-              display: "flex",
-              justifyContent: "flex-end",
-              alignItems: "center",
-              fontFamily: FM,
-              fontSize: 11,
-              letterSpacing: "0.08em",
-              color: C.textSecondary,
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-              <span
-                aria-hidden
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: C.tealLight,
-                  boxShadow: `0 0 8px ${C.tealLight}99`,
-                }}
-              />
-              Live · polymarket · updated {formatAgo(data.at)}
-            </span>
-          </div>
-        )}
       </PageFrame>
     </>
+  );
+}
+
+/* ---------- Live-status pill ----------
+ *
+ * Compact top-of-page freshness indicator. Three segments (status /
+ * source / age) separated by thin vertical bars instead of mid-dots so
+ * the eye doesn't read them as bullet points. The green dot pulses via
+ * the `.basket-live-dot` keyframe animation (defined at the bottom of
+ * BASKET_CSS) which makes "live" feel live even on a stale tab. */
+function LiveStatusPill({ at }: { at: number }) {
+  // Re-render every 10s so "updated just now" → "updated 12s ago"
+  // without needing a router event. Cheap — just a setState on a tick.
+  const [, force] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => force((n) => n + 1), 10_000);
+    return () => clearInterval(iv);
+  }, []);
+
+  return (
+    <div
+      role="status"
+      aria-label="Live data status"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "7px 14px",
+        borderRadius: 999,
+        border: `0.5px solid ${C.border}`,
+        background: "rgba(10, 15, 24, 0.55)",
+        fontFamily: FM,
+        fontSize: 10.5,
+        letterSpacing: "0.12em",
+        textTransform: "uppercase",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+        <span
+          aria-hidden
+          className="basket-live-dot"
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: "50%",
+            background: C.green,
+            boxShadow: `0 0 10px ${C.green}cc`,
+          }}
+        />
+        <span style={{ color: C.green, fontWeight: 600 }}>Live</span>
+      </span>
+      <span
+        aria-hidden
+        style={{ width: 1, height: 10, background: C.border }}
+      />
+      <span style={{ color: C.textSecondary, fontWeight: 500 }}>Polymarket</span>
+      <span
+        aria-hidden
+        style={{ width: 1, height: 10, background: C.border }}
+      />
+      <span style={{ color: C.textMuted, fontWeight: 400 }}>
+        {formatAgo(at)}
+      </span>
+    </div>
   );
 }
 
@@ -316,8 +370,24 @@ function BasketCard({
   const [hov, setHov] = useState(false);
   const color = tc(bundle.tier);
   const posChange = bundle.change >= 0;
-  const urgent = bundle.daysLeft <= 20;
   const tierCls = `basket-card-tier-${bundle.tier}`;
+
+  // Last 30 days for the card preview. We derive min / mid / max from
+  // this slice and render them as a compact y-axis scale next to the
+  // sparkline so the curve's amplitude is readable at a glance instead
+  // of being decorative only.
+  const cardSeries = useMemo(() => bundle.history.slice(-30), [bundle.history]);
+  const { min: seriesMin, max: seriesMax } = useMemo(() => {
+    if (cardSeries.length === 0) return { min: 0, max: 0 };
+    let mn = cardSeries[0];
+    let mx = cardSeries[0];
+    for (const v of cardSeries) {
+      if (v < mn) mn = v;
+      if (v > mx) mx = v;
+    }
+    return { min: mn, max: mx };
+  }, [cardSeries]);
+  const seriesMid = (seriesMin + seriesMax) / 2;
 
   return (
     <div
@@ -357,8 +427,11 @@ function BasketCard({
           position: "relative",
           display: "flex",
           flexDirection: "column",
-          gap: 14,
-          padding: 20,
+          // Tighter inner spacing + shorter chart (see below) make the
+          // whole card ~50px shorter so a full 3×3 grid fits on a
+          // 1440×900 laptop without scrolling.
+          gap: 10,
+          padding: 16,
           borderRadius: 14.8,
           background: hov
             ? "linear-gradient(160deg, rgba(15, 22, 34, 0.94) 0%, rgba(6, 10, 18, 0.96) 100%)"
@@ -435,7 +508,12 @@ function BasketCard({
             fontFamily: FM,
             fontSize: 11,
             fontWeight: 500,
-            color: urgent ? color : C.textSecondary,
+            // Tier-colored for every basket, not just the ≤20d urgent
+            // ones — the days value is the primary "when" metric on the
+            // card and should read with the same emphasis across every
+            // row. (Previously only <=20d got the tint, which made the
+            // rest of the grid feel grey and lifeless.)
+            color,
             letterSpacing: "0.06em",
             textTransform: "uppercase",
             whiteSpace: "nowrap",
@@ -448,15 +526,50 @@ function BasketCard({
       {/* Chart — the star of the card. `bundle.history` is a full year of
           daily NAV points; the card preview always shows the most-recent
           30 days so the visual matches the "today" numbers below. The
-          full history is only consumed by the basket detail page. */}
+          full history is only consumed by the basket detail page.
+
+          The small column on the right is a static y-axis scale (max /
+          mid / min NAV for the visible 30-day window). No range picker
+          here — the card is one-glance by design; the range picker
+          lives on the detail page. */}
       <div
         style={{
           position: "relative",
-          height: 120,
+          // Shorter chart than before (88 vs 120) — still generous enough
+          // to read the curve at a glance, but saves 32px per card which
+          // is the difference between a 3×3 grid fitting and not fitting
+          // on a standard laptop viewport.
+          height: 88,
           margin: "0 -4px",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) auto",
+          alignItems: "stretch",
+          columnGap: 6,
         }}
       >
-        <Sparkline data={bundle.history.slice(-30)} color={color} height={120} />
+        <div style={{ position: "relative", minWidth: 0 }}>
+          <Sparkline data={cardSeries} color={color} height={88} />
+        </div>
+        <div
+          aria-hidden
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            padding: "1px 0 4px",
+            fontFamily: FM,
+            fontSize: 9.5,
+            color: C.textMuted,
+            letterSpacing: "0.02em",
+            textAlign: "right",
+            minWidth: 38,
+            pointerEvents: "none",
+          }}
+        >
+          <span>{(seriesMax * 100).toFixed(1)}%</span>
+          <span>{(seriesMid * 100).toFixed(1)}%</span>
+          <span>{(seriesMin * 100).toFixed(1)}%</span>
+        </div>
       </div>
 
       {/* Footer: probability + 24h change + resolves */}
@@ -473,7 +586,7 @@ function BasketCard({
           <div
             style={{
               fontFamily: FD,
-              fontSize: 28,
+              fontSize: 24,
               fontWeight: 300,
               color,
               letterSpacing: "-0.025em",
@@ -485,9 +598,9 @@ function BasketCard({
           <div
             style={{
               fontFamily: FM,
-              fontSize: 11,
+              fontSize: 10.5,
               color: C.textMuted,
-              marginTop: 6,
+              marginTop: 4,
             }}
           >
             ${bundle.nav.toFixed(3)}
@@ -497,7 +610,7 @@ function BasketCard({
           <div
             style={{
               fontFamily: FM,
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: 500,
               color: posChange ? C.green : C.red,
               letterSpacing: "0.01em",
@@ -509,9 +622,9 @@ function BasketCard({
           <div
             style={{
               fontFamily: FM,
-              fontSize: 11,
+              fontSize: 10.5,
               color: C.textMuted,
-              marginTop: 6,
+              marginTop: 4,
               letterSpacing: "0.02em",
             }}
           >
@@ -759,10 +872,11 @@ function PlaceholderCard({ tier, window: win }: { tier: 90 | 70 | 50; window: Wi
 function LoadingGrid() {
   return (
     <div
+      className="basket-grid"
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-        gap: 20,
+        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+        gap: 14,
       }}
     >
       {Array.from({ length: 6 }).map((_, i) => (
@@ -925,8 +1039,36 @@ const BASKET_CSS = `
   animation-duration: 6s;
 }
 
+/* Green pulsing dot on the live-status pill. Scales slightly + fades
+   so it reads as "heartbeat" instead of the "loading" shimmer. Toggled
+   off when the user has reduced-motion enabled. */
+@keyframes basket-live-pulse {
+  0%, 100% { transform: scale(1);   opacity: 1;   box-shadow: 0 0 8px rgba(34, 197, 94, 0.75); }
+  50%      { transform: scale(1.4); opacity: 0.55; box-shadow: 0 0 14px rgba(34, 197, 94, 0.9); }
+}
+.basket-live-dot {
+  animation: basket-live-pulse 1.8s ease-in-out infinite;
+  transform-origin: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .basket-card__border,
-  .basket-card__shimmer { animation: none !important; }
+  .basket-card__shimmer,
+  .basket-live-dot { animation: none !important; }
+}
+
+/* Collapse the 3-column grid on narrower viewports. The card itself
+   has a ~320px comfortable minimum — below that the sparkline loses
+   enough horizontal room that the axis labels start to crowd the
+   curve. Two clean breakpoints: 2-up below ~1000px, 1-up below ~640px. */
+@media (max-width: 1000px) {
+  .basket-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+@media (max-width: 640px) {
+  .basket-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
 }
 `;
