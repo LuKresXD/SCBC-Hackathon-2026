@@ -10,7 +10,9 @@ import {
 } from '../db/queries';
 import {
   adminWithdrawFees,
+  getMockAdapterState,
   getVaultState,
+  initializeMockAdapter,
 } from '../services/solana';
 import {
   finalizeBundleIfReady,
@@ -211,6 +213,49 @@ router.get('/bundles/:id/onchain', async (req: Request, res: Response) => {
     res.json(state);
   } catch (err) {
     console.error('GET /api/admin/bundles/:id/onchain error:', err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+/**
+ * POST /api/admin/init-mock-adapter
+ * One-time bootstrap of the Meteora mock adapter used by the PPN program.
+ * Idempotent: returns the existing adapter state if already initialized.
+ *
+ * Body: { apy_bps?: number }  (default 800 = 8% APY)
+ */
+router.post('/init-mock-adapter', async (req: Request, res: Response) => {
+  try {
+    const { apy_bps } = req.body as { apy_bps?: number };
+    const apyBps = typeof apy_bps === 'number' && apy_bps > 0 ? apy_bps : 800;
+    if (apyBps > 10_000) {
+      return res
+        .status(400)
+        .json({ error: 'apy_bps too high (max 10000 = 100%)' });
+    }
+    const result = await initializeMockAdapter(apyBps);
+    res.json({
+      initialized: result.signature !== null,
+      signature: result.signature,
+      adapter: result.adapter,
+    });
+  } catch (err) {
+    console.error('POST /api/admin/init-mock-adapter error:', err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+/**
+ * GET /api/admin/mock-adapter
+ * Read the on-chain mock-adapter state. Returns null if not yet initialized.
+ */
+router.get('/mock-adapter', async (_req: Request, res: Response) => {
+  try {
+    const state = await getMockAdapterState();
+    if (!state) return res.status(404).json({ error: 'Mock adapter not initialized' });
+    res.json(state);
+  } catch (err) {
+    console.error('GET /api/admin/mock-adapter error:', err);
     res.status(500).json({ error: String(err) });
   }
 });

@@ -1,11 +1,17 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Header, PageFrame } from "../_components/Header";
 import { MetricTile } from "../_components/charts";
 import { C, FS, FD, FM, EASE, tc, fmtUsd } from "../_lib/tokens";
-import { BUNDLES, bundleById } from "../_lib/bundles";
+import { bundleById } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
+import {
+  useLiveBaskets,
+  matchesPickerWindow,
+  type PickerWindow,
+} from "../_lib/use-live-baskets";
+import type { LiveBasket } from "../_lib/live-baskets";
 
 // Hardcoded DefiLlama pool IDs for top Solana USDC single-sided vaults
 // These are stable, well-audited, high-TVL pools
@@ -32,7 +38,8 @@ function calcDynamicSplit(apyDecimal: number, days: number): { vaultPct: number;
 
 export default function PpnPage() {
   const { state, dispatch } = useSandbox();
-  const [selectedBundle, setSelectedBundle] = useState<string>(BUNDLES[0].id);
+  const basketState = useLiveBaskets();
+  const [selectedBundle, setSelectedBundle] = useState<string | null>(null);
   const [amt, setAmt] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [renderNow, setRenderNow] = useState<number>(() => Date.now());
@@ -100,11 +107,33 @@ export default function PpnPage() {
   }, []);
 
   const [bundleTier, setBundleTier] = useState<90 | 70 | 50>(90);
-  const [bundleTime, setBundleTime] = useState<"all" | "week" | "month" | "6months" | "long">("all");
+  const [bundleTime, setBundleTime] = useState<PickerWindow>("all");
+
+  const liveBaskets: LiveBasket[] =
+    basketState.status === "ok" ? basketState.baskets : [];
+
+  // Auto-select the first matching live basket whenever the filters change
+  // or the selected basket disappears from the universe.
+  const filteredBaskets = useMemo(() => {
+    return liveBaskets
+      .filter((b) => b.tier === bundleTier)
+      .filter((b) => matchesPickerWindow(b.daysLeft, bundleTime))
+      .sort((a, b) => a.daysLeft - b.daysLeft);
+  }, [liveBaskets, bundleTier, bundleTime]);
+
+  useEffect(() => {
+    if (filteredBaskets.length === 0) {
+      if (selectedBundle !== null) setSelectedBundle(null);
+      return;
+    }
+    const stillThere = filteredBaskets.some((b) => b.id === selectedBundle);
+    if (!stillThere) setSelectedBundle(filteredBaskets[0].id);
+  }, [filteredBaskets, selectedBundle]);
 
   const APY = bestVault?.apy ?? 0.035;
-  const selectedBundleObj = BUNDLES.find(b => b.id === selectedBundle) ?? BUNDLES[0];
-  const maturityDays = selectedBundleObj.daysLeft;
+  const selectedBundleObj =
+    liveBaskets.find((b) => b.id === selectedBundle) ?? filteredBaskets[0] ?? null;
+  const maturityDays = selectedBundleObj?.daysLeft ?? 0;
 
   const dep = parseFloat(amt) || 0;
   const insufficient = dep > state.usdc;  const { vaultPct, basketPct } = calcDynamicSplit(APY, maturityDays);
@@ -116,7 +145,7 @@ export default function PpnPage() {
   const estimatedYield = vaultAtMaturity - vaultAmt;
 
   function handleDeposit() {
-    if (dep <= 0 || insufficient) return;
+    if (dep <= 0 || insufficient || !selectedBundle || !selectedBundleObj) return;
     dispatch({
       type: "ppn/open",
       bundleId: selectedBundle,
@@ -262,45 +291,78 @@ export default function PpnPage() {
                 </div>
               </div>
 
-              {/* Filtered + sorted bundles */}
-              {(() => {
-                const filtered = BUNDLES
-                  .filter(b => b.tier === bundleTier)
-                  .filter(b => {
-                    if (bundleTime === "all") return true;
-                    if (bundleTime === "week") return b.daysLeft <= 7;
-                    if (bundleTime === "month") return b.daysLeft > 7 && b.daysLeft <= 30;
-                    if (bundleTime === "6months") return b.daysLeft > 30 && b.daysLeft <= 180;
-                    return b.daysLeft > 180;
-                  })
-                  .sort((a, b) => a.daysLeft - b.daysLeft);
-
-                if (filtered.length === 0) return (
-                  <div style={{ textAlign: "center", color: C.textMuted, fontSize: 13, fontFamily: FS, padding: "20px 0" }}>
-                    No baskets match these filters
-                  </div>
-                );
-
-                return (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
-                    {filtered.map((b) => (
-                      <div key={b.id} onClick={() => setSelectedBundle(b.id)} style={{
-                        background: selectedBundle === b.id ? `${tc(b.tier)}10` : "rgba(10, 15, 24, 0.6)",
-                        border: `0.5px solid ${selectedBundle === b.id ? tc(b.tier) + "60" : "rgba(255, 255, 255, 0.06)"}`,
-                        borderLeft: `3px solid ${tc(b.tier)}`,
-                        borderRadius: 10, padding: "10px 14px", cursor: "pointer",
-                        transition: `all 0.2s ${EASE}`,
-                        boxShadow: selectedBundle === b.id ? `0 0 16px ${tc(b.tier)}18` : "none",
-                      }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>{b.id}</div>
-                        <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, marginTop: 3, letterSpacing: "0.04em" }}>
-                          {b.tier}% tier · NAV {(b.nav * 100).toFixed(1)}% · {b.daysLeft}d left
+              {/* Live basket grid — mirrors the exact same synthetic baskets
+                  surfaced on /app/basket so the PPN reference universe and
+                  the tranching universe stay consistent. */}
+              {basketState.status === "loading" && (
+                <div style={{ textAlign: "center", color: C.textMuted, fontSize: 13, fontFamily: FS, padding: "20px 0" }}>
+                  Loading live baskets…
+                </div>
+              )}
+              {basketState.status === "error" && (
+                <div style={{ textAlign: "center", color: C.red, fontSize: 12, fontFamily: FS, padding: "20px 0" }}>
+                  Couldn't load live baskets: {basketState.error}
+                </div>
+              )}
+              {basketState.status === "ok" && filteredBaskets.length === 0 && (
+                <div style={{ textAlign: "center", color: C.textMuted, fontSize: 13, fontFamily: FS, padding: "20px 0" }}>
+                  No live baskets match these filters
+                </div>
+              )}
+              {basketState.status === "ok" && filteredBaskets.length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8 }}>
+                  {filteredBaskets.map((b) => {
+                    const active = selectedBundle === b.id;
+                    const topLeg = [...b.markets].sort(
+                      (x, y) => y.volumeUsd - x.volumeUsd,
+                    )[0];
+                    return (
+                      <div
+                        key={b.id}
+                        onClick={() => setSelectedBundle(b.id)}
+                        style={{
+                          background: active ? `${tc(b.tier)}10` : "rgba(10, 15, 24, 0.6)",
+                          border: `0.5px solid ${active ? tc(b.tier) + "60" : "rgba(255, 255, 255, 0.06)"}`,
+                          borderLeft: `3px solid ${tc(b.tier)}`,
+                          borderRadius: 10,
+                          padding: "10px 14px",
+                          cursor: "pointer",
+                          transition: `all 0.2s ${EASE}`,
+                          boxShadow: active ? `0 0 16px ${tc(b.tier)}18` : "none",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 6 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>
+                            {b.id}
+                          </div>
+                          <div style={{ fontSize: 10, color: tc(b.tier), fontFamily: FM, fontWeight: 600 }}>
+                            {b.daysLeft}d
+                          </div>
                         </div>
+                        <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, marginTop: 3, letterSpacing: "0.04em" }}>
+                          {b.totalLegs} legs · NAV {(b.nav * 100).toFixed(1)}% · resolves {b.date}
+                        </div>
+                        {topLeg && (
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: C.textSecondary,
+                              fontFamily: FS,
+                              marginTop: 6,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                            title={topLeg.question}
+                          >
+                            • {topLeg.question}
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                );
-              })()}
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Existing vaults */}
@@ -311,7 +373,11 @@ export default function PpnPage() {
                   <span style={{ fontFamily: FM, fontSize: 10, letterSpacing: "0.18em", color: C.textMuted, fontWeight: 500 }}>YOUR VAULTS</span>
                 </div>
                 {state.ppnVaults.map((v) => {
-                  const b = bundleById(v.bundleId);
+                  // Prefer live basket metadata (fresh NAV/date); fall back
+                  // to the seeded BUNDLES for legacy vault ids that no
+                  // longer exist in the live universe.
+                  const liveBasket = liveBaskets.find((b) => b.id === v.bundleId);
+                  const b = liveBasket ?? bundleById(v.bundleId);
                   const elapsed = Math.max(0, (renderNow - v.createdAt) / 86_400_000);
                   const accrued = v.principal * (v.apy / 100 / 365) * Math.min(elapsed, v.maturityDays);
                   return (
@@ -404,17 +470,27 @@ export default function PpnPage() {
 
             <button
               onClick={handleDeposit}
-              disabled={insufficient || dep <= 0}
+              disabled={insufficient || dep <= 0 || !selectedBundle}
               style={{
                 width: "100%", padding: "12px 0", borderRadius: 10, border: "none",
-                background: confirmed ? C.green : (insufficient || dep <= 0) ? "rgba(255,255,255,0.06)" : C.violet,
-                color: (insufficient || dep <= 0) ? C.textMuted : "#fff",
+                background: confirmed
+                  ? C.green
+                  : insufficient || dep <= 0 || !selectedBundle
+                    ? "rgba(255,255,255,0.06)"
+                    : C.violet,
+                color: insufficient || dep <= 0 || !selectedBundle ? C.textMuted : "#fff",
                 fontSize: 14, fontWeight: 700, fontFamily: FD,
-                cursor: (insufficient || dep <= 0) ? "not-allowed" : "pointer",
+                cursor: insufficient || dep <= 0 || !selectedBundle ? "not-allowed" : "pointer",
                 transition: `all 0.2s ${EASE}`,
               }}
             >
-              {confirmed ? "✓ PPN opened" : insufficient ? "Insufficient USDC" : "Open PPN"}
+              {confirmed
+                ? "✓ PPN opened"
+                : !selectedBundle
+                  ? "Pick a basket first"
+                  : insufficient
+                    ? "Insufficient USDC"
+                    : "Open PPN"}
             </button>
             <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FS, textAlign: "center", marginTop: 10 }}>
               Split auto-calculated · principal guaranteed at maturity

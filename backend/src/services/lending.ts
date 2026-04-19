@@ -65,20 +65,67 @@ export function snapshot(): PoolSnapshot {
   };
 }
 
+export class LendingError extends Error {
+  code: "ZERO_AMOUNT" | "INSUFFICIENT_LIQUIDITY" | "WITHDRAW_EXCEEDS_BALANCE" | "REPAY_EXCEEDS_DEBT";
+  constructor(
+    code: LendingError["code"],
+    message: string,
+  ) {
+    super(message);
+    this.code = code;
+  }
+}
+
+function requirePositive(amount: number) {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new LendingError("ZERO_AMOUNT", "amount must be a positive number");
+  }
+}
+
 export function deposit(amountUsdc: number): PoolSnapshot {
-  state.total_deposits += Math.max(0, amountUsdc);
+  requirePositive(amountUsdc);
+  state.total_deposits += amountUsdc;
   return snapshot();
 }
 export function withdraw(amountUsdc: number): PoolSnapshot {
-  state.total_deposits = Math.max(0, state.total_deposits - amountUsdc);
+  requirePositive(amountUsdc);
+  const available = state.total_deposits - state.total_borrows;
+  if (amountUsdc > available) {
+    throw new LendingError(
+      "INSUFFICIENT_LIQUIDITY",
+      `Only ${available} USDC is withdrawable (${state.total_borrows} is on loan).`,
+    );
+  }
+  if (amountUsdc > state.total_deposits) {
+    throw new LendingError(
+      "WITHDRAW_EXCEEDS_BALANCE",
+      `Pool only holds ${state.total_deposits} USDC total.`,
+    );
+  }
+  state.total_deposits -= amountUsdc;
   return snapshot();
 }
 export function borrow(amountUsdc: number): PoolSnapshot {
-  state.total_borrows += Math.max(0, amountUsdc);
+  requirePositive(amountUsdc);
+  const available = state.total_deposits - state.total_borrows;
+  if (amountUsdc > available) {
+    throw new LendingError(
+      "INSUFFICIENT_LIQUIDITY",
+      `Pool can lend at most ${available} USDC right now.`,
+    );
+  }
+  state.total_borrows += amountUsdc;
   return snapshot();
 }
 export function repay(amountUsdc: number): PoolSnapshot {
-  state.total_borrows = Math.max(0, state.total_borrows - amountUsdc);
+  requirePositive(amountUsdc);
+  if (amountUsdc > state.total_borrows) {
+    throw new LendingError(
+      "REPAY_EXCEEDS_DEBT",
+      `Total outstanding is only ${state.total_borrows} USDC.`,
+    );
+  }
+  state.total_borrows -= amountUsdc;
   return snapshot();
 }
 

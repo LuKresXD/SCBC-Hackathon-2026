@@ -21,6 +21,7 @@ import { metricsRoutes } from './routes/metrics';
 import { trancheRoutes } from './routes/tranches';
 import { lendingRoutes } from './routes/lending';
 import { hedgeRoutes } from './routes/hedge';
+import portfolioRoutes from './routes/portfolio';
 import { metricsMiddleware } from './services/metrics';
 import { startMonitorServer } from './monitor/server';
 import { startCronJobs } from './services/cron';
@@ -31,8 +32,26 @@ import { errorHandler } from './middleware/errorHandler';
 const app = express();
 
 // CORS
+// FRONTEND_URL may be a single origin ("http://localhost:3000") or a
+// comma-separated list ("http://localhost:3000,http://localhost:3003").
+// An unset value falls back to "*" so standalone API testing still works.
+const frontendOrigins = (process.env.FRONTEND_URL ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const corsOrigin: cors.CorsOptions['origin'] =
+  frontendOrigins.length === 0
+    ? '*'
+    : frontendOrigins.length === 1
+      ? frontendOrigins[0]
+      : (origin, cb) => {
+          // Allow same-origin / curl / server-to-server (no Origin header).
+          if (!origin) return cb(null, true);
+          if (frontendOrigins.includes(origin)) return cb(null, true);
+          return cb(new Error(`CORS: origin ${origin} not allowed`));
+        };
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: corsOrigin,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -76,6 +95,15 @@ const marketLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many market requests, please try again later' },
+});
+
+// AI portfolio composer: 10 req/min per IP (Anthropic API calls are expensive)
+const portfolioLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many portfolio requests, please try again later' },
 });
 
 // Health check
@@ -157,6 +185,7 @@ app.use('/api/metrics', metricsRoutes);
 app.use('/api/tranches', trancheRoutes);
 app.use('/api/lending', lendingRoutes);
 app.use('/api/hedge', hedgeRoutes);
+app.use('/api/portfolio', portfolioLimiter, portfolioRoutes);
 
 // Root redirect to API docs
 app.get('/', (_req, res) => res.redirect('/api/docs'));

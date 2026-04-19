@@ -21,18 +21,25 @@ import { PublicKey } from "@solana/web3.js";
 import {
   adminWithdrawFees as _adminWithdrawFees,
   buildDepositTx as _buildDepositTx,
+  buildPpnDepositTx as _buildPpnDepositTx,
+  buildPpnRedeemTx as _buildPpnRedeemTx,
   buildRedeemTx as _buildRedeemTx,
   confirmTransaction as _confirmTransaction,
   finalizeVault as _finalizeVault,
+  getMockAdapterState as _getMockAdapterState,
   getTokenBalance as _getTokenBalance,
   getVaultState as _getVaultState,
+  initializeMockAdapter as _initializeMockAdapter,
   initializeVault as _initializeVault,
   resolveLeg as _resolveLeg,
   type BuildDepositTxResult,
+  type BuildPpnDepositTxResult,
+  type BuildPpnRedeemTxResult,
   type BuildRedeemTxResult,
   type InitializeVaultArgs,
   type InitializeVaultResult,
   type LegInitView,
+  type MockAdapterState,
   type VaultStateView,
 } from "../solana/client";
 import { deriveTraxMint, deriveUsdcVault, deriveVaultPda } from "../solana/anchor";
@@ -41,21 +48,28 @@ import { deriveTraxMint, deriveUsdcVault, deriveVaultPda } from "../solana/ancho
 
 export {
   BuildDepositTxResult,
+  BuildPpnDepositTxResult,
+  BuildPpnRedeemTxResult,
   BuildRedeemTxResult,
   InitializeVaultArgs,
   InitializeVaultResult,
   LegInitView,
+  MockAdapterState,
   VaultStateView,
 };
 
 export const buildDepositTx = _buildDepositTx;
 export const buildRedeemTx = _buildRedeemTx;
+export const buildPpnDepositTx = _buildPpnDepositTx;
+export const buildPpnRedeemTx = _buildPpnRedeemTx;
 export const initializeVault = _initializeVault;
 export const resolveLeg = _resolveLeg;
 export const finalizeVault = _finalizeVault;
 export const adminWithdrawFees = _adminWithdrawFees;
 export const getVaultState = _getVaultState;
 export const confirmTransaction = _confirmTransaction;
+export const getMockAdapterState = _getMockAdapterState;
+export const initializeMockAdapter = _initializeMockAdapter;
 
 // ---------- Legacy stub-compatible API ----------
 

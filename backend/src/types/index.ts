@@ -115,6 +115,17 @@ export interface PolymarketMarket {
   active: boolean;
   closed: boolean;
   end_date_iso?: string;
+  // URL slugs — used by the frontend to build working polymarket.com links.
+  slug?: string;
+  event_id?: string;
+  event_slug?: string;
+  event_title?: string;
+  // Price / change telemetry mirrored from Gamma. Optional because not every
+  // Gamma row populates every field (new markets won't have 1wk/1mo yet).
+  last_trade_price?: number;
+  one_day_price_change?: number;  // absolute delta in YES price over ~24h
+  one_week_price_change?: number; // absolute delta in YES price over ~7d
+  one_month_price_change?: number;
 }
 
 export interface PolymarketToken {
@@ -143,10 +154,22 @@ export interface PPNVault {
   principal_usdc: number;        // Original deposit, locked in Meteora vault
   yield_deployed_usdc: number;   // Accumulated yield deployed into bundles
   estimated_apy: number;         // Current estimated APY from Meteora
-  vault_address: string;         // Solana vault address
+  vault_address: string;         // For on-chain notes this is the note PDA (base58);
+                                 // legacy stubs keep the `stub_vault_*` format.
   status: 'active' | 'matured' | 'withdrawn';
   created_at: string;
   maturity_date: string;
+  // On-chain integration columns (see db/schema_ppn_onchain.sql). All nullable
+  // so legacy stub rows continue to round-trip unchanged.
+  note_seed_hex?: string | null;
+  onchain_tx_signature?: string | null;
+  redemption_tx_signature?: string | null;
+  maturity_ts?: number | null;
+  // Tranche overlay (see db/schema_tranche.sql). NULL columns = vanilla PPN.
+  tranche_kind?: 'senior' | 'mezzanine' | 'junior' | null;
+  tranche_attach?: number | null;
+  tranche_detach?: number | null;
+  price_per_token?: number | null;
 }
 
 export interface PPNDepositRequest {

@@ -1,0 +1,22 @@
+PORT=3001
+
+# ---------- Supabase ----------
+SUPABASE_URL=https://wgjmjjfbkxjuzatizrxl.supabase.co
+SUPABASE_ANON_KEY=sb_secret_fAiAyqp13hGMBqBvFIuF4Q_UCcAJpsQ
+
+# ---------- External APIs ----------
+POLYMARKET_API_URL=https://clob.polymarket.com
+FRONTEND_URL=http://localhost:3000
+
+# ---------- Solana (populated by 14-deploy-devnet.command, phase 15) ----------
+SOLANA_RPC_URL=https://api.devnet.solana.com
+TRAXIS_VAULT_PROGRAM_ID=E77R7yqUEAWz9jUk92kSnrpvUBEwGpPT3iZaThbKQcJb
+TRAXIS_PPN_PROGRAM_ID=4NnrpeWgdmVymcdGqbrmQUunHHvyVSevUXCKFGJYwbtE
+USDC_MINT=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
+FEE_RECIPIENT=38fe3phREhkZNHmeAaZg1snxNafpFkPTivST465SYY5f
+AUTHORITY_KEYPAIR=/Users/victor/.config/solana/id.json
+
+# ---------- Helius ----------
+HELIUS_API_KEY=replace_with_helius_key
+# Set in Helius dashboard to point at your deployed backend:
+#   https://<your-railway-app>.up.railway.app/api/webhook/helius
