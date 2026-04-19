@@ -99,6 +99,9 @@ export default function PpnPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const [bundleTier, setBundleTier] = useState<90 | 70 | 50>(90);
+  const [bundleTime, setBundleTime] = useState<"all" | "week" | "month" | "6months" | "long">("all");
+
   const APY = bestVault?.apy ?? 0.035;
   const selectedBundleObj = BUNDLES.find(b => b.id === selectedBundle) ?? BUNDLES[0];
   const maturityDays = selectedBundleObj.daysLeft;
@@ -216,32 +219,88 @@ export default function PpnPage() {
 
             {/* Basket picker */}
             <div style={{ background: "linear-gradient(135deg, rgba(15, 21, 32, 0.7) 0%, rgba(5, 8, 12, 0.8) 100%)", border: "0.5px solid rgba(255, 255, 255, 0.06)", borderRadius: 14, padding: 20, marginBottom: 20, backdropFilter: "blur(10px)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
                 <span style={{ width: 14, height: 1, background: C.textMuted, opacity: 0.6 }} />
                 <span style={{ fontFamily: FM, fontSize: 10, letterSpacing: "0.18em", color: C.textMuted, fontWeight: 500 }}>PICK A REFERENCE BASKET</span>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 10 }}>
-                {BUNDLES.map((b) => (
-                  <div
-                    key={b.id}
-                    onClick={() => setSelectedBundle(b.id)}
-                    style={{
-                      background: selectedBundle === b.id ? `${tc(b.tier)}10` : "rgba(10, 15, 24, 0.6)",
-                      border: `0.5px solid ${selectedBundle === b.id ? tc(b.tier) + "60" : "rgba(255, 255, 255, 0.06)"}`,
-                      borderLeft: `3px solid ${tc(b.tier)}`,
-                      borderRadius: 10,
-                      padding: "10px 14px",
-                      cursor: "pointer",
+
+              {/* Tier filter */}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: FM, letterSpacing: "0.16em", marginBottom: 8 }}>PROBABILITY TIER</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {([90, 70, 50] as const).map(t => (
+                    <button key={t} onClick={() => { setBundleTier(t); setBundleTime("all"); }} style={{
+                      padding: "6px 14px", borderRadius: 100, cursor: "pointer",
+                      border: `0.5px solid ${bundleTier === t ? tc(t) : "rgba(255,255,255,0.08)"}`,
+                      background: bundleTier === t ? `${tc(t)}15` : "transparent",
+                      color: bundleTier === t ? tc(t) : C.textSecondary,
+                      fontSize: 12, fontFamily: FD, fontWeight: bundleTier === t ? 500 : 400,
+                      boxShadow: bundleTier === t ? `0 0 14px ${tc(t)}20` : "none",
                       transition: `all 0.2s ${EASE}`,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>{b.id}</div>
-                    <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, marginTop: 3, letterSpacing: "0.04em" }}>
-                      {b.tier}% tier · NAV {(b.nav * 100).toFixed(1)}% · {b.daysLeft}d left
-                    </div>
-                  </div>
-                ))}
+                    }}>{t}%</button>
+                  ))}
+                </div>
               </div>
+
+              {/* Time filter */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: FM, letterSpacing: "0.16em", marginBottom: 8 }}>RESOLUTION WINDOW</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {(["all", "week", "month", "6months", "long"] as const).map(t => {
+                    const labels = { all: "All", week: "This week", month: "This month", "6months": "6 months", long: "Long term" };
+                    return (
+                      <button key={t} onClick={() => setBundleTime(t)} style={{
+                        padding: "6px 12px", borderRadius: 100, cursor: "pointer",
+                        border: `0.5px solid ${bundleTime === t ? C.tealLight : "rgba(255,255,255,0.08)"}`,
+                        background: bundleTime === t ? "rgba(45, 212, 191, 0.1)" : "transparent",
+                        color: bundleTime === t ? C.tealLight : C.textSecondary,
+                        fontSize: 11, fontFamily: FD, fontWeight: bundleTime === t ? 500 : 400,
+                        transition: `all 0.2s ${EASE}`,
+                      }}>{labels[t]}</button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Filtered + sorted bundles */}
+              {(() => {
+                const filtered = BUNDLES
+                  .filter(b => b.tier === bundleTier)
+                  .filter(b => {
+                    if (bundleTime === "all") return true;
+                    if (bundleTime === "week") return b.daysLeft <= 7;
+                    if (bundleTime === "month") return b.daysLeft > 7 && b.daysLeft <= 30;
+                    if (bundleTime === "6months") return b.daysLeft > 30 && b.daysLeft <= 180;
+                    return b.daysLeft > 180;
+                  })
+                  .sort((a, b) => a.daysLeft - b.daysLeft);
+
+                if (filtered.length === 0) return (
+                  <div style={{ textAlign: "center", color: C.textMuted, fontSize: 13, fontFamily: FS, padding: "20px 0" }}>
+                    No baskets match these filters
+                  </div>
+                );
+
+                return (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
+                    {filtered.map((b) => (
+                      <div key={b.id} onClick={() => setSelectedBundle(b.id)} style={{
+                        background: selectedBundle === b.id ? `${tc(b.tier)}10` : "rgba(10, 15, 24, 0.6)",
+                        border: `0.5px solid ${selectedBundle === b.id ? tc(b.tier) + "60" : "rgba(255, 255, 255, 0.06)"}`,
+                        borderLeft: `3px solid ${tc(b.tier)}`,
+                        borderRadius: 10, padding: "10px 14px", cursor: "pointer",
+                        transition: `all 0.2s ${EASE}`,
+                        boxShadow: selectedBundle === b.id ? `0 0 16px ${tc(b.tier)}18` : "none",
+                      }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>{b.id}</div>
+                        <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, marginTop: 3, letterSpacing: "0.04em" }}>
+                          {b.tier}% tier · NAV {(b.nav * 100).toFixed(1)}% · {b.daysLeft}d left
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Existing vaults */}
