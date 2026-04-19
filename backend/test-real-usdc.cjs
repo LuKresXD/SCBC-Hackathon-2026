@@ -378,15 +378,20 @@ async function getUsdcBalance(conn, owner) {
   console.log(`  owner:         ${note.owner.toBase58()}`);
   console.log(`  principalUsdc: ${note.principalUsdc.toString()}`);
   console.log(`  maturityTs:    ${note.maturityTs.toString()}`);
-  console.log(`  adapter:       ${note.adapter.toBase58()}`);
-  console.log(`  redeemed:      ${note.redeemed}`);
+  console.log(`  traxVault:     ${note.traxVault.toBase58()}`);
+  console.log(`  traxMint:      ${note.traxMint.toBase58()}`);
+  console.log(`  state:         ${JSON.stringify(note.state)}`);
   console.log(`  Solscan:       ${solscanAcct(notePda.toBase58())}`);
+
+  // Anchor serialises the PpnState enum as an object with one key —
+  // { active: {} } for Active, { redeemed: {} } for Redeemed.
+  const isActive = note.state && Object.prototype.hasOwnProperty.call(note.state, "active");
 
   const ok =
     note.owner.equals(authPk) &&
     note.principalUsdc.toString() === principal.toString() &&
     note.maturityTs.toNumber() === maturityTs &&
-    !note.redeemed;
+    isActive;
   if (ok) {
     console.log("  ✅ Note account matches expected state.");
   } else {

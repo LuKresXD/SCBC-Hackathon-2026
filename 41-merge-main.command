@@ -109,25 +109,28 @@ git checkout main 2>&1 | tee -a "$LOG" || {
 }
 git pull --ff-only origin main 2>&1 | tee -a "$LOG" || true
 
-git merge --no-ff integration/full-wiring -m "$(cat <<'EOF'
+MERGE_MSGFILE="$(mktemp -t merge-msg)"
+cat >"$MERGE_MSGFILE" <<'MERGE_MSG'
 Merge integration/full-wiring: Tharun UI + wiring backend + tranche/lending
 
 Includes:
   - Tharun's live Polymarket baskets, responsive detail chart, wallet-connect UI
-  - main's vault BPF-stack-overflow fix
+  - Vault BPF-stack-overflow fix from main
   - Backend PPN on-chain prepare/confirm routes + Anchor client helpers
   - Lending program scaffold + error code cleanup
   - Tranche backend: POST /api/tranches/prepare|confirm, GET /user/:wallet
   - schema_tranche.sql overlay (non-destructive)
   - backend/test-real-usdc.cjs proof-of-movement test
   - Command scripts for build, deploy, integrate, test, merge
-EOF
-)" 2>&1 | tee -a "$LOG" || {
+MERGE_MSG
+if ! git merge --no-ff integration/full-wiring -F "$MERGE_MSGFILE" 2>&1 | tee -a "$LOG"; then
+  rm -f "$MERGE_MSGFILE"
   log "❌ merge failed"
   log "   Resolve conflicts manually, commit, then push main."
   read -r -p "Press ENTER to close..."
   exit 1
-}
+fi
+rm -f "$MERGE_MSGFILE"
 
 # --- 6. Push ---
 log ""
