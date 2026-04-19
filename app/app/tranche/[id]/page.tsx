@@ -1,23 +1,53 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Header, PageFrame } from "../../_components/Header";
 import { ConnectWalletCard } from "../../_components/ConnectWalletCard";
 import { MetricTile } from "../../_components/charts";
 import { C, FS, FD, EASE, trancheColor, tc } from "../../_lib/tokens";
-import { bundleById } from "../../_lib/bundles";
+import { bundleById, type Bundle } from "../../_lib/bundles";
+import { useLiveBaskets } from "../../_lib/use-live-baskets";
 import { quoteTranchesLocal } from "../_quote";
 
 type TrancheKind = "senior" | "mezzanine" | "junior";
 
 export default function TrancheDetail() {
   const params = useParams<{ id: string }>();
-  const bundle = bundleById(params.id);
+  const basketState = useLiveBaskets();
   const [kind, setKind] = useState<TrancheKind>("senior");
 
+  // Same resolution priority as /app/basket/[id]: live cache wins when
+  // available (real leg count, real resolution span), seed only as a
+  // fallback for offline / degraded mode. The old code called
+  // `bundleById(params.id)` directly, which now finds the seed for every
+  // live id since the two id spaces were unified — that meant the
+  // tranche detail was permanently pinned to stale 12-leg seed data.
+  const bundle: Bundle | null = useMemo(() => {
+    if (basketState.status === "ok") {
+      const live = basketState.baskets.find((b) => b.id === params.id);
+      if (live) return live;
+    }
+    return bundleById(params.id) ?? null;
+  }, [params.id, basketState]);
+
   if (!bundle) {
+    // Only show "not found" once the live fetch has resolved — otherwise
+    // a brief flicker of "Bundle not found" appears on cold loads while
+    // the shared cache is still pending.
+    if (basketState.status === "loading") {
+      return (
+        <>
+          <Header />
+          <PageFrame>
+            <div style={{ padding: 48, textAlign: "center", color: C.textMuted, fontFamily: FS }}>
+              Loading basket…
+            </div>
+          </PageFrame>
+        </>
+      );
+    }
     return (
       <>
         <Header />

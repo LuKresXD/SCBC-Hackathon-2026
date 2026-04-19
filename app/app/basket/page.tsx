@@ -1,23 +1,28 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Header, PageFrame } from "../_components/Header";
 import { Sparkline } from "../_components/charts";
 import { C, FS, FD, FM, EASE, tc, tl } from "../_lib/tokens";
 import { BUNDLES, type Bundle } from "../_lib/bundles";
 import {
-  buildLiveBaskets,
-  fetchLiveMarkets,
   isLiveBasket,
   type BasketSlot,
   type LiveBasket,
   type WindowKey,
 } from "../_lib/live-baskets";
+import { useLiveBaskets } from "../_lib/use-live-baskets";
 
 type TierFilter = "all" | 90 | 70 | 50;
 type WindowFilter = "all" | "week" | "month" | "long";
-type SortOption = "change_desc" | "change_asc" | "nav_desc" | "nav_asc" | "days_asc";
+type SortOption =
+  | "grid"
+  | "change_desc"
+  | "change_asc"
+  | "nav_desc"
+  | "nav_asc"
+  | "days_asc";
 
 const WINDOW_LABEL: Record<Exclude<WindowFilter, "all">, string> = {
   week: "This week",
@@ -26,6 +31,7 @@ const WINDOW_LABEL: Record<Exclude<WindowFilter, "all">, string> = {
 };
 
 const SORT_LABEL: Record<SortOption, string> = {
+  grid: "By tier · time",
   change_desc: "Top gainers",
   change_asc: "Top losers",
   nav_desc: "Highest prob",
@@ -33,7 +39,12 @@ const SORT_LABEL: Record<SortOption, string> = {
   days_asc: "Expiring soon",
 };
 
+// Rendering order for the natural grid sort.
+const WINDOW_ORDER: Record<WindowKey, number> = { week: 0, month: 1, long: 2 };
+const TIER_ORDER: Record<90 | 70 | 50, number> = { 90: 0, 70: 1, 50: 2 };
+
 function formatDaysLeft(days: number): string {
+  if (!Number.isFinite(days)) return "TBD";
   if (days <= 0) return "Resolving";
   if (days === 1) return "1 day";
   return `${days} days`;
@@ -58,50 +69,30 @@ export default function BasketsPage() {
   const router = useRouter();
   const [tier, setTier] = useState<TierFilter>("all");
   const [win, setWin] = useState<WindowFilter>("all");
-  const [sort, setSort] = useState<SortOption>("change_desc");
+  const [sort, setSort] = useState<SortOption>("grid");
   const [query, setQuery] = useState("");
-  const [data, setData] = useState<DataState>({ status: "loading" });
-  const mountedRef = useRef(true);
+  const basketState = useLiveBaskets();
 
-  // Fetch live markets on mount, rebuild baskets, and refresh every 60s.
-  useEffect(() => {
-    mountedRef.current = true;
-    let timer: ReturnType<typeof setInterval> | null = null;
-
-    async function load() {
-      try {
-        const markets = await fetchLiveMarkets(5000);
-        const slots = buildLiveBaskets(markets);
-        if (!mountedRef.current) return;
-        const haveAny = slots.some(isLiveBasket);
-        if (!haveAny) {
-          setData({
-            status: "fallback",
-            baskets: BUNDLES,
-            error: "No live markets matched any tier × window bucket",
-            source: "seed",
-          });
-        } else {
-          setData({ status: "ok", slots, at: Date.now(), source: "live" });
-        }
-      } catch (err) {
-        if (!mountedRef.current) return;
-        setData({
-          status: "fallback",
-          baskets: BUNDLES,
-          error: err instanceof Error ? err.message : "Failed to load live markets",
-          source: "seed",
-        });
-      }
+  // Derive our local view from the shared cache. The shared hook already
+  // deduplicates fetches across every /app/* page — we just reshape its
+  // output into the existing DataState to keep the UI tree unchanged.
+  const data: DataState = useMemo(() => {
+    if (basketState.status === "loading") return { status: "loading" };
+    if (basketState.status === "error") {
+      return {
+        status: "fallback",
+        baskets: BUNDLES,
+        error: basketState.error,
+        source: "seed",
+      };
     }
-
-    load();
-    timer = setInterval(load, 60_000);
-    return () => {
-      mountedRef.current = false;
-      if (timer) clearInterval(timer);
+    return {
+      status: "ok",
+      slots: basketState.baskets as unknown as BasketSlot[],
+      at: basketState.at,
+      source: "live",
     };
-  }, []);
+  }, [basketState]);
 
   // The grid mixes real live baskets (LiveBasket) with placeholder slots for
   // tier×window combos that don't have 10 live legs yet. Fallback mode shows
@@ -124,13 +115,27 @@ export default function BasketsPage() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return slots.filter((s) => {
+    const matching = slots.filter((s) => {
       if (tier !== "all" && s.tier !== tier) return false;
       if (win !== "all" && s.window !== win) return false;
       if (q && !s.id.toLowerCase().includes(q)) return false;
       return true;
-    }).sort((a, b) => {
-      // Placeholders sink to the bottom within each sort group.
+    });
+
+    // "grid" sort keeps the canonical 3×3 layout (rows = tier 90→50,
+    // cols = window week→long). Placeholders stay in their natural slot so
+    // the grid is uniform even when some combos don't have 10 live legs.
+    if (sort === "grid") {
+      return matching.sort((a, b) => {
+        const tierDiff = TIER_ORDER[a.tier] - TIER_ORDER[b.tier];
+        if (tierDiff !== 0) return tierDiff;
+        return WINDOW_ORDER[a.window] - WINDOW_ORDER[b.window];
+      });
+    }
+
+    // For every other sort mode, push placeholders to the bottom so the
+    // real baskets surface first in the chosen ranking.
+    return matching.sort((a, b) => {
       const aLive = isLiveBasket(a);
       const bLive = isLiveBasket(b);
       if (aLive !== bLive) return aLive ? -1 : 1;
@@ -238,8 +243,13 @@ export default function BasketsPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
-              gap: 16,
+              // auto-fit collapses empty tracks so the visible cards always
+              // stretch to fill the row evenly (no phantom 4th column on
+              // wide monitors where 3 cards otherwise leave a gap on the
+              // right). minmax keeps a sensible min so cards don’t squish.
+              gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+              gap: 20,
+              alignItems: "stretch",
             }}
           >
             {filtered.map((s, i) =>
@@ -257,25 +267,22 @@ export default function BasketsPage() {
           </div>
         )}
 
-        <div
-          style={{
-            marginTop: 18,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            fontFamily: FM,
-            fontSize: 11,
-            letterSpacing: "0.08em",
-            color: C.textMuted,
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <span>
-            {filtered.filter(isLiveBasket).length} live · {filtered.length} total
-          </span>
-          {data.status === "ok" && (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, color: C.textSecondary }}>
+        {data.status === "ok" && (
+          <div
+            style={{
+              marginTop: 18,
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              fontFamily: FM,
+              fontSize: 11,
+              letterSpacing: "0.08em",
+              color: C.textSecondary,
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
               <span
                 aria-hidden
                 style={{
@@ -288,8 +295,8 @@ export default function BasketsPage() {
               />
               Live · polymarket · updated {formatAgo(data.at)}
             </span>
-          )}
-        </div>
+          </div>
+        )}
       </PageFrame>
     </>
   );
@@ -438,7 +445,10 @@ function BasketCard({
         </span>
       </div>
 
-      {/* Chart — the star of the card */}
+      {/* Chart — the star of the card. `bundle.history` is a full year of
+          daily NAV points; the card preview always shows the most-recent
+          30 days so the visual matches the "today" numbers below. The
+          full history is only consumed by the basket detail page. */}
       <div
         style={{
           position: "relative",
@@ -446,7 +456,7 @@ function BasketCard({
           margin: "0 -4px",
         }}
       >
-        <Sparkline data={bundle.history} color={color} width={520} height={120} />
+        <Sparkline data={bundle.history.slice(-30)} color={color} height={120} />
       </div>
 
       {/* Footer: probability + 24h change + resolves */}
@@ -751,8 +761,8 @@ function LoadingGrid() {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
-        gap: 16,
+        gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+        gap: 20,
       }}
     >
       {Array.from({ length: 6 }).map((_, i) => (

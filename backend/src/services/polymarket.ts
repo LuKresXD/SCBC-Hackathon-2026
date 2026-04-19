@@ -18,6 +18,21 @@ interface GammaMarketResponse {
     outcome: string;
     price: number;
   }>;
+  // Parent events: Polymarket groups correlated questions under one event
+  // (e.g. "What will happen before GTA VI?"). The first entry is used for
+  // linking and for cross-basket correlation dedupe.
+  events?: Array<{
+    id?: string;
+    slug?: string;
+    title?: string;
+  }>;
+  // Price telemetry (all optional — newer markets may not have long-horizon
+  // changes yet, and Gamma does not always emit oneDayPriceChange on every
+  // row; we forward whichever fields are present).
+  lastTradePrice?: number;
+  oneDayPriceChange?: number;
+  oneWeekPriceChange?: number;
+  oneMonthPriceChange?: number;
 }
 
 interface GammaEventResponse {
@@ -72,6 +87,7 @@ function parseOutcomePrices(raw: string): number[] {
 }
 
 function toPolymarketMarket(m: GammaMarketResponse): PolymarketMarket {
+  const primaryEvent = m.events?.[0];
   return {
     id: m.id,
     question: m.question,
@@ -82,6 +98,14 @@ function toPolymarketMarket(m: GammaMarketResponse): PolymarketMarket {
     active: m.active,
     closed: m.closed,
     end_date_iso: m.endDate,
+    slug: m.slug,
+    event_id: primaryEvent?.id,
+    event_slug: primaryEvent?.slug,
+    event_title: primaryEvent?.title,
+    last_trade_price: m.lastTradePrice,
+    one_day_price_change: m.oneDayPriceChange,
+    one_week_price_change: m.oneWeekPriceChange,
+    one_month_price_change: m.oneMonthPriceChange,
   };
 }
 

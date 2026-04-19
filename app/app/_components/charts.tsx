@@ -3,38 +3,66 @@
  * Shared chart + card primitives — orbital dark-space theme.
  */
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { C, FM, FS, FD, EASE, lightenColor, darkenColor, tc } from "../_lib/tokens";
 
 export function Sparkline({
   data,
   color,
   height = 48,
-  width = 120,
+  width,
 }: {
   data: number[];
   color: string;
   height?: number;
+  /**
+   * Optional explicit pixel width. When omitted (preferred), the chart sizes
+   * itself to its container via ResizeObserver so the rightmost data point
+   * always lands at the right edge of the card instead of being clipped by
+   * `overflow: hidden` on narrower parents.
+   */
   width?: number;
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLCanvasElement>(null);
+  const [measured, setMeasured] = useState<number | null>(null);
+
+  // Track the container's actual rendered width. We intentionally ignore the
+  // `width` prop here when not supplied — container-driven sizing keeps the
+  // sparkline crisp at every zoom level / viewport width.
+  useEffect(() => {
+    if (width !== undefined) return; // caller pinned an explicit width
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.max(1, Math.round(entries[0].contentRect.width));
+      setMeasured(w);
+    });
+    ro.observe(el);
+    // Prime once synchronously so the first paint isn't empty.
+    setMeasured(Math.max(1, Math.round(el.getBoundingClientRect().width)));
+    return () => ro.disconnect();
+  }, [width]);
+
+  const renderWidth = width ?? measured;
+
   useEffect(() => {
     const c = ref.current;
-    if (!c) return;
+    if (!c || !renderWidth) return;
     const ctx = c.getContext("2d")!;
     const dpr = window.devicePixelRatio || 1;
-    c.width = width * dpr;
+    c.width = renderWidth * dpr;
     c.height = height * dpr;
-    c.style.width = width + "px";
+    c.style.width = renderWidth + "px";
     c.style.height = height + "px";
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, width, height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, renderWidth, height);
     const min = Math.min(...data);
     const max = Math.max(...data);
     const range = max - min || 0.01;
     const pad = 3;
     const pts = data.map((v, i) => ({
-      x: pad + (i / (data.length - 1)) * (width - pad * 2),
+      x: pad + (i / (data.length - 1)) * (renderWidth - pad * 2),
       y: pad + (1 - (v - min) / range) * (height - pad * 2),
     }));
     ctx.beginPath();
@@ -52,8 +80,20 @@ export function Sparkline({
     ctx.closePath();
     ctx.fillStyle = color + "18";
     ctx.fill();
-  }, [data, color, height, width]);
-  return <canvas ref={ref} style={{ display: "block", width: "100%", height: height + "px" }} />;
+  }, [data, color, height, renderWidth]);
+
+  // Wrapper div is what ResizeObserver watches — it always fills the parent
+  // horizontally. The canvas is sized to match in pixels so its drawing
+  // coordinates line up 1:1 with the displayed box (no more fixed 520px
+  // overflow that the previous implementation produced).
+  return (
+    <div
+      ref={wrapRef}
+      style={{ display: "block", width: "100%", height: height + "px", position: "relative" }}
+    >
+      <canvas ref={ref} style={{ display: "block" }} />
+    </div>
+  );
 }
 
 export function PulseGauge({

@@ -115,6 +115,17 @@ export interface PolymarketMarket {
   active: boolean;
   closed: boolean;
   end_date_iso?: string;
+  // URL slugs — used by the frontend to build working polymarket.com links.
+  slug?: string;
+  event_id?: string;
+  event_slug?: string;
+  event_title?: string;
+  // Price / change telemetry mirrored from Gamma. Optional because not every
+  // Gamma row populates every field (new markets won't have 1wk/1mo yet).
+  last_trade_price?: number;
+  one_day_price_change?: number;  // absolute delta in YES price over ~24h
+  one_week_price_change?: number; // absolute delta in YES price over ~7d
+  one_month_price_change?: number;
 }
 
 export interface PolymarketToken {

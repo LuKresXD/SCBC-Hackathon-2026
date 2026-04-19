@@ -1,10 +1,28 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletReadyState } from "@solana/wallet-adapter-base";
 import type { Wallet } from "@solana/wallet-adapter-react";
 import { C, FM, FD, FS } from "../_lib/tokens";
+
+/**
+ * Render children into <body> once we're on the client.
+ *
+ * The wallet button sits inside the sticky <header>, which has
+ * `backdrop-filter: blur(...)`. Per CSS spec, `backdrop-filter` makes the
+ * element a containing block for ALL descendants — including ones with
+ * `position: fixed`. So without portalling, the modal (inset:0 + position:
+ * fixed) gets clipped to the 56px header strip instead of covering the
+ * viewport, which is the "stuck at the top of the page" bug.
+ */
+function BodyPortal({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted || typeof document === "undefined") return null;
+  return createPortal(children, document.body);
+}
 
 /**
  * Drop-in replacement for WalletMultiButton.
@@ -40,14 +58,20 @@ export function ConnectButton({
   const [menuOpen, setMenuOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  // The post-connect menu is portalled to <body> so it escapes the header's
+  // backdrop-filter containing block. That also means it's no longer a DOM
+  // descendant of menuRef, so outside-click detection needs to check this
+  // separate ref too.
+  const menuContentRef = useRef<HTMLDivElement | null>(null);
 
   // Close the post-connect menu if the user clicks outside.
   useEffect(() => {
     if (!menuOpen) return;
     function onDocClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
+      const t = e.target as Node;
+      const insideButton = menuRef.current?.contains(t);
+      const insideMenu = menuContentRef.current?.contains(t);
+      if (!insideButton && !insideMenu) setMenuOpen(false);
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
@@ -212,13 +236,21 @@ export function ConnectButton({
         <span style={{ fontFamily: connected ? FM : FD }}>{label}</span>
       </button>
 
-      {/* Post-connect dropdown: copy address / disconnect */}
+      {/* Post-connect dropdown: copy address / disconnect. Portalled out
+          because the button lives inside <header>'s backdrop-filter
+          containing block, which would otherwise clip the menu. */}
       {connected && menuOpen && (
+        <BodyPortal>
         <div
+          ref={menuContentRef}
           style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            right: 0,
+            position: "fixed",
+            top: (menuRef.current?.getBoundingClientRect().bottom ?? 0) + 6,
+            right: Math.max(
+              8,
+              window.innerWidth -
+                (menuRef.current?.getBoundingClientRect().right ?? window.innerWidth),
+            ),
             minWidth: 200,
             background: C.card,
             borderTop: `0.5px solid ${C.border}`,
@@ -228,7 +260,7 @@ export function ConnectButton({
             borderRadius: 10,
             padding: 4,
             boxShadow: "0 12px 32px rgba(0,0,0,0.4)",
-            zIndex: 200,
+            zIndex: 10000,
           }}
         >
           <button
@@ -262,10 +294,13 @@ export function ConnectButton({
             Disconnect
           </button>
         </div>
+        </BodyPortal>
       )}
 
-      {/* Wallet-picker modal */}
+      {/* Wallet-picker modal. Portalled to <body> for the same containing-
+          block reason as the menu above. */}
       {open && (
+        <BodyPortal>
         <div
           onClick={() => setOpen(false)}
           style={{
@@ -274,7 +309,7 @@ export function ConnectButton({
             background: "rgba(0, 0, 0, 0.72)",
             backdropFilter: "blur(6px)",
             WebkitBackdropFilter: "blur(6px)",
-            zIndex: 1000,
+            zIndex: 10000,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -382,6 +417,7 @@ export function ConnectButton({
             </div>
           </div>
         </div>
+        </BodyPortal>
       )}
     </div>
   );

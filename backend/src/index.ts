@@ -32,8 +32,26 @@ import { errorHandler } from './middleware/errorHandler';
 const app = express();
 
 // CORS
+// FRONTEND_URL may be a single origin ("http://localhost:3000") or a
+// comma-separated list ("http://localhost:3000,http://localhost:3003").
+// An unset value falls back to "*" so standalone API testing still works.
+const frontendOrigins = (process.env.FRONTEND_URL ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const corsOrigin: cors.CorsOptions['origin'] =
+  frontendOrigins.length === 0
+    ? '*'
+    : frontendOrigins.length === 1
+      ? frontendOrigins[0]
+      : (origin, cb) => {
+          // Allow same-origin / curl / server-to-server (no Origin header).
+          if (!origin) return cb(null, true);
+          if (frontendOrigins.includes(origin)) return cb(null, true);
+          return cb(new Error(`CORS: origin ${origin} not allowed`));
+        };
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: corsOrigin,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,

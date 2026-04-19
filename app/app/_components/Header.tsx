@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { C, FM, FD, BACKEND_URL } from "../_lib/tokens";
+import { C, FM, FD } from "../_lib/tokens";
 
 const ConnectButton = dynamic(
   async () => (await import("./ConnectButton")).ConnectButton,
@@ -20,124 +20,6 @@ const NAV_LEFT = [
   { id: "lending",  label: "Lending",        href: "/app/lending" },
   { id: "hedge",    label: "Hedge",          href: "/app/hedge" },
 ];
-
-type OnchainStatus = {
-  cluster: string;
-  programs: {
-    vault: { deployed: boolean; executable: boolean };
-    ppn:   { deployed: boolean; executable: boolean };
-  };
-};
-
-type LiveStats = {
-  cluster: string | null;
-  programsHealthy: number;    // 0..2
-  programsTotal: number;      // always 2
-  bundleCount: number | null;
-  marketCount: number | null;
-  rpcError: string | null;
-};
-
-function useLiveStats(): LiveStats {
-  const [stats, setStats] = useState<LiveStats>({
-    cluster: null,
-    programsHealthy: 0,
-    programsTotal: 2,
-    bundleCount: null,
-    marketCount: null,
-    rpcError: null,
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-    async function pull() {
-      try {
-        const [statusRes, bundlesRes, marketsRes] = await Promise.all([
-          fetch(`${BACKEND_URL}/api/onchain/status`, { cache: "no-store" }),
-          fetch(`${BACKEND_URL}/api/bundles`, { cache: "no-store" }),
-          fetch(`${BACKEND_URL}/api/markets/curated?limit=1&overfetch=500`, { cache: "no-store" }),
-        ]);
-        const status = (await statusRes.json()) as OnchainStatus;
-        const bundles = (await bundlesRes.json()) as unknown[];
-        const markets = (await marketsRes.json()) as { count?: number; total_after_filter?: number; markets?: unknown[] };
-        if (cancelled) return;
-        const healthy =
-          (status.programs?.vault?.deployed && status.programs?.vault?.executable ? 1 : 0) +
-          (status.programs?.ppn?.deployed && status.programs?.ppn?.executable ? 1 : 0);
-        const marketCount =
-          typeof markets?.count === "number"
-            ? markets.count
-            : typeof markets?.total_after_filter === "number"
-              ? markets.total_after_filter
-              : Array.isArray(markets?.markets)
-                ? markets.markets.length
-                : null;
-        setStats({
-          cluster: status.cluster ?? null,
-          programsHealthy: healthy,
-          programsTotal: 2,
-          bundleCount: Array.isArray(bundles) ? bundles.length : null,
-          marketCount,
-          rpcError: null,
-        });
-      } catch (e) {
-        if (!cancelled) setStats((s) => ({ ...s, rpcError: (e as Error).message }));
-      }
-    }
-    pull();
-    const iv = setInterval(pull, 20000);
-    return () => { cancelled = true; clearInterval(iv); };
-  }, []);
-
-  return stats;
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <span style={{ fontSize: 10, fontFamily: FM, letterSpacing: "0.1em", color: C.textSecondary, whiteSpace: "nowrap" }}>
-      <span style={{ color: C.textMuted }}>{label} </span>
-      <span style={{ color: C.textPrimary, fontWeight: 500 }}>{value}</span>
-    </span>
-  );
-}
-
-function OnchainStatusPill() {
-  const stats = useLiveStats();
-  const healthy = stats.programsHealthy === stats.programsTotal;
-  const dotColor = stats.rpcError ? C.red : healthy ? C.tealLight : C.amber;
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 14,
-        padding: "6px 12px",
-      }}
-    >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          background: dotColor,
-          display: "inline-block",
-          flexShrink: 0,
-        }}
-      />
-      {stats.rpcError ? (
-        <Stat label="RPC" value="OFFLINE" />
-      ) : (
-        <>
-          <Stat label="NET" value={(stats.cluster ?? "—").toUpperCase()} />
-          <Stat label="PROGRAMS" value={`${stats.programsHealthy}/${stats.programsTotal}`} />
-          <Stat label="BUNDLES" value={stats.bundleCount == null ? "—" : String(stats.bundleCount)} />
-          <Stat label="MARKETS" value={stats.marketCount == null ? "—" : String(stats.marketCount)} />
-        </>
-      )}
-    </div>
-  );
-}
 
 export function Header({ onResetClick }: { onResetClick?: () => void } = {}) {
   const pathname = usePathname();
@@ -237,7 +119,6 @@ export function Header({ onResetClick }: { onResetClick?: () => void } = {}) {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-          <OnchainStatusPill />
           {onResetClick && (
             <button
               type="button"
