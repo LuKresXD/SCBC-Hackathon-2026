@@ -139,7 +139,7 @@ function OnchainStatusPill() {
   );
 }
 
-export function Header() {
+export function Header({ onResetClick }: { onResetClick?: () => void } = {}) {
   const pathname = usePathname();
 
   return (
@@ -238,6 +238,35 @@ export function Header() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
           <OnchainStatusPill />
+          {onResetClick && (
+            <button
+              type="button"
+              onClick={onResetClick}
+              title="Reset sandbox"
+              style={{
+                background: "transparent",
+                border: `0.5px solid ${C.border}`,
+                borderRadius: 6,
+                color: C.textSecondary,
+                fontFamily: FM,
+                fontSize: 12,
+                height: 32,
+                padding: "0 10px",
+                cursor: "pointer",
+                letterSpacing: "0.06em",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.color = C.textPrimary;
+                (e.currentTarget as HTMLElement).style.borderColor = C.borderHover;
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.color = C.textSecondary;
+                (e.currentTarget as HTMLElement).style.borderColor = C.border;
+              }}
+            >
+              ↻ RESET
+            </button>
+          )}
           <ConnectButton variant="header" />
         </div>
       </header>
