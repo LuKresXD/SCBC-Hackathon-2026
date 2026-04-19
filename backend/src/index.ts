@@ -21,6 +21,7 @@ import { metricsRoutes } from './routes/metrics';
 import { trancheRoutes } from './routes/tranches';
 import { lendingRoutes } from './routes/lending';
 import { hedgeRoutes } from './routes/hedge';
+import portfolioRoutes from './routes/portfolio';
 import { metricsMiddleware } from './services/metrics';
 import { startMonitorServer } from './monitor/server';
 import { startCronJobs } from './services/cron';
@@ -76,6 +77,15 @@ const marketLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many market requests, please try again later' },
+});
+
+// AI portfolio composer: 10 req/min per IP (Anthropic API calls are expensive)
+const portfolioLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many portfolio requests, please try again later' },
 });
 
 // Health check
@@ -157,6 +167,7 @@ app.use('/api/metrics', metricsRoutes);
 app.use('/api/tranches', trancheRoutes);
 app.use('/api/lending', lendingRoutes);
 app.use('/api/hedge', hedgeRoutes);
+app.use('/api/portfolio', portfolioLimiter, portfolioRoutes);
 
 // Root redirect to API docs
 app.get('/', (_req, res) => res.redirect('/api/docs'));
