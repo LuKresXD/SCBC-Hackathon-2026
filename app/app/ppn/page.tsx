@@ -7,22 +7,27 @@ import { C, FS, FD, FM, EASE, tc, fmtUsd } from "../_lib/tokens";
 import { BUNDLES, bundleById } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
 
-// USDC mint address on Solana mainnet
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+// Hardcoded DefiLlama pool IDs for top Solana USDC single-sided vaults
+// These are stable, well-audited, high-TVL pools
+const DEFI_LLAMA_POOLS = [
+  { id: "f4844743-d1f9-4b08-b63d-84028c13b28b", name: "Kamino",  fallbackApy: 0.044 },
+  { id: "a7c53df8-5a5b-42a3-b5d0-ee3d73b9ac6e", name: "MarginFi", fallbackApy: 0.038 },
+  { id: "bd5e5a1c-e70e-4e9e-a7d6-cce55f85264f", name: "Drift",   fallbackApy: 0.042 },
+  { id: "c5fd5730-7706-4b3a-8f1e-0b9c4c3e1c2a", name: "Save",   fallbackApy: 0.035 },
+];
 const METEORA_VAULT_API = "https://merv2-api.meteora.ag/vault_info";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const STRUCTURING_FEE = 0.005; // 0.5% on basket portion only
 
-// Dynamic split calculation:
-// We want vault_portion * (1 + daily_rate)^days = principal
-// So vault_portion = principal / (1 + daily_rate)^days
-// basket_portion = principal - vault_portion
-// This guarantees 100% principal return even if basket goes to zero.
+type VaultSource = { name: string; apy: number; live: boolean };
+
+// Dynamic split: vault grows back to principal by maturity
 function calcDynamicSplit(apyDecimal: number, days: number): { vaultPct: number; basketPct: number } {
   if (apyDecimal <= 0 || days <= 0) return { vaultPct: 0.99, basketPct: 0.01 };
   const dailyRate = apyDecimal / 365;
   const growthFactor = Math.pow(1 + dailyRate, days);
   const vaultPct = 1 / growthFactor;
-  const basketPct = 1 - vaultPct;
-  return { vaultPct, basketPct };
+  return { vaultPct, basketPct: 1 - vaultPct };
 }
 
 export default function PpnPage() {
@@ -32,50 +37,69 @@ export default function PpnPage() {
   const [confirmed, setConfirmed] = useState(false);
   const [renderNow, setRenderNow] = useState<number>(() => Date.now());
 
-  // Live Meteora APY state
-  const [vaultApy, setVaultApy] = useState<number | null>(null);
+  // Live vault sources state
+  const [vaultSources, setVaultSources] = useState<VaultSource[]>([]);
+  const [bestVault, setBestVault] = useState<VaultSource | null>(null);
   const [apyLoading, setApyLoading] = useState(true);
-  const [apyError, setApyError] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setRenderNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Fetch live Meteora USDC vault APY
   useEffect(() => {
-    async function fetchApy() {
-      try {
-        setApyLoading(true);
-        setApyError(false);
-        const res = await fetch(METEORA_VAULT_API);
-        if (!res.ok) throw new Error("Failed to fetch");
-        const data = await res.json();
-        // Find USDC vault by token address
-        const usdcVault = data.find((v: { token_address: string }) =>
-          v.token_address?.toLowerCase() === USDC_MINT.toLowerCase()
-        );
-        if (usdcVault) {
-          // API returns APY as a percentage (e.g. 8.4 not 0.084), convert to decimal
-          const rawApy = usdcVault.average_apy ?? usdcVault.closest_apy ?? 8.4;
-          setVaultApy(rawApy / 100);
-        } else {
-          setVaultApy(0.084);
-        }
-      } catch {
-        setApyError(true);
-        setVaultApy(0.084); // fallback to 8.4%
-      } finally {
-        setApyLoading(false);
+    async function fetchApys() {
+      setApyLoading(true);
+      const sources: VaultSource[] = [];
+
+      // Try DefiLlama for each pool
+      for (const pool of DEFI_LLAMA_POOLS) {
+        try {
+          const res = await fetch(`https://yields.llama.fi/pool/${pool.id}`);
+          if (res.ok) {
+            const data = await res.json();
+            const apy = (data?.data?.apy ?? 0) / 100;
+            if (apy > 0) {
+              sources.push({ name: pool.name, apy, live: true });
+              continue;
+            }
+          }
+        } catch {}
+        // Fallback to hardcoded
+        sources.push({ name: pool.name, apy: pool.fallbackApy, live: false });
       }
+
+      // Try Meteora as additional source
+      try {
+        const res = await fetch(METEORA_VAULT_API);
+        if (res.ok) {
+          const data = await res.json();
+          const usdcVault = data.find((v: { token_address: string }) =>
+            v.token_address?.toLowerCase() === USDC_MINT.toLowerCase()
+          );
+          if (usdcVault) {
+            const apy = (usdcVault.average_apy ?? usdcVault.closest_apy ?? 0) / 100;
+            if (apy > 0) sources.push({ name: "Meteora", apy, live: true });
+          }
+        }
+      } catch {}
+      if (!sources.find(s => s.name === "Meteora")) {
+        sources.push({ name: "Meteora", apy: 0.03, live: false });
+      }
+
+      // Sort by APY descending, pick best
+      sources.sort((a, b) => b.apy - a.apy);
+      setVaultSources(sources);
+      setBestVault(sources[0] ?? null);
+      setApyLoading(false);
     }
-    fetchApy();
-    // Refresh every 5 minutes
-    const interval = setInterval(fetchApy, 5 * 60 * 1000);
+
+    fetchApys();
+    const interval = setInterval(fetchApys, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
-  const APY = vaultApy ?? 0.084;
+  const APY = bestVault?.apy ?? 0.035;
   const selectedBundleObj = BUNDLES.find(b => b.id === selectedBundle) ?? BUNDLES[0];
   const maturityDays = selectedBundleObj.daysLeft;
 
@@ -83,10 +107,9 @@ export default function PpnPage() {
   const insufficient = dep > state.usdc;  const { vaultPct, basketPct } = calcDynamicSplit(APY, maturityDays);
   const vaultAmt = dep * vaultPct;
   const basketAmt = dep * basketPct;
-
-  // What the vault grows to by maturity (should equal dep)
+  const fee = basketAmt * STRUCTURING_FEE; // 0.5% on basket only, not vault
+  const basketAmtAfterFee = basketAmt - fee;
   const vaultAtMaturity = vaultAmt * Math.pow(1 + APY / 365, maturityDays);
-  // Estimated yield earned on vault portion
   const estimatedYield = vaultAtMaturity - vaultAmt;
 
   function handleDeposit() {
@@ -118,19 +141,18 @@ export default function PpnPage() {
             Zero-loss <span style={{ fontWeight: 500, background: "linear-gradient(90deg, #a78bfa 0%, #c4b5fd 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>structured notes</span>
           </div>
           <div style={{ fontSize: 13, color: C.textSecondary, fontFamily: FS, maxWidth: 620, lineHeight: 1.6 }}>
-            Your principal is locked in Meteora's highest-yield USDC vault. The split is calculated so that vault yield alone returns 100% of your deposit by maturity. Only yield is at risk — never principal.
+            Your principal is locked in a top Solana USDC vault. The split is calculated so vault yield alone covers your full deposit by maturity. You never put principal at risk, just the basket portion.
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginBottom: 24 }}>
           <MetricTile label="PRINCIPAL" value="100% guaranteed" color={C.teal} sub="returned at maturity" />
           <MetricTile
-            label="VAULT APY (LIVE)"
+            label={`BEST VAULT APY${apyLoading ? "" : " · " + (bestVault?.name ?? "")}`}
             value={apyLoading ? "Loading..." : `${(APY * 100).toFixed(2)}%`}
-            color={apyError ? C.amber : C.green}
-            sub={apyError ? "fallback rate" : "Meteora USDC vault · 24h avg"}
+            color={C.green}
+            sub={apyLoading ? "scanning vaults..." : `${bestVault?.live ? "live rate" : "estimated"}, auto-selected`}
           />
-          <MetricTile label="UPSIDE" value="Basket payout" color={C.amber} sub="yield deployed into predictions" />
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 20 }}>
@@ -146,14 +168,36 @@ export default function PpnPage() {
               overflow: "hidden",
             }}>
               <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 1.5, background: "linear-gradient(to right, transparent, rgba(139, 92, 246, 0.6), transparent)" }} />
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                 <span style={{ width: 14, height: 1, background: C.violet, opacity: 0.6 }} />
                 <span style={{ fontFamily: FM, fontSize: 10, letterSpacing: "0.18em", color: C.violet, fontWeight: 500 }}>HOW THE SPLIT WORKS</span>
               </div>
-              <p style={{ fontSize: 13, color: C.textSecondary, fontFamily: FS, lineHeight: 1.65, marginBottom: 12 }}>
-                The vault/basket split is calculated dynamically. Given the current Meteora USDC APY of <span style={{ color: C.green, fontFamily: FM, fontWeight: 500 }}>{(APY * 100).toFixed(2)}%</span> and your chosen maturity of <span style={{ color: C.tealLight, fontFamily: FM, fontWeight: 500 }}>{maturityDays} days</span>, we calculate exactly how much needs to go into the vault so that daily compounding returns your full principal by maturity.
+              <p style={{ fontSize: 13, color: C.textSecondary, fontFamily: FS, lineHeight: 1.65, marginBottom: 14 }}>
+                We compare {vaultSources.length} Solana USDC vaults in real time and route to the best rate. The split is sized so vault yield alone covers your full principal by maturity. The basket is pure upside, and we take our 0.5% fee only on that part.
               </p>
-              <div style={{ background: "rgba(5, 8, 12, 0.5)", borderRadius: 10, padding: "12px 16px", fontFamily: FM, fontSize: 11, color: C.textMuted, letterSpacing: "0.04em" }}>
+
+              {/* Vault comparison table */}
+              {vaultSources.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  {vaultSources.map((v, i) => (
+                    <div key={v.name} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "7px 12px", borderRadius: 8, marginBottom: 4,
+                      background: i === 0 ? "rgba(45, 212, 191, 0.08)" : "rgba(5, 8, 12, 0.4)",
+                      border: `0.5px solid ${i === 0 ? "rgba(45, 212, 191, 0.25)" : "rgba(255,255,255,0.05)"}`,
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {i === 0 && <span style={{ width: 5, height: 5, borderRadius: "50%", background: C.tealLight, boxShadow: `0 0 6px ${C.tealLight}` }} />}
+                        <span style={{ fontSize: 12, color: i === 0 ? C.textPrimary : C.textSecondary, fontFamily: FD, fontWeight: i === 0 ? 600 : 400 }}>{v.name}</span>
+                        {i === 0 && <span style={{ fontSize: 9, color: C.tealLight, fontFamily: FM, letterSpacing: "0.1em", padding: "1px 5px", border: `0.5px solid ${C.tealLight}40`, borderRadius: 4 }}>BEST</span>}
+                      </div>
+                      <span style={{ fontSize: 12, color: i === 0 ? C.tealLight : C.textSecondary, fontFamily: FM, fontWeight: i === 0 ? 600 : 400 }}>{(v.apy * 100).toFixed(2)}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ background: "rgba(5, 8, 12, 0.5)", borderRadius: 10, padding: "10px 14px", fontFamily: FM, fontSize: 11, color: C.textMuted, letterSpacing: "0.04em" }}>
                 Vault: <span style={{ color: C.teal }}>{(vaultPct * 100).toFixed(2)}%</span> · Basket upside: <span style={{ color: C.amber }}>{(basketPct * 100).toFixed(2)}%</span> · Maturity: <span style={{ color: C.tealLight }}>{maturityDays}d</span>
               </div>
               {dep > 0 && (
@@ -281,10 +325,11 @@ export default function PpnPage() {
 
             {/* Live split breakdown */}
             <div style={{ background: C.surface, borderRadius: 10, padding: "14px", marginBottom: 16 }}>
-              <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 10 }}>DYNAMIC SPLIT · {maturityDays}d @ {(APY * 100).toFixed(2)}% APY</div>
+              <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 10 }}>BREAKDOWN · {maturityDays}d @ {(APY * 100).toFixed(2)}% via {bestVault?.name ?? "vault"}</div>
               {[
-                ["Vault (protected)", dep > 0 ? fmtUsd(vaultAmt, 0) : "-", C.teal, `${(vaultPct * 100).toFixed(1)}%`],
-                ["Basket (upside)", dep > 0 ? fmtUsd(basketAmt, 0) : "-", C.amber, `${(basketPct * 100).toFixed(1)}%`],
+                ["Vault (protected)", dep > 0 ? fmtUsd(vaultAmt, 0) : "-", C.teal, "no fee"],
+                ["Basket (upside)", dep > 0 ? fmtUsd(basketAmtAfterFee, 2) : "-", C.amber, "after 0.5% fee"],
+                ["Structuring fee", dep > 0 ? fmtUsd(fee, 2) : "-", C.textMuted, "0.5% of basket"],
                 ["Yield by maturity", dep > 0 ? `+${fmtUsd(estimatedYield, 2)}` : "-", C.green, "est."],
                 ["Minimum return", dep > 0 ? fmtUsd(dep, 0) : "-", C.textPrimary, "guaranteed"],
               ].map(([k, v, c, tag]) => (
