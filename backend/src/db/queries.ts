@@ -415,6 +415,25 @@ export async function getPPNVaultsByWallet(walletAddress: string): Promise<PPNVa
   return data ?? [];
 }
 
+/**
+ * Tranche-only positions for a wallet. Excludes vanilla PPN notes where
+ * `tranche_kind` is null. Used by the tranche portfolio UI.
+ */
+export async function getTranchesByWallet(walletAddress: string): Promise<PPNVault[]> {
+  const { data, error } = await supabase
+    .from('ppn_vaults')
+    .select('*')
+    .eq('wallet_address', walletAddress)
+    .not('tranche_kind', 'is', null)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('getTranchesByWallet error:', error.message);
+    return [];
+  }
+  return data ?? [];
+}
+
 export async function getPPNVaultById(id: string): Promise<PPNVault | null> {
   const { data, error } = await supabase
     .from('ppn_vaults')
@@ -463,6 +482,69 @@ export async function updatePPNVaultStatus(
     return null;
   }
   return data;
+}
+
+/**
+ * Update the on-chain artifacts for a PPN vault. Used after the initialize_note
+ * (or redeem_at_maturity) transaction confirms so we can link the Supabase row
+ * to the on-chain note PDA + tx signature.
+ */
+export async function updatePPNVaultOnchain(
+  id: string,
+  updates: Partial<
+    Pick<
+      PPNVault,
+      'note_seed_hex'
+      | 'onchain_tx_signature'
+      | 'redemption_tx_signature'
+      | 'maturity_ts'
+      | 'vault_address'
+      | 'status'
+      | 'tranche_kind'
+      | 'tranche_attach'
+      | 'tranche_detach'
+      | 'price_per_token'
+    >
+  >
+): Promise<PPNVault | null> {
+  const { data, error } = await supabase
+    .from('ppn_vaults')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('updatePPNVaultOnchain error:', error.message);
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Look up a PPN vault by wallet + bundle. The frontend doesn't know the vault
+ * UUID during the redeem flow (it only has wallet + bundle), so this lets us
+ * find the one active note. Returns the most recent active vault if multiple
+ * exist.
+ */
+export async function getActivePPNVault(
+  walletAddress: string,
+  bundleId: string
+): Promise<PPNVault | null> {
+  const { data, error } = await supabase
+    .from('ppn_vaults')
+    .select('*')
+    .eq('wallet_address', walletAddress)
+    .eq('bundle_id', bundleId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.error('getActivePPNVault error:', error.message);
+    return null;
+  }
+  return (data ?? [])[0] ?? null;
 }
 
 export async function getAllLegs(): Promise<Leg[]> {

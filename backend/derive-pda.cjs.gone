@@ -1,0 +1,16 @@
+require('dotenv').config();
+const web3 = require('@solana/web3.js');
+const { PublicKey } = web3;
+const Buf = require('buffer').Buffer;
+
+const ppn = new PublicKey(process.env.TRAXIS_PPN_PROGRAM_ID);
+const vault = new PublicKey(process.env.TRAXIS_VAULT_PROGRAM_ID);
+
+const [adapter] = PublicKey.findProgramAddressSync([Buf.from('mock_adapter')], ppn);
+console.log('mock_adapter PDA:', adapter.toBase58());
+
+const [meteoraPool] = PublicKey.findProgramAddressSync([Buf.from('meteora_pool')], ppn);
+console.log('meteora_pool PDA:', meteoraPool.toBase58());
+
+console.log('PPN program:', ppn.toBase58());
+console.log('Vault program:', vault.toBase58());
