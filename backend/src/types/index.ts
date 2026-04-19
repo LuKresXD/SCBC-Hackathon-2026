@@ -143,10 +143,17 @@ export interface PPNVault {
   principal_usdc: number;        // Original deposit, locked in Meteora vault
   yield_deployed_usdc: number;   // Accumulated yield deployed into bundles
   estimated_apy: number;         // Current estimated APY from Meteora
-  vault_address: string;         // Solana vault address
+  vault_address: string;         // For on-chain notes this is the note PDA (base58);
+                                 // legacy stubs keep the `stub_vault_*` format.
   status: 'active' | 'matured' | 'withdrawn';
   created_at: string;
   maturity_date: string;
+  // On-chain integration columns (see db/schema_ppn_onchain.sql). All nullable
+  // so legacy stub rows continue to round-trip unchanged.
+  note_seed_hex?: string | null;
+  onchain_tx_signature?: string | null;
+  redemption_tx_signature?: string | null;
+  maturity_ts?: number | null;
 }
 
 export interface PPNDepositRequest {

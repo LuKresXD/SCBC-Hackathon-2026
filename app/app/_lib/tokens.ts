@@ -39,6 +39,18 @@ export const EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 export const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3001";
 
+/**
+ * Circle's devnet USDC mint. Same value the backend uses in `backend/.env`
+ * as `USDC_MINT`. Override via `NEXT_PUBLIC_USDC_MINT` if we ever move to a
+ * different devnet mint or to mainnet.
+ */
+export const USDC_MINT =
+  process.env.NEXT_PUBLIC_USDC_MINT ??
+  "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
+/** USDC has 6 decimals on both mainnet and devnet. */
+export const USDC_DECIMALS = 6;
+
 // Sandbox starting balance. Every page references this so we define it once.
 export const SANDBOX_STARTING_USDC = 10_000;
 

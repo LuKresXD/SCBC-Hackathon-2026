@@ -6,6 +6,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { C, FS, FD, EASE } from "../_lib/tokens";
 import { useSandbox } from "../_lib/demo-state";
+import { WalletConnectButton } from "../_lib/wallet";
 
 const NAV = [
   { id: "markets", label: "Markets", href: "/app" },
@@ -75,7 +76,7 @@ export function Header({ onResetClick }: { onResetClick?: () => void }) {
           );
         })}
       </nav>
-      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontFamily: FD }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>
             ${state.usdc.toLocaleString(undefined, { maximumFractionDigits: 0 })}
@@ -90,6 +91,7 @@ export function Header({ onResetClick }: { onResetClick?: () => void }) {
             </button>
           )}
         </div>
+        <WalletConnectButton compact />
       </div>
     </header>
   );

@@ -2,6 +2,7 @@
 members = [
     "programs/traxis_vault",
     "programs/traxis_ppn",
+    "programs/traxis_lending",
 ]
 resolver = "2"
 

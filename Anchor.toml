@@ -7,13 +7,19 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-traxis_vault = "DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat"
-traxis_ppn   = "3wDHsr9EnWkF968zYmSsj4hShNkAyFV6r7zxPrjqWNsp"
+traxis_vault   = "DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat"
+traxis_ppn     = "3wDHsr9EnWkF968zYmSsj4hShNkAyFV6r7zxPrjqWNsp"
+# traxis_lending is scaffolded but NOT yet deployed. The placeholder id below
+# matches the declare_id! in programs/traxis_lending/src/lib.rs. Generate a
+# real keypair at target/deploy/traxis_lending-keypair.json on first deploy
+# and update both here and in lib.rs.
+traxis_lending = "LENDinggg1111111111111111111111111111111111"
 
 [programs.devnet]
 # IDs match the keypairs in target/deploy/ as of phase-14 deploy.
-traxis_vault = "DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat"
-traxis_ppn   = "3wDHsr9EnWkF968zYmSsj4hShNkAyFV6r7zxPrjqWNsp"
+traxis_vault   = "DY7NAimrQZY7SxveXTb38XN7H69wAXjZZj8DRHto4Aat"
+traxis_ppn     = "3wDHsr9EnWkF968zYmSsj4hShNkAyFV6r7zxPrjqWNsp"
+traxis_lending = "LENDinggg1111111111111111111111111111111111"
 
 [registry]
 url = "https://api.apr.dev"
