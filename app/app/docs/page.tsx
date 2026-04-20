@@ -156,22 +156,22 @@ function HackathonNote() {
     <aside
       role="note"
       style={{
-        background: "rgba(217, 119, 6, 0.08)",
-        borderLeft: "3px solid #d97706",
-        borderRadius: 4,
-        padding: "16px 20px",
-        marginBottom: 28,
+        background: "rgba(255, 255, 255, 0.02)",
+        border: "1px solid rgba(255, 255, 255, 0.16)",
+        borderRadius: 10,
+        padding: "22px 26px",
+        marginBottom: 32,
       }}
     >
       <div
         style={{
           fontFamily: FM,
-          fontSize: 10,
-          letterSpacing: "0.14em",
+          fontSize: 11,
+          letterSpacing: "0.22em",
           fontWeight: 600,
-          color: "#fbbf24",
+          color: C.textPrimary,
           textTransform: "uppercase",
-          marginBottom: 6,
+          marginBottom: 14,
         }}
       >
         Disclaimer
@@ -181,8 +181,9 @@ function HackathonNote() {
           margin: 0,
           fontFamily: FS,
           fontSize: 14,
-          lineHeight: 1.7,
-          color: C.textPrimary,
+          lineHeight: 1.65,
+          color: C.textSecondary,
+          maxWidth: 640,
         }}
       >
         Senthos is a hackathon project built for SCBC 2026 at USC (build

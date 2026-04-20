@@ -322,7 +322,9 @@ export default function PpnPage() {
               <div style={{ marginBottom: 10 }}>
                 <div style={{ fontSize: 9, color: C.textMuted, fontFamily: FM, letterSpacing: "0.16em", marginBottom: 8 }}>PROBABILITY TIER</div>
                 <div style={{ display: "flex", gap: 6 }}>
-                  {([90, 70, 50] as const).map(t => (
+                  {([90, 70, 50] as const).map(t => {
+                    const tierLabel = { 90: "High", 70: "Mid", 50: "Low" }[t];
+                    return (
                     <button key={t} onClick={() => { setBundleTier(t); setBundleTime("all"); }} style={{
                       padding: "6px 14px", borderRadius: 100, cursor: "pointer",
                       border: `0.5px solid ${bundleTier === t ? tc(t) : "rgba(255,255,255,0.08)"}`,
@@ -331,8 +333,9 @@ export default function PpnPage() {
                       fontSize: 12, fontFamily: FD, fontWeight: bundleTier === t ? 500 : 400,
                       boxShadow: bundleTier === t ? `0 0 14px ${tc(t)}20` : "none",
                       transition: `all 0.2s ${EASE}`,
-                    }}>{t}%</button>
-                  ))}
+                    }}>{tierLabel}</button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -546,7 +549,6 @@ export default function PpnPage() {
               {[
                 ["Vault (protected)", dep > 0 ? fmtUsd(vaultAmt, 0) : "-", C.teal, "no fee"],
                 ["Basket (upside)", dep > 0 ? fmtUsd(basketAmtAfterFee, 2) : "-", C.amber, "after 0.5% fee"],
-                ["Structuring fee", dep > 0 ? fmtUsd(fee, 2) : "-", C.textMuted, "0.5% of basket"],
                 ["Yield by maturity", dep > 0 ? `+${fmtUsd(estimatedYield, 2)}` : "-", C.green, "est."],
                 ["Minimum return", dep > 0 ? fmtUsd(dep, 0) : "-", C.textPrimary, "guaranteed"],
               ].map(([k, v, c, tag]) => (
