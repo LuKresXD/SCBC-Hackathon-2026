@@ -5,7 +5,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Header, PageFrame } from "../_components/Header";
 import { MetricTile } from "../_components/charts";
-import { C, FS, FD, FM, EASE, tc, fmtUsd } from "../_lib/tokens";
+import { C, FS, FD, FM, EASE, tc, fmtUsd, BACKEND_URL } from "../_lib/tokens";
 import { bundleById } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
 import {
@@ -21,19 +21,21 @@ import {
 } from "../_lib/wallet-bridge";
 import { ppnDeposit, PpnError } from "../_lib/ppn-client";
 
-// Hardcoded DefiLlama pool IDs for top Solana USDC single-sided vaults
-// These are stable, well-audited, high-TVL pools
-const DEFI_LLAMA_POOLS = [
-  { id: "f4844743-d1f9-4b08-b63d-84028c13b28b", name: "Kamino",  fallbackApy: 0.044 },
-  { id: "a7c53df8-5a5b-42a3-b5d0-ee3d73b9ac6e", name: "MarginFi", fallbackApy: 0.038 },
-  { id: "bd5e5a1c-e70e-4e9e-a7d6-cce55f85264f", name: "Drift",   fallbackApy: 0.042 },
-  { id: "c5fd5730-7706-4b3a-8f1e-0b9c4c3e1c2a", name: "Save",   fallbackApy: 0.035 },
-];
-const METEORA_VAULT_API = "https://merv2-api.meteora.ag/vault_info";
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const STRUCTURING_FEE = 0.005; // 0.5% on basket portion only
 
+// Backend `/api/vaults/yields` returns the ranked USDC lending venues
+// after pulling the DefiLlama pool universe server-side, applying the
+// TVL floor and slug allowlist, and caching for 5 min. We only surface
+// the three fields the UI renders; the backend adds `project`, `tvlUsd`,
+// and `pool` which are not read here.
 type VaultSource = { name: string; apy: number; live: boolean };
+
+interface YieldsResponse {
+  sources: Array<{ name: string; apy: number; live: boolean }>;
+  best: { name: string; apy: number; live: boolean } | null;
+  fetched_at: number;
+  cache_stale: boolean;
+}
 
 // Dynamic split: vault grows back to principal by maturity
 function calcDynamicSplit(apyDecimal: number, days: number): { vaultPct: number; basketPct: number } {
@@ -74,55 +76,40 @@ export default function PpnPage() {
   }, []);
 
   useEffect(() => {
+    // Single call to the backend aggregator; upstream throttling,
+    // slug allowlist, TVL floor, and stale-cache fallback are all
+    // handled server-side. Route polls at the same 5-min cadence the
+    // cache enforces so we don't fan out redundant requests.
+    let cancelled = false;
     async function fetchApys() {
-      setApyLoading(true);
-      const sources: VaultSource[] = [];
-
-      // Try DefiLlama for each pool
-      for (const pool of DEFI_LLAMA_POOLS) {
-        try {
-          const res = await fetch(`https://yields.llama.fi/pool/${pool.id}`);
-          if (res.ok) {
-            const data = await res.json();
-            const apy = (data?.data?.apy ?? 0) / 100;
-            if (apy > 0) {
-              sources.push({ name: pool.name, apy, live: true });
-              continue;
-            }
-          }
-        } catch {}
-        // Fallback to hardcoded
-        sources.push({ name: pool.name, apy: pool.fallbackApy, live: false });
-      }
-
-      // Try Meteora as additional source
+      if (!cancelled) setApyLoading(true);
       try {
-        const res = await fetch(METEORA_VAULT_API);
-        if (res.ok) {
-          const data = await res.json();
-          const usdcVault = data.find((v: { token_address: string }) =>
-            v.token_address?.toLowerCase() === USDC_MINT.toLowerCase()
-          );
-          if (usdcVault) {
-            const apy = (usdcVault.average_apy ?? usdcVault.closest_apy ?? 0) / 100;
-            if (apy > 0) sources.push({ name: "Meteora", apy, live: true });
-          }
-        }
-      } catch {}
-      if (!sources.find(s => s.name === "Meteora")) {
-        sources.push({ name: "Meteora", apy: 0.03, live: false });
+        const res = await fetch(`${BACKEND_URL}/api/vaults/yields`, {
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as YieldsResponse;
+        if (cancelled) return;
+        const sources: VaultSource[] = (body.sources ?? [])
+          .filter((s) => typeof s?.apy === "number" && s.apy > 0)
+          .map((s) => ({ name: s.name, apy: s.apy, live: s.live }));
+        sources.sort((a, b) => b.apy - a.apy);
+        setVaultSources(sources);
+        setBestVault(sources[0] ?? null);
+      } catch {
+        // Leave the prior snapshot in place on transient failure;
+        // `apyLoading` is flipped off so the UI doesn't spin forever.
+      } finally {
+        if (!cancelled) setApyLoading(false);
       }
-
-      // Sort by APY descending, pick best
-      sources.sort((a, b) => b.apy - a.apy);
-      setVaultSources(sources);
-      setBestVault(sources[0] ?? null);
-      setApyLoading(false);
     }
 
     fetchApys();
     const interval = setInterval(fetchApys, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   const [bundleTier, setBundleTier] = useState<90 | 70 | 50>(90);
@@ -379,7 +366,7 @@ export default function PpnPage() {
               )}
               {basketState.status === "error" && (
                 <div style={{ textAlign: "center", color: C.red, fontSize: 12, fontFamily: FS, padding: "20px 0" }}>
-                  Couldn't load live baskets: {basketState.error}
+                  Couldn&apos;t load live baskets: {basketState.error}
                 </div>
               )}
               {basketState.status === "ok" && filteredBaskets.length === 0 && (
