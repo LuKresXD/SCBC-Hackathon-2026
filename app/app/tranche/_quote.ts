@@ -1030,8 +1030,43 @@ export function quoteTrancheOrder(
   // double-charging and also avoids free size on baskets with no live
   // books.
   // -----------------------------------------------------------------
-  const hedgeNotional =
-    usdcAmount * Math.max(1e-6, quote.notionalShare);
+
+  // -----------------------------------------------------------------
+  // Hedge notional for CONVEX tranche claims.
+  //
+  // The previous model used `usdcAmount × notionalShare`, treating a
+  // tranche like a linear slice of basket NAV. That is correct only
+  // for senior slices where delta ≈ 1 and the desk can fully replicate
+  // the payoff with a delta-one basket hedge. For mezzanine and junior
+  // slices the ask price is a call-spread premium — pennies per token
+  // — and each user dollar buys `1 / ask` tokens of face. A $100k
+  // junior clip at a $0.056 ask creates ~1.8M tokens, i.e. $1.7M of
+  // max face obligation (~17× the received premium). None of that
+  // tail leverage was reflected in the old `hedgeNotional` — the desk
+  // was effectively short a lottery without any UW charge.
+  //
+  // New decomposition:
+  //   tokensOutPreFee = usdcAmount / marketPrice
+  //   faceObligation  = tokensOutPreFee × 1            (max payout at detach)
+  //   hedgeNotional   = tokensOut × NAV × |delta|_clamped
+  //                     (dollars of basket exposure for a delta-one hedge)
+  //   tailExposure    = tokensOut × capitalAtRisk
+  //                     (dollars of residual convex obligation the desk
+  //                      must warehouse because gamma can't be hedged
+  //                      linearly)
+  // -----------------------------------------------------------------
+  const tokensOutPreFee =
+    usdcAmount / Math.max(0.0001, quote.marketPrice);
+  const navForHedge = ctx?.stats
+    ? Math.max(0, Math.min(1, ctx.stats.nav))
+    : 1;
+  const deltaClamped = Math.min(
+    1,
+    Math.max(0, Math.abs(quote.delta)),
+  );
+  const hedgeNotional = tokensOutPreFee * navForHedge * deltaClamped;
+  const tailExposureUsdc = tokensOutPreFee * quote.capitalAtRisk;
+
   let risk: OrderRisk | undefined;
   let mmSizeComponentBps = 0;
   let warehouseBps = 0;
@@ -1057,6 +1092,48 @@ export function quoteTrancheOrder(
     warehouseFraction = risk.warehouseFraction;
   }
 
+  // -----------------------------------------------------------------
+  // Tranche tail-risk premium.
+  //
+  // Charges the desk's carrying cost on the residual convex (gamma)
+  // obligation that can't be laid off via linear hedging. Expressed
+  // as bps of the USDC notional:
+  //
+  //   tailPremiumBps
+  //     = (tokensOut × capitalAtRisk / usdcAmount)    ← face leverage ratio
+  //     × UW_COST_OF_CAPITAL
+  //     × tauYears
+  //     × TAIL_PREMIUM_MULT[kind]
+  //     × 10_000
+  //
+  // The face-leverage ratio is `capitalAtRisk / marketPrice` which
+  // equals ~17 for our flagship HIGH junior (ask $0.056, fair $0.057,
+  // capitalAtRisk 0.944), ~2.2 for mezz, and ~0.01 for senior — i.e.
+  // junior is structurally short ~17× more tail than senior per
+  // USDC dollar, exactly the leverage the old linear-notional model
+  // was missing.
+  //
+  // Senior multiplier is 0 because senior delta ≈ 1 and its tail is
+  // already priced into the static UW premium (capitalAtRisk is tiny).
+  // Junior and mezz pick up a meaningful premium that the user pays
+  // through the fee breakdown rather than the protocol warehousing
+  // silently.
+  // -----------------------------------------------------------------
+  const TAIL_PREMIUM_MULT: Record<TrancheKind, number> = {
+    senior: 0.0,
+    mezzanine: 1.5,
+    junior: 3.0,
+  };
+  const tauYearsTail = ctx?.stats
+    ? Math.max(1 / 365, ctx.stats.daysLeft / 365)
+    : 0.25;
+  const tailPremiumBps =
+    (tailExposureUsdc / Math.max(1, usdcAmount)) *
+    UW_COST_OF_CAPITAL *
+    tauYearsTail *
+    TAIL_PREMIUM_MULT[quote.kind] *
+    10_000;
+
   // Combined MM spread: base static component + size-dependent impact
   // + inventory + concentration. Capped so ridiculous orders still
   // produce a finite number (the position cap below is what actually
@@ -1070,12 +1147,17 @@ export function quoteTrancheOrder(
       concentrationBps,
   );
 
-  // Warehouse premium stacks on top of the static underwriting bps.
-  // Capped at 10% so a fully-warehoused junior doesn't eat the order.
-  const UW_BPS_HARD_CAP = 1_000;
+  // Warehouse + tail premia stack on top of the static underwriting
+  // bps. Per-kind hard caps let convex tranches surface a realistic
+  // tail charge (senior stays tight since TAIL_PREMIUM_MULT = 0).
+  const UW_BPS_HARD_CAP_ORDER: Record<TrancheKind, number> = {
+    senior: 1_000,      // senior tail ≈ 0; keep the 10% ceiling
+    mezzanine: 2_500,   // allow ~25% UW for meaningful gamma trades
+    junior: 4_000,      // junior can legitimately price 25–40% UW
+  };
   const underwritingBps = Math.min(
-    UW_BPS_HARD_CAP,
-    baseUnderwritingBps + warehouseBps,
+    UW_BPS_HARD_CAP_ORDER[quote.kind],
+    baseUnderwritingBps + warehouseBps + tailPremiumBps,
   );
 
   // All four fee components are deducted from the USDC notional before
@@ -1098,8 +1180,39 @@ export function quoteTrancheOrder(
   const totalFeeBps =
     protocolFeeBps + mmSpreadBps + underwritingBps + scaledSlippageBps;
 
-  // Position cap: use the live hedge-depth-derived cap when available,
-  // otherwise fall back to the static (tier, kind) table + depth cap.
+  // -----------------------------------------------------------------
+  // Position cap — now driven by FACE OBLIGATION, not notional share.
+  //
+  // The prior cap divided the desk's hedge budget by `notionalShare`
+  // to convert an MM-side exposure into a USDC-side clip. That math
+  // assumes a tranche is a linear claim on basket NAV; for convex
+  // slices it grossly over-allocates junior/mezz (e.g. $5M+ of
+  // permissible USDC input on a $50k hedge book because each user
+  // dollar looks like only 3% of hedge pressure — ignoring that it
+  // also creates 18× face leverage).
+  //
+  // New model: the desk can warehouse at most `FACE_BUDGET[kind] ×
+  // hedgeCapacity` of face obligation across this tranche. Since
+  // each user dollar buys `1 / marketPrice` tokens of face, that
+  // face budget translates to a user USDC cap of:
+  //
+  //   maxUsdc = hedgeCapacity × FACE_BUDGET[kind] × marketPrice
+  //
+  // For our flagship HIGH junior (marketPrice $0.056, hedgeCap
+  // $500k, FACE_BUDGET 0.75) this yields a ~$21k cap instead of the
+  // old ~$5M. Senior with high marketPrice and FACE_BUDGET 3.0
+  // retains a multi-hundred-k cap, matching its near-linear hedge.
+  //
+  // We floor the cap at $1k so demo baskets with near-zero hedge
+  // capacity still produce a workable minimum quote, and we keep
+  // the old delta-hedge-based cap as a secondary ceiling so orders
+  // that would violate the linear MM hedge budget still get blocked.
+  // -----------------------------------------------------------------
+  const FACE_BUDGET_MULT: Record<TrancheKind, number> = {
+    senior: 3.0,
+    mezzanine: 1.5,
+    junior: 0.75,
+  };
   let capacityUsdc: number;
   if (ctx?.stats && ctx.hedgeability) {
     const cap = computeMaxPositionUsdc(
@@ -1107,12 +1220,18 @@ export function quoteTrancheOrder(
       quote.kind,
       ctx.hedgeability,
     );
-    // Divide by notionalShare so `capacityUsdc` refers to the user's
-    // USDC INPUT, not the MM's hedge notional. A junior tranche with
-    // 3% notional share and a $10k MM hedge cap implies a $333k max
-    // USDC clip, because each user dollar only puts $0.03 of hedge
-    // pressure on the book.
-    capacityUsdc = cap.maxOrderUsdc / Math.max(0.01, quote.notionalShare);
+    const maxFaceObligationUsdc =
+      ctx.hedgeability.hedgeCapacityUsdc * FACE_BUDGET_MULT[quote.kind];
+    const faceCapUsdc = Math.max(
+      1_000,
+      maxFaceObligationUsdc * quote.marketPrice,
+    );
+    // Retain the delta-hedge capacity as a secondary ceiling — a
+    // wide senior slice on a tiny book shouldn't exceed the linear
+    // hedge depth even if its face is cheap.
+    const deltaHedgeCapUsdc =
+      cap.maxOrderUsdc / Math.max(0.01, quote.notionalShare);
+    capacityUsdc = Math.min(faceCapUsdc, deltaHedgeCapUsdc);
   } else {
     capacityUsdc = Math.min(quote.maxOrderUsdc, quote.depthCapUsdc);
   }

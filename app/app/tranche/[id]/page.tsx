@@ -1110,8 +1110,15 @@ function TrancheBuyPanel({
   //     — CLOB walk is so expensive the quote is noise
   //   • warehouse fraction > WAREHOUSE_BLOCK_FRAC (70%)
   //     — desk would be carrying >70% of the hedge as naked risk
-  //   • total fees > TOTAL_FEE_BLOCK_BPS (20%)
+  //   • total fees > TOTAL_FEE_BLOCK_BPS[kind]
   //     — economics no longer make sense for the user
+  //
+  // TOTAL_FEE_BLOCK is kind-specific because junior/mezz now carry a
+  // tail-risk underwriting premium that correctly reflects the desk's
+  // convex obligation. A $5k junior clip on a narrow window legitimately
+  // prices at 30–35% all-in — that's the user paying for tail leverage
+  // rather than the protocol warehousing it. Senior stays tight at 20%
+  // since its tail premium is zero by construction.
   //
   // These are USER-visible blocks surfaced via an "Insufficient
   // liquidity" button state, distinct from the "Insufficient USDC"
@@ -1119,7 +1126,11 @@ function TrancheBuyPanel({
   // -----------------------------------------------------------------
   const SLIPPAGE_BLOCK_BPS = 1_500;     // 15% slippage ceiling
   const WAREHOUSE_BLOCK_FRAC = 0.70;    // 70% naked warehouse ceiling
-  const TOTAL_FEE_BLOCK_BPS = 2_000;    // 20% total fee ceiling
+  const TOTAL_FEE_BLOCK_BPS: Record<TrancheKind, number> = {
+    senior: 2_000,
+    mezzanine: 3_500,
+    junior: 5_000,
+  };
   const effectiveSlippageBps =
     order.slippageBps + (order.risk?.marketImpactBps ?? 0);
   const slippageBlocked =
@@ -1127,7 +1138,7 @@ function TrancheBuyPanel({
   const warehouseBlocked =
     hasAmount && order.warehouseFraction > WAREHOUSE_BLOCK_FRAC;
   const feeBlocked =
-    hasAmount && order.totalFeeBps > TOTAL_FEE_BLOCK_BPS;
+    hasAmount && order.totalFeeBps > TOTAL_FEE_BLOCK_BPS[selected.kind];
   const liquidityBlocked =
     overCap || slippageBlocked || warehouseBlocked || feeBlocked;
 
