@@ -1001,7 +1001,11 @@ function BasketBuyPanel({
             amount={amount}
             setAmount={setAmount}
             usdcAmount={usdcAmount}
-            stateUsdc={state.usdc}
+            // Pass the LIVE on-chain USDC balance to the "Available" label.
+            // We used to pass `state.usdc` (the in-memory sandbox counter),
+            // which read $0.00 for every fresh tester and made the panel
+            // look broken. `liveUsdc` is polled every 12 s from chain.
+            stateUsdc={liveUsdc}
             fees={fees}
             tokensOut={tokensOut}
             accent={accent}

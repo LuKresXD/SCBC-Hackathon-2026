@@ -94,8 +94,12 @@ async function prepareDepositHandler(req: Request, res: Response) {
       last_valid_block_height: built.lastValidBlockHeight,
     });
   } catch (err) {
+    // Surface the real underlying error up to the UI so testers can actually
+    // see what went wrong (instead of the opaque "Failed to prepare deposit"
+    // message we had before). Keep the server log for Sentry-grade debugging.
     console.error('POST /api/deposit/prepare error:', err);
-    res.status(500).json({ error: 'Failed to prepare deposit' });
+    const detail = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Failed to prepare deposit: ${detail}` });
   }
 }
 
