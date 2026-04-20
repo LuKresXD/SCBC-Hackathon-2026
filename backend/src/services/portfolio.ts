@@ -40,9 +40,21 @@ export interface PortfolioRequest {
   capital_usd: number;
   objective: "income" | "speculation" | "balanced";
   horizon: "short" | "medium" | "long";
+  // Optional reference basket supplied by the frontend. When present, the
+  // backend uses these values directly instead of querying Supabase, so
+  // every recommendation deep-links to a basket the frontend can resolve.
+  basket?: {
+    id: string;
+    name: string;
+    risk_tier: number;
+    nav: number;
+    days: number;
+    legs: number;
+  };
 }
 
 export interface AllocationTrancheDetails {
+  basket_id?: string;
   basket_name?: string;
   tier: "senior" | "mezzanine" | "junior";
   expected_yield_pct: number;
@@ -94,18 +106,11 @@ export interface PortfolioResponse {
 
 const SYSTEM_PROMPT = `You are the portfolio composer for Senthos, a protocol that packages prediction-market outcomes into structured products on Solana devnet. A user tells you how much capital they have and how much risk they are willing to take, and you respond with a portfolio allocation across the Senthos structured products. You always return your answer by calling the \`return_portfolio\` tool - never plain text.
 
-Senthos only issues structured products. Individual prediction markets are NOT offered to end users and are NEVER a valid allocation kind in your response. Allocate only across tranches of the curated basket and the USDC lending pool.
+Senthos only recommends structured tranche products from its curated baskets. Lending / money-market pools and individual prediction markets are NOT offered to end users and are NEVER a valid allocation kind in your response. Allocate only across tranches of the curated basket.
 
-## The two primitives
+## The only primitive
 
-### 1. USDC Lending (kind: "lending")
-A single USDC money-market pool. Users supply USDC and earn interest scaled by utilization; borrowers post basket or tranche tokens as collateral at tier-specific LTV ratios. The rate curve is piecewise linear: 2% APY at 0% utilization, ramping to ~8.4% at 80%, then steeply up beyond that. The supply APY is the borrow APY multiplied by utilization and (1 - reserve_factor).
-
-Risk profile: very low. Lending is a stablecoin-denominated yield primitive. The only loss vectors are pool insolvency (collateral liquidations failing) and USDC itself depegging. For our purposes, treat this as the "cash equivalent" of the basket - always a valid choice, especially for risk-averse users or as ballast in higher-risk portfolios.
-
-Allocation guidance: a single lending row makes sense. Do not split lending into multiple allocations.
-
-### 2. Tranches (kind: "tranche")
+### Tranches (kind: "tranche")
 Every Senthos basket can be sliced into three tranche classes on a payout waterfall:
 - **senior** (attach 0 -> detach 0.60): takes the first 60% of basket payout. Highest probability of getting paid in full; lowest upside. Priced near par, expected APY is a modest coupon, typically 3-12% annualised depending on basket tier and horizon.
 - **mezzanine** (attach 0.60 -> detach 0.85): middle slice. Moderate probability of full pay, moderate expected return.
@@ -122,36 +127,36 @@ Allocation guidance: at most one allocation per tier. When risk_pct is low (<= 3
 
 ## Risk tolerance -> allocation heuristics
 
-These are defaults. Deviate if the objective argues for it; do not deviate wildly.
+These are defaults. Deviate if the objective argues for it; do not deviate wildly. Allocate exclusively across tranche tiers (senior / mezzanine / junior).
 
-- **risk_pct 0-30 (conservative)**: 55-75% lending, 25-45% senior tranche. Expected APY range: 3-9%.
-- **risk_pct 30-70 (balanced)**: 20-40% lending, 40-70% split across senior and mezzanine tranches (skew toward mezzanine as risk rises). Expected APY range: 6-18%.
-- **risk_pct 70-100 (aggressive)**: 0-20% lending, 15-35% mezzanine tranche, 40-70% junior tranche. Expected APY range: 15-50% (with correspondingly higher variance).
+- **risk_pct 0-30 (conservative)**: 80-100% senior tranche, 0-20% mezzanine. No junior. Expected APY range: 3-12%.
+- **risk_pct 30-70 (balanced)**: 40-65% senior, 25-50% mezzanine, 0-15% junior (junior only enters at the top of this band). Expected APY range: 8-25%.
+- **risk_pct 70-100 (aggressive)**: 0-25% senior (often zero), 20-45% mezzanine, 40-75% junior. Expected APY range: 18-60% with correspondingly higher variance.
 
 ## Objective semantics
 
-- **income**: prefer steady yield. Minimum 30% lending + senior tranche combined. APY range should reflect steady compounding (narrower low-high gap).
+- **income**: prefer steady yield. Heavy senior weighting; mezzanine is acceptable as a modest top-up. Junior only if risk_pct is also high. APY range should reflect steady compounding (narrower low-high gap).
 - **balanced**: no hard constraints - follow the risk-tolerance defaults straightforwardly. APY range should be moderately wide.
-- **speculation**: maximise expected-return variance. Junior tranche gets the biggest allocation; lending is the floor that keeps some capital working. APY range should reflect the wider dispersion (low value can be near 0%; high can reach 50%+).
+- **speculation**: maximise expected-return variance. Junior tranche gets the biggest allocation, supported by a mezzanine position. APY range should reflect the wider dispersion (low value can be near 0%; high can reach 50%+).
 
 ## Horizon semantics
 
 The user tells you roughly how long they want to hold. You are given the reference basket's actual days-to-resolution as well; use both together.
 
-- **short** (under 30 days): the user wants to be liquid again soon. Favour the senior tranche (pays first, resolves early in the payout waterfall) and the lending pool (always liquid). Avoid or minimise junior tranche - its payoff typically requires waiting the full resolution window for the basket to pay in full. If the reference basket's days-to-resolution is longer than 30 days, increase the lending weight and explicitly note in the summary that the user will be locked into the basket beyond their preferred window.
+- **short** (under 30 days): the user wants to be liquid soon. Favour the senior tranche, which pays out first in the basket's waterfall and therefore tends to resolve earlier when the basket pays down. Avoid or minimise junior - its payoff requires the full resolution window to realise.
 - **medium** (one to three months): no hard constraint. Follow the risk-tolerance defaults.
-- **long** (three months or more): the user is patient. Junior and mezzanine tranches become more attractive because they can sit through full resolution. Lending weight can drop as low as the minimum floor.
+- **long** (three months or more): the user is patient. Junior and mezzanine tranches become more attractive because they can sit through full resolution without the user chafing.
 
-When the user's horizon is short and the reference basket is long (or vice versa), do not pretend the mismatch doesn't exist. Acknowledge it once in the summary in plain language ("The current basket runs longer than your preferred window, so most of the capital stays in the lending pool where it remains liquid.").
+If the user's horizon is short but the reference basket's days-to-resolution is meaningfully longer (or vice versa), acknowledge the mismatch once in the summary in plain language. Never silently pretend a 90-day basket fits a 20-day horizon.
 
 ## Output contract
 
 Call \`return_portfolio\` with:
-- \`allocations\`: 2-4 entries. Weights MUST sum to exactly 1.0. Mix at least two kinds unless the user is at the extremes (<5 or >95 risk_pct).
+- \`allocations\`: 1-3 entries, one per tranche tier at most. Weights MUST sum to exactly 1.0. Never include more than one allocation for the same tier.
 - For each allocation:
-  - \`kind\`: MUST be "tranche" or "lending". "market" is NOT a valid kind. If you are tempted to recommend an individual prediction market (e.g. "France wins World Cup", "Spurs win NBA Finals"), that is a hard error - rewrite as a tranche allocation on the curated basket instead.
+  - \`kind\`: MUST be "tranche". No other kind is valid. Lending pools and individual prediction markets are never offered.
   - \`weight\`: number in [0, 1]
-  - \`details\`: for tranches include { basket_name, tier, expected_yield_pct, price_per_token }. For lending include { supply_apy_pct, utilization }.
+  - \`details\`: include { basket_name, tier, expected_yield_pct, price_per_token }.
   - \`rationale\`: see the writing rules below.
 - \`summary\`: see the writing rules below.
 
@@ -159,7 +164,7 @@ Call \`return_portfolio\` with:
 
 Your reader is a retail investor. They have read the Senthos product page and understand "basket", "senior tranche", "mezzanine tranche", "junior tranche", and "lending pool". They do NOT know trading-desk shorthand.
 
-You may use these product terms naturally when they help precision: senior tranche, mezzanine tranche, junior tranche, basket, tranche, lending pool, yield, discount, issue price, resolution, upside, downside. Explain movement contextually ("if the basket resolves above its current price", "if the basket pays in full") - do not use math-notation like "NAV".
+You may use these product terms naturally when they help precision: senior tranche, mezzanine tranche, junior tranche, basket, tranche, yield, discount, issue price, resolution, upside, downside. Explain movement contextually ("if the basket resolves above its current price", "if the basket pays in full") - do not use math-notation like "NAV".
 
 The following words and phrases are BANNED in both rationale and summary. If you use any of them, rewrite before submitting:
   "ballast", "dry powder", "mezz" (write "mezzanine" in full), "senior-heavy", "structured upside",
@@ -173,10 +178,9 @@ Do not use "NAV" by itself. Do not use semicolons chaining short phrases ("A; B;
 Explain in clear investor language why this leg is in the portfolio given the user's risk and objective. Use product terms (senior, mezzanine, junior, basket, lending pool) naturally.
 
 Good rationale examples:
-  - "The senior slice pays out first if the basket resolves near its expected range, so it anchors the portfolio with steady yield and limited downside."
+  - "The senior slice pays out first if the basket resolves near its expected range, so it gives the portfolio steady yield with limited downside."
   - "A mezzanine position at its discounted entry price adds meaningful upside if the basket resolves at or above par, with a tolerable risk of falling short."
-  - "The junior tranche is priced at a deep discount, so a small allocation can produce outsized returns if the basket pays in full by resolution."
-  - "Supplying USDC to the lending pool keeps this portion of the capital liquid and earning a modest yield while the tranche positions take the structured risk."
+  - "The junior tranche is priced at a deep discount, so even a modest basket result translates into a large percentage return for this slice."
 
 Bad rationale examples (these are what NOT to write):
   - "100% attach probability guarantees first-loss protection; discounted price offers outsized APY if basket pays."
@@ -190,8 +194,8 @@ Sentence 1 describes the portfolio's intent in investor prose. You MAY mention p
 Sentence 2 describes the single scenario in which this portfolio performs best, in clear prose. Describe the outcome (how the basket resolves, how quickly, whether the senior or mezzanine pay in full).
 
 Good summary examples:
-  - "A balanced approach that anchors most of the portfolio in a low-priced senior tranche slice while leaving room for a moderate mezzanine position and a liquid cash buffer in the lending pool. The portfolio performs best if the basket resolves above its current issue price before maturity."
-  - "A conservative allocation focused on steady yield from the lending pool paired with a senior tranche slice of the basket. The best outcome is a quiet month in which the basket resolves comfortably above its issue price and the senior tranche pays in full."
+  - "A balanced approach that anchors most of the portfolio in a low-priced senior tranche slice while leaving room for a moderate mezzanine position. The portfolio performs best if the basket resolves above its current issue price before maturity."
+  - "A conservative allocation that concentrates in the senior tranche slice of the basket, paired with a small mezzanine position for incremental yield. The best outcome is a quiet run in which the basket resolves comfortably above its issue price and the senior tranche pays in full."
   - "An aggressive mix that concentrates capital in the junior tranche to capture the deep discount on offer, with a supporting mezzanine position. The portfolio performs best if the basket pays in full by resolution, letting the junior tranche hit its maximum payout."
 
 Bad summary examples (these are what NOT to write):
@@ -204,11 +208,11 @@ If your draft summary starts with a number, a percentage, or a list of allocatio
 - \`expected_apy_low\`: conservative (10th-percentile) annualised return expectation, in percent. Can be 0 or slightly negative with heavy junior-tranche exposure.
 - \`expected_apy_high\`: optimistic (90th-percentile) annualised return expectation, in percent.
 
-The gap between low and high should reflect the risk taken on. A 20/80 lending + senior portfolio should have a tight range (say 3-8%). A 10% lending + 30% mezzanine + 60% junior portfolio should have a wide range (say -5% to 50%).
+The gap between low and high should reflect the risk taken on. A fully senior-tranche portfolio should have a tight range (say 3-10%). A mezzanine-heavy mix should have a moderate range. A junior-heavy mix should have a wide range (say -10% to 60%).
 
-Do not invent values. Tranche yields, prices, and lending APY are given to you exactly - copy them into the details fields verbatim.
+Do not invent values. Tranche yields and prices are given to you exactly - copy them into the details fields verbatim.
 
-BREVITY MATTERS. The response must complete in under 8 seconds of generation, which means fewer than 800 output tokens total. Do not pad rationales. Do not restate the user's inputs in the summary. Do not explain what a tranche is or what lending is - the caller already knows.`;
+BREVITY MATTERS. The response must complete in under 8 seconds of generation, which means fewer than 800 output tokens total. Do not pad rationales. Do not restate the user's inputs in the summary. Do not explain what a tranche is - the caller already knows.`;
 
 // ---------------------------------------------------------------------------
 // Tool schema - force Claude to return structured JSON. We add usd_amount,
@@ -231,9 +235,9 @@ const RETURN_PORTFOLIO_TOOL: Anthropic.Tool = {
           properties: {
             kind: {
               type: "string",
-              enum: ["tranche", "lending"],
+              enum: ["tranche"],
               description:
-                "Which Senthos structured product this allocation uses. Individual prediction markets are not offered.",
+                "Only Senthos tranche products are offered. Lending pools and individual prediction markets are not valid allocations.",
             },
             weight: {
               type: "number",
@@ -305,7 +309,7 @@ interface Primitives {
   };
 }
 
-async function fetchPrimitives(): Promise<Primitives> {
+async function fetchPrimitives(clientBasket?: PortfolioRequest["basket"]): Promise<Primitives> {
   const lending = lendingSnapshot();
 
   // Curated markets via the existing filter pipeline.
@@ -315,10 +319,25 @@ async function fetchPrimitives(): Promise<Primitives> {
     .sort((a, b) => b.volumeUsd - a.volumeUsd)
     .slice(0, MAX_MARKETS_IN_PROMPT);
 
+  // Reference basket resolution priority:
+  //   1. client-supplied basket (frontend's real universe — the only ids
+  //      the /app/tranche/[id] route can actually resolve)
+  //   2. Supabase active bundle (legacy path, kept for backwards compat)
+  //   3. mock fallback (pre-seed demo)
+  let refBundle: Primitives["refBundle"];
+  if (clientBasket) {
+    refBundle = { ...clientBasket };
+    const tranches = quoteTranches({
+      bundleNav: refBundle.nav,
+      totalLegs: refBundle.legs,
+      horizonDays: refBundle.days,
+    });
+    return { lending, markets, tranches, refBundle };
+  }
+
   // Tranche quotes: pick the first active bundle if Supabase has one,
   // otherwise fall back to a mock so the endpoint still works pre-seed.
   const bundles = await getAllBundles();
-  let refBundle: Primitives["refBundle"];
   if (bundles.length > 0) {
     const b = bundles[0];
     const days = Math.max(
@@ -373,20 +392,14 @@ function buildUserMessage(req: PortfolioRequest, prims: Primitives): string {
 - objective: ${req.objective}
 - horizon: ${req.horizon} (short = under 30 days, medium = 30-90 days, long = 90+ days)
 
-## Live primitives
+## Live primitive
 
-### 1. USDC lending pool
-- supply_apy: ${prims.lending.supply_rate_apy}%
-- borrow_apy: ${prims.lending.borrow_rate_apy}%
-- utilization: ${(prims.lending.utilization * 100).toFixed(1)}%
-- total_deposits: $${prims.lending.total_deposits}
-
-### 2. Reference basket for tranche pricing
+### Reference basket for tranche pricing
 - basket: "${prims.refBundle.name}" (tier ${prims.refBundle.risk_tier}, current token price ${prims.refBundle.nav.toFixed(2)}, ${prims.refBundle.days} days to resolution)
 - Tranche quotes on this basket:
 ${trancheLines}
 
-Construct the portfolio now by calling return_portfolio. Weights must sum to 1.0. Use the tranche quote rows above verbatim for the tranche details (do not invent yields). Kind must be "tranche" or "lending" only. Include 2-4 allocations.`;
+Construct the portfolio now by calling return_portfolio. Weights must sum to 1.0. Use the tranche quote rows above verbatim for the tranche details (do not invent yields). Kind MUST be "tranche" - no other kind is valid. Include 1-3 allocations, one per tier at most.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -472,10 +485,10 @@ function validateAndRenormalize(
     if (a.weight < 0 || a.weight > 1) {
       throw new Error(`weight ${a.weight} out of [0, 1]`);
     }
-    // Individual prediction markets are not a valid Senthos product. Reject
-    // any stale allocation that slipped through the tool schema.
-    if (a.kind !== "tranche" && a.kind !== "lending") {
-      throw new Error(`invalid allocation kind "${a.kind}" - only "tranche" and "lending" are allowed`);
+    // Only tranche allocations are valid. Reject any stale allocation that
+    // slipped through the tool schema (lending, market, etc.).
+    if (a.kind !== "tranche") {
+      throw new Error(`invalid allocation kind "${a.kind}" - only "tranche" is allowed`);
     }
     sum += a.weight;
   }
@@ -572,14 +585,30 @@ export async function constructPortfolio(
     );
   }
 
-  const prims = await fetchPrimitives();
+  const prims = await fetchPrimitives(req.basket);
   const userMessage = buildUserMessage(req, prims);
   const { parsed, usage } = await callClaude(userMessage);
   const validated = validateAndRenormalize(parsed, req.capital_usd);
-  const risk_score = computeRiskScore(validated.allocations);
+  // Inject the reference basket id into each tranche allocation's details
+  // so the frontend can deep-link the card to /app/tranche/[basket_id].
+  // We cast through `Allocation` because the spread preserves the
+  // original details shape (AllocationTrancheDetails) and only appends
+  // an optional `basket_id` field — the AllocationTrancheDetails interface
+  // already accommodates extra string keys via its index signature.
+  const withBasketId: Allocation[] = validated.allocations.map((a) => {
+    if (a.kind !== "tranche") return a;
+    return {
+      ...a,
+      details: {
+        ...(a.details as AllocationTrancheDetails),
+        basket_id: prims.refBundle.id,
+      },
+    } as Allocation;
+  });
+  const risk_score = computeRiskScore(withBasketId);
 
   return {
-    allocations: validated.allocations,
+    allocations: withBasketId,
     summary: validated.summary,
     expected_apy_low: validated.expected_apy_low,
     expected_apy_high: validated.expected_apy_high,

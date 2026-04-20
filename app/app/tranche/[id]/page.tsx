@@ -2,12 +2,12 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Header, PageFrame } from "../../_components/Header";
 import { MetricTile } from "../../_components/charts";
-import { C, FS, FD, FM, EASE, trancheColor, tc } from "../../_lib/tokens";
+import { C, FS, FD, FM, EASE, trancheColor, tc, fmtUsd } from "../../_lib/tokens";
 import { bundleById, type Bundle } from "../../_lib/bundles";
 import type { LiveBasket, LiveMarket } from "../../_lib/live-baskets";
 import { useLiveBaskets, formatYieldPct } from "../../_lib/use-live-baskets";
@@ -49,8 +49,21 @@ type ResolvedBasket =
 export default function TrancheDetail() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const search = useSearchParams();
   const basketState = useLiveBaskets();
-  const [selectedKind, setSelectedKind] = useState<TrancheKind>("senior");
+  // Pre-select the tab from ?tier=… when the user lands here via an AI rec.
+  const queryTier = search?.get("tier");
+  const initialKind: TrancheKind =
+    queryTier === "senior" || queryTier === "mezzanine" || queryTier === "junior"
+      ? queryTier
+      : "senior";
+  const [selectedKind, setSelectedKind] = useState<TrancheKind>(initialKind);
+  // Amount from ?amount=… so we can surface it in the buy card.
+  const rawAmount = search?.get("amount");
+  const recommendedAmount =
+    rawAmount != null && Number.isFinite(parseFloat(rawAmount))
+      ? parseFloat(rawAmount)
+      : null;
 
   // Same resolution priority as /app/basket/[id]: live cache wins when
   // available, seed is fallback only. Without this, the live id space
@@ -363,14 +376,48 @@ export default function TrancheDetail() {
             />
           </div>
 
-          <TrancheBuyPanel
-            bundle={bundle}
-            stats={stats}
-            quotes={quotes}
-            selectedKind={selected.kind}
-            onSelectKind={setSelectedKind}
-            markets={markets}
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+            {recommendedAmount != null && (
+              <div style={{
+                background: `${selectedColor}12`,
+                border: `1px solid ${selectedColor}55`,
+                borderRadius: 12,
+                padding: "12px 14px",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                flexShrink: 0,
+              }}>
+                <div style={{
+                  width: 28, height: 28, borderRadius: "50%",
+                  background: `${selectedColor}22`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={selectedColor} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 3 L13.5 9.5 L20 11 L13.5 12.5 L12 19 L10.5 12.5 L4 11 L10.5 9.5 Z" />
+                  </svg>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 10, color: selectedColor, fontFamily: FM, letterSpacing: "0.18em", fontWeight: 500, marginBottom: 3 }}>
+                    PERSONALIZATION · RECOMMENDED
+                  </div>
+                  <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD, fontWeight: 500 }}>
+                    Deposit {fmtUsd(recommendedAmount, recommendedAmount % 1 === 0 ? 0 : 2)} into the {selected.kind} tranche
+                  </div>
+                </div>
+              </div>
+            )}
+            <TrancheBuyPanel
+              bundle={bundle}
+              stats={stats}
+              quotes={quotes}
+              selectedKind={selected.kind}
+              onSelectKind={setSelectedKind}
+              markets={markets}
+              recommendedAmount={recommendedAmount}
+            />
+          </div>
         </div>
         <style>{TRANCHE_DETAIL_CSS}</style>
       </PageFrame>
@@ -900,6 +947,7 @@ function TrancheBuyPanel({
   selectedKind,
   onSelectKind,
   markets,
+  recommendedAmount,
 }: {
   bundle: Bundle;
   stats: BasketStats;
@@ -907,11 +955,18 @@ function TrancheBuyPanel({
   selectedKind: TrancheKind;
   onSelectKind: (k: TrancheKind) => void;
   markets: LiveMarket[];
+  recommendedAmount?: number | null;
 }) {
   const { connected } = useWallet();
   const { setVisible: setWalletModalVisible } = useWalletModal();
   const { state, dispatch } = useSandbox();
-  const [amount, setAmount] = useState<string>("100");
+  // Seed the amount input from the AI-recommended deposit when a user
+  // lands on this page via a `?amount=` deep link. Falls back to $100.
+  const initialAmount =
+    recommendedAmount != null && recommendedAmount > 0
+      ? String(recommendedAmount)
+      : "100";
+  const [amount, setAmount] = useState<string>(initialAmount);
   const [books, setBooks] = useState<Map<string, Orderbook>>(new Map());
 
   const selected = quotes.find((q) => q.kind === selectedKind) ?? quotes[0];
