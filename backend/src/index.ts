@@ -21,6 +21,7 @@ import { metricsRoutes } from './routes/metrics';
 import { lendingRoutes } from './routes/lending';
 import { hedgeRoutes } from './routes/hedge';
 import portfolioRoutes from './routes/portfolio';
+import vaultRoutes from './routes/vaults';
 import { metricsMiddleware } from './services/metrics';
 import { startMonitorServer } from './monitor/server';
 import { startCronJobs } from './services/cron';
@@ -183,6 +184,7 @@ app.use('/api/onchain', onchainRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/lending', lendingRoutes);
 app.use('/api/hedge', hedgeRoutes);
+app.use('/api/vaults', vaultRoutes);
 app.use('/api/portfolio', portfolioLimiter, portfolioRoutes);
 
 // Root redirect to API docs
