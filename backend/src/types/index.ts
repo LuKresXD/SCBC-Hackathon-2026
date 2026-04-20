@@ -177,6 +177,14 @@ export interface PPNDepositRequest {
   wallet_address: string;
   amount_usdc: number;
   maturity_days?: number; // default 30
+  // Tranche overlay — PPN program is reused for senior/mezz/junior tranches
+  // (see db/schema_tranche.sql). When any of these are set the backend persists
+  // them alongside the note so the frontend can render the tranche-specific
+  // UI for this vault. Vanilla PPNs leave all four NULL.
+  tranche_kind?: 'senior' | 'mezzanine' | 'junior';
+  tranche_attach?: number;
+  tranche_detach?: number;
+  price_per_token?: number;
 }
 
 export interface PPNDepositResponse {

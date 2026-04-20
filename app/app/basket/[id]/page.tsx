@@ -18,6 +18,12 @@ import {
   SLIPPAGE_BPS_CEILING,
   type Orderbook,
 } from "../../_lib/orderbook";
+import {
+  useWalletSigner,
+  useUsdcBalance,
+  explorerTxUrl,
+} from "../../_lib/wallet-bridge";
+import { depositIntoBundle, DepositError } from "../../_lib/deposit-client";
 
 type ResolvedBasket =
   | { kind: "live"; basket: LiveBasket }
@@ -331,7 +337,7 @@ const HOW_IT_WORKS: Array<{ num: string; title: string; body: string }> = [
     num: "02",
     title: "Settlement",
     body:
-      "In this preview the deposit updates your sandbox portfolio instantly. On Solana mainnet, the traxis_vault program would lock USDC in the basket vault and mint STHS against the quoted NAV.",
+      "Buy signs a single Solana transaction in your wallet. The traxis_vault program transfers USDC from you into the basket vault, takes the protocol fee, and mints STHS tokens back to your wallet — all atomically, on Solana devnet today.",
   },
   {
     num: "03",
@@ -521,10 +527,20 @@ function BasketBuyPanel({
 }) {
   const { connected } = useWallet();
   const { setVisible: setWalletModalVisible } = useWalletModal();
-  const { state, dispatch } = useSandbox();
+  const { dispatch } = useSandbox();
+  const wallet = useWalletSigner();
+  const usdc = useUsdcBalance();
   const [amount, setAmount] = useState<string>("100");
   const [books, setBooks] = useState<Map<string, Orderbook>>(new Map());
   const [bookStatus, setBookStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  // On-chain submission state — mirrors the prepare/sign/confirm lifecycle of
+  // `depositIntoBundle`. `txError` is user-facing copy; `txSignature` drives
+  // the Explorer link shown beneath the button on success.
+  const [txStage, setTxStage] = useState<
+    "idle" | "preparing" | "signing" | "confirming" | "persisting" | "done"
+  >("idle");
+  const [txError, setTxError] = useState<string | null>(null);
+  const [txSignature, setTxSignature] = useState<string | null>(null);
 
   // Top 10 weighted legs with a non-empty token id drive the live CLOB
   // snapshot. We skip legs without token ids (seed fallback, mostly).
@@ -582,22 +598,72 @@ function BasketBuyPanel({
 
   const hasAmount = usdcAmount > 0;
   const overCap = hasAmount && usdcAmount > MAX_ORDER_USDC;
-  const insufficient = connected && hasAmount && usdcAmount > state.usdc;
-  const canSubmit = connected && hasAmount && !insufficient && !overCap;
+  // `usdc.uiAmount` is the LIVE wallet balance polled from the chain.
+  // We gate "Insufficient USDC" on the real balance so the CTA tells the
+  // user the truth about their wallet, not a sandbox counter.
+  const liveUsdc = usdc.uiAmount;
+  const insufficient = connected && hasAmount && usdcAmount > liveUsdc;
+  const txBusy =
+    txStage === "preparing" ||
+    txStage === "signing" ||
+    txStage === "confirming" ||
+    txStage === "persisting";
+  const canSubmit =
+    connected && hasAmount && !insufficient && !overCap && !txBusy;
 
   // The button is always actionable so users can simulate the trade
   // without wallet friction. Wallet picker only opens on real submit.
-  function handlePrimary() {
+  // Once the user has a connected wallet and a valid amount this does the
+  // real on-chain flow: prepare tx at the backend, Phantom signs + sends,
+  // we poll for confirmation, backend persists the position. The sandbox
+  // dispatch still runs on success so the UI bookkeeping (positions list
+  // etc.) stays in sync until every view has been migrated off the
+  // sandbox reducer.
+  async function handlePrimary() {
     if (!connected) {
       setWalletModalVisible(true);
       return;
     }
     if (!canSubmit) return;
-    dispatch({
-      type: "basket/deposit",
-      bundleId: bundle.id,
-      usdcAmount,
-    });
+    setTxError(null);
+    setTxSignature(null);
+    setTxStage("preparing");
+    try {
+      const result = await depositIntoBundle({
+        wallet,
+        bundleId: bundle.id,
+        amountUsdc: usdcAmount,
+      });
+      // No per-stage hook in `depositIntoBundle`; jump to the final stage
+      // once it resolves. The intermediate UI is cosmetic — `txBusy` is
+      // the only thing that actually gates the button.
+      setTxStage("done");
+      setTxSignature(result.signature);
+      // Keep the sandbox reducer in sync so the portfolio card reflects
+      // the new position until we re-source that view from the chain.
+      dispatch({
+        type: "basket/deposit",
+        bundleId: bundle.id,
+        usdcAmount,
+      });
+      // Kick the balance poll right away so the UI updates before the
+      // 12-second interval tick.
+      void usdc.refresh();
+    } catch (err) {
+      setTxStage("idle");
+      if (err instanceof DepositError) {
+        setTxError(err.message);
+      } else if (err instanceof Error) {
+        // Phantom's reject string is long and unhelpful — shorten it.
+        setTxError(
+          /user rejected/i.test(err.message)
+            ? "Transaction was rejected in your wallet."
+            : err.message,
+        );
+      } else {
+        setTxError(String(err));
+      }
+    }
   }
 
   const buttonLabel = !hasAmount
@@ -606,8 +672,19 @@ function BasketBuyPanel({
       ? `Max $${MAX_ORDER_USDC.toLocaleString()} per order`
       : insufficient
         ? "Insufficient USDC"
-        : "Buy position";
-  const buttonActive = hasAmount && !insufficient && !overCap;
+        : txStage === "preparing"
+          ? "Preparing transaction…"
+          : txStage === "signing"
+            ? "Awaiting wallet signature…"
+            : txStage === "confirming"
+              ? "Confirming on Solana…"
+              : txStage === "persisting"
+                ? "Finalising…"
+                : txStage === "done"
+                  ? "✓ Position opened"
+                  : "Buy position";
+  const buttonActive =
+    hasAmount && !insufficient && !overCap && !txBusy && txStage !== "done";
 
   return (
     <div
@@ -678,9 +755,13 @@ function BasketBuyPanel({
           >
             <span>Amount</span>
             <span>
-              Sandbox balance{" "}
+              Wallet balance{" "}
               <span style={{ color: connected ? C.textSecondary : C.textMuted }}>
-                {connected ? `$${state.usdc.toFixed(2)}` : "sim"}
+                {connected
+                  ? usdc.loading && usdc.uiAmount === 0
+                    ? "…"
+                    : `$${liveUsdc.toFixed(2)}`
+                  : "connect"}
               </span>
             </span>
           </div>
@@ -824,6 +905,51 @@ function BasketBuyPanel({
         >
           {buttonLabel}
         </button>
+
+        {/* Tx result strip: error toast on failure / rejection, or a
+            devnet-aware Solana Explorer link on success. We surface the
+            signature inline (rather than in a modal) so Victor can verify
+            on-chain movement in one click without losing basket context. */}
+        {txError && (
+          <div
+            style={{
+              fontFamily: FM,
+              fontSize: 11,
+              lineHeight: 1.45,
+              color: "#ff8570",
+              background: "rgba(255, 90, 70, 0.08)",
+              border: "0.5px solid rgba(255, 90, 70, 0.35)",
+              borderRadius: 8,
+              padding: "8px 12px",
+              letterSpacing: "0.02em",
+              fontWeight: 400,
+            }}
+          >
+            {txError}
+          </div>
+        )}
+        {txSignature && (
+          <a
+            href={explorerTxUrl(txSignature)}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              fontFamily: FM,
+              fontSize: 11,
+              color: accent,
+              background: `${accent}14`,
+              border: `0.5px solid ${accent}55`,
+              borderRadius: 8,
+              padding: "8px 12px",
+              letterSpacing: "0.02em",
+              fontWeight: 500,
+              textAlign: "center",
+              textDecoration: "none",
+            }}
+          >
+            View on Solana Explorer ↗
+          </a>
+        )}
       </div>
 
       {/* ---- How it works ---- */}

@@ -2,17 +2,25 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { Header, PageFrame } from "../_components/Header";
 import { SvgDonut } from "../_components/charts";
 import { C, FS, FD, FM, EASE, tc, trancheColor, fmtUsd } from "../_lib/tokens";
 import { bundleById } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
+import { useUsdcBalance } from "../_lib/wallet-bridge";
 import { Personalization } from "./_personalization";
 
 type View = "positions" | "personalization";
 
 export default function PortfolioPage() {
   const { state, totals } = useSandbox();
+  const { connected } = useWallet();
+  const usdc = useUsdcBalance();
+  // Cash line is the real on-chain USDC in the connected wallet. When
+  // disconnected we fall back to 0 so the donut + positions list simply
+  // omit the cash slice instead of flashing a stale sandbox counter.
+  const liveUsdc = connected ? usdc.uiAmount : 0;
   const [activeId, setActiveId] = useState<string | null>(null);
   const [renderNow, setRenderNow] = useState<number>(() => Date.now());
   const [view, setView] = useState<View>("positions");
@@ -22,7 +30,7 @@ export default function PortfolioPage() {
   }, []);
 
   const donutData: Array<{ id: string; value: number; color: string }> = [
-    ...(state.usdc > 0 ? [{ id: "cash", value: state.usdc, color: "#4a5a6a" }] : []),
+    ...(liveUsdc > 0 ? [{ id: "cash", value: liveUsdc, color: "#4a5a6a" }] : []),
     ...(totals.basketValue > 0 ? [{ id: "baskets", value: totals.basketValue, color: C.teal }] : []),
     ...(totals.trancheValue > 0 ? [{ id: "tranches", value: totals.trancheValue, color: C.amber }] : []),
     ...(totals.ppnValue > 0 ? [{ id: "ppn", value: totals.ppnValue, color: C.violet }] : []),
@@ -372,11 +380,14 @@ export default function PortfolioPage() {
             });
           });
 
-          // USDC cash position
-          if (state.usdc > 0) {
+          // USDC cash position. Pulls straight from the wallet-bridge's
+          // live poll so this reflects the user's actual on-chain ATA
+          // (Circle devnet USDC). If the wallet is disconnected the row
+          // is skipped — the connect CTA lives in the header.
+          if (liveUsdc > 0) {
             rows.push({
               key: "usdc",
-              value: state.usdc,
+              value: liveUsdc,
               el: (
                 <div key="usdc" style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
                   <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, letterSpacing: "0.08em", marginBottom: 14 }}>CASH</div>
@@ -388,7 +399,7 @@ export default function PortfolioPage() {
                         <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>Solana · available</div>
                       </div>
                     </div>
-                    <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(state.usdc, 2)}</div>
+                    <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(liveUsdc, 2)}</div>
                   </div>
                 </div>
               ),
