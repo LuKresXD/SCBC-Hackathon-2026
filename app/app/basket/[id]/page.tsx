@@ -27,8 +27,10 @@ import {
 import {
   depositIntoBundle,
   redeemFromBundle,
+  resolveBundleUuid,
   DepositError,
 } from "../../_lib/deposit-client";
+import { useStshBalances } from "../../_lib/portfolio-client";
 
 type ResolvedBasket =
   | { kind: "live"; basket: LiveBasket }
@@ -743,10 +745,44 @@ function BasketBuyPanel({
   // receives after fees. The on-chain `redeem` instruction takes no
   // amount — it always closes the full position; `sellQty` is still
   // used for the UI quote and the sandbox reducer's optimistic update.
+  //
+  // `heldQty` used to read from `state.basketPositions` (the in-memory
+  // sandbox reducer), which is empty for any fresh wallet that has
+  // deposited only via the real on-chain flow. That made the Sell tab
+  // always show "HELD 0.00 STHS" and the button say "No position to
+  // sell" even when the user genuinely held tokens. Now we resolve the
+  // UI basket id (which can be a synthetic "STHS-HIGH-SHORT" that
+  // routes to LK-90-0430 at buy time) to the same backend UUID the
+  // deposit flow uses, then look up the on-chain STHS balance for that
+  // bundle via `useStshBalances()`. `state.basketPositions` is still
+  // consulted for `avgCost` because that's the only place entry price
+  // is tracked in-session.
+  const stsh = useStshBalances();
+  const [resolvedBundleUuid, setResolvedBundleUuid] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    resolveBundleUuid(bundle.id)
+      .then((uuid) => {
+        if (!cancelled) setResolvedBundleUuid(uuid);
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedBundleUuid(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bundle.id]);
+  const onchainHeldQty =
+    resolvedBundleUuid
+      ? stsh.balances.find((b) => b.bundleId === resolvedBundleUuid)
+          ?.uiAmount ?? 0
+      : 0;
   const existingPosition = state.basketPositions.find(
     (p) => p.bundleId === bundle.id,
   );
-  const heldQty = existingPosition?.qty ?? 0;
+  const heldQty = onchainHeldQty;
   const sellQty = Math.max(0, Number.parseFloat(sellQtyInput) || 0);
   const sellUsdcNotional = sellQty * navPrice;
   const sellFees = useMemo(

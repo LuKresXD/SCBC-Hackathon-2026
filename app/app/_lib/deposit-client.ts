@@ -100,7 +100,7 @@ function pickFallbackBundle(
   return initialized[0];
 }
 
-async function resolveBundleUuid(uiBundleId: string): Promise<string> {
+export async function resolveBundleUuid(uiBundleId: string): Promise<string> {
   // Direct UUID passthrough (live baskets would do this once they carry one).
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uiBundleId)) {
     return uiBundleId;
