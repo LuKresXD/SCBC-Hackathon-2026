@@ -36,7 +36,9 @@ export const EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 export const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3001";
 
-export const SANDBOX_STARTING_USDC = 10_000;
+// USDC balance a fresh portfolio starts with. Real balance comes from the
+// connected wallet once wired; until then every session starts at zero.
+export const INITIAL_USDC = 0;
 
 export function tc(tier: number): string {
   return tier === 90 ? C.teal : tier === 70 ? C.amber : C.coral;

@@ -4,14 +4,18 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { Header, PageFrame } from "../_components/Header";
 import { SvgDonut, MetricTile } from "../_components/charts";
-import { C, FS, FD, FM, tc, trancheColor, fmtUsd } from "../_lib/tokens";
+import { C, FS, FD, FM, EASE, tc, trancheColor, fmtUsd } from "../_lib/tokens";
 import { bundleById } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
+import { Personalization } from "./_personalization";
+
+type View = "positions" | "personalization";
 
 export default function PortfolioPage() {
-  const { state, dispatch, totals } = useSandbox();
+  const { state, totals } = useSandbox();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [renderNow, setRenderNow] = useState<number>(() => Date.now());
+  const [view, setView] = useState<View>("positions");
   useEffect(() => {
     const t = setInterval(() => setRenderNow(Date.now()), 1000);
     return () => clearInterval(t);
@@ -41,23 +45,94 @@ export default function PortfolioPage() {
         .senthos-orbit-med  { animation: senthosOrbitRev 120s linear infinite; }
         .senthos-orbit-fast { animation: senthosOrbitSlow 160s linear infinite; }
       `}</style>
-      <Header onResetClick={() => dispatch({ type: "reset" })} />
+      <Header />
       <PageFrame>
         <div style={{ marginBottom: 24, position: "relative", paddingBottom: 22, borderBottom: "0.5px solid rgba(45, 212, 191, 0.1)" }}>
           <div style={{ position: "absolute", top: 0, right: 0, width: 220, height: 140, background: "radial-gradient(ellipse at top right, rgba(45, 212, 191, 0.1) 0%, transparent 70%)", pointerEvents: "none" }} />
+          {/* Segmented Positions / Personalization tab — top-right of the header */}
+          <div style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            zIndex: 3,
+            display: "flex",
+            gap: 2,
+            padding: 3,
+            background: "rgba(8, 12, 20, 0.7)",
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+            borderRadius: 10,
+            backdropFilter: "blur(10px)",
+          }}>
+            {([
+              { id: "positions",       label: "Positions" },
+              { id: "personalization", label: "Personalization" },
+            ] as const).map((t) => {
+              const active = view === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setView(t.id)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 7,
+                    padding: "8px 14px",
+                    borderRadius: 7,
+                    border: "none",
+                    cursor: "pointer",
+                    fontFamily: FD,
+                    fontSize: 12,
+                    fontWeight: active ? 500 : 400,
+                    letterSpacing: "0.02em",
+                    background: active ? "rgba(45, 212, 191, 0.12)" : "transparent",
+                    color: active ? C.tealLight : C.textSecondary,
+                    transition: `color 0.15s ${EASE}, background 0.15s ${EASE}`,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (active) return;
+                    (e.currentTarget as HTMLElement).style.color = C.textPrimary;
+                  }}
+                  onMouseLeave={(e) => {
+                    if (active) return;
+                    (e.currentTarget as HTMLElement).style.color = C.textSecondary;
+                  }}
+                >
+                  {t.id === "personalization" && (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                      <path d="M12 3 L13.5 9.5 L20 11 L13.5 12.5 L12 19 L10.5 12.5 L4 11 L10.5 9.5 Z" />
+                    </svg>
+                  )}
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, position: "relative" }}>
             <span style={{ width: 18, height: 1, background: "#2dd4bf", opacity: 0.6 }} />
-            <span style={{ fontFamily: FM, fontSize: 10, letterSpacing: "0.22em", color: "#2dd4bf", fontWeight: 500 }}>PORTFOLIO</span>
+            <span style={{ fontFamily: FM, fontSize: 10, letterSpacing: "0.22em", color: "#2dd4bf", fontWeight: 500 }}>
+              {view === "positions" ? "PORTFOLIO" : "PORTFOLIO · AI"}
+            </span>
             <span style={{ width: 18, height: 1, background: "#2dd4bf", opacity: 0.6 }} />
           </div>
           <div style={{ fontSize: 32, fontWeight: 200, color: C.textPrimary, fontFamily: FD, marginBottom: 6, letterSpacing: "-0.02em", position: "relative" }}>
-            Your <span style={{ fontWeight: 500, background: "linear-gradient(90deg, #2dd4bf 0%, #a5f3fc 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>orbit</span>
+            {view === "positions" ? (
+              <>Your <span style={{ fontWeight: 500, background: "linear-gradient(90deg, #2dd4bf 0%, #a5f3fc 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>orbit</span></>
+            ) : (
+              <>A portfolio, <span style={{ fontWeight: 500, background: "linear-gradient(90deg, #2dd4bf 0%, #a5f3fc 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>tailored</span></>
+            )}
           </div>
           <div style={{ fontSize: 13, color: C.textSecondary, fontFamily: FS, position: "relative" }}>
-            Unified view across cash, baskets, tranches, PPN vaults, and lending
+            {view === "positions"
+              ? "Unified view across cash, baskets, tranches, PPN vaults, and lending"
+              : "Let Claude build an allocation from your risk tolerance, capital, and objective"}
           </div>
         </div>
 
+        {view === "personalization" ? (
+          <Personalization />
+        ) : (
+        <>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 20 }}>
           <MetricTile label="TOTAL VALUE" value={fmtUsd(totals.totalValue, 2)} color={C.green} />
           <MetricTile label="UNREALIZED P&L" value={`${totals.unrealizedPnl >= 0 ? "+" : ""}${fmtUsd(totals.unrealizedPnl, 2)}`} color={totals.unrealizedPnl >= 0 ? C.green : C.red} />
@@ -325,6 +400,8 @@ export default function PortfolioPage() {
           rows.sort((a, b) => b.value - a.value);
           return rows.map(r => r.el);
         })()}
+        </>
+        )}
       </PageFrame>
     </>
   );
