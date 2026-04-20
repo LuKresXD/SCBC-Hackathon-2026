@@ -2,11 +2,11 @@
 
 import React, { useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { Header, PageFrame } from "../../_components/Header";
 import { ConnectWalletCard } from "../../_components/ConnectWalletCard";
 import { MetricTile } from "../../_components/charts";
-import { C, FS, FD, EASE, trancheColor, tc } from "../../_lib/tokens";
+import { C, FS, FD, FM, EASE, trancheColor, tc, fmtUsd } from "../../_lib/tokens";
 import { bundleById, type Bundle } from "../../_lib/bundles";
 import { useLiveBaskets } from "../../_lib/use-live-baskets";
 import { quoteTranchesLocal } from "../_quote";
@@ -15,8 +15,20 @@ type TrancheKind = "senior" | "mezzanine" | "junior";
 
 export default function TrancheDetail() {
   const params = useParams<{ id: string }>();
+  const search = useSearchParams();
   const basketState = useLiveBaskets();
-  const [kind, setKind] = useState<TrancheKind>("senior");
+  // Pre-select the tab from ?tier=… when the user lands here via an AI rec.
+  const queryTier = search?.get("tier");
+  const initialKind: TrancheKind =
+    queryTier === "senior" || queryTier === "mezzanine" || queryTier === "junior"
+      ? queryTier
+      : "senior";
+  const [kind, setKind] = useState<TrancheKind>(initialKind);
+  // Amount from ?amount=… so we can surface it in the buy card.
+  const rawAmount = search?.get("amount");
+  const recommendedAmount = rawAmount != null && Number.isFinite(parseFloat(rawAmount))
+    ? parseFloat(rawAmount)
+    : null;
 
   // Same resolution priority as /app/basket/[id]: live cache wins when
   // available (real leg count, real resolution span), seed only as a
@@ -150,11 +162,44 @@ export default function TrancheDetail() {
             </div>
           </div>
 
-          <ConnectWalletCard
-            title={`Buy ${kind} tranche`}
-            subtitle={`Issue price $${q.pricePerToken.toFixed(2)} · ${q.expectedYieldPct.toFixed(1)}% expected APY. Connect a Solana wallet to deposit USDC into the ${kind} tranche.`}
-            accent={trancheColor(kind)}
-          />
+          <div>
+            {recommendedAmount != null && (
+              <div style={{
+                background: `${trancheColor(kind)}12`,
+                border: `1px solid ${trancheColor(kind)}55`,
+                borderRadius: 12,
+                padding: "12px 14px",
+                marginBottom: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+              }}>
+                <div style={{
+                  width: 28, height: 28, borderRadius: "50%",
+                  background: `${trancheColor(kind)}22`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={trancheColor(kind)} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 3 L13.5 9.5 L20 11 L13.5 12.5 L12 19 L10.5 12.5 L4 11 L10.5 9.5 Z" />
+                  </svg>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 10, color: trancheColor(kind), fontFamily: FM, letterSpacing: "0.18em", fontWeight: 500, marginBottom: 3 }}>
+                    PERSONALIZATION · RECOMMENDED
+                  </div>
+                  <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD, fontWeight: 500 }}>
+                    Deposit {fmtUsd(recommendedAmount, recommendedAmount % 1 === 0 ? 0 : 2)}
+                  </div>
+                </div>
+              </div>
+            )}
+            <ConnectWalletCard
+              title={`Buy ${kind} tranche`}
+              subtitle={`Issue price $${q.pricePerToken.toFixed(2)} · ${q.expectedYieldPct.toFixed(1)}% expected APY.${recommendedAmount != null ? ` Your Personalization recommended depositing ${fmtUsd(recommendedAmount, recommendedAmount % 1 === 0 ? 0 : 2)} into the ${kind} tranche.` : ""} Connect a Solana wallet to deposit USDC into the ${kind} tranche.`}
+              accent={trancheColor(kind)}
+            />
+          </div>
         </div>
       </PageFrame>
     </>

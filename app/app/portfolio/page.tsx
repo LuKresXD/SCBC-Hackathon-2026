@@ -133,47 +133,6 @@ export default function PortfolioPage() {
           <Personalization />
         ) : (
         <>
-        {/* Single stats bar — four metrics inside one card divided by
-             hairlines. Stops the "awkwardly stretched" look that separate
-             full-width tiles produced. */}
-        <div style={{
-          background: "rgba(13, 19, 28, 0.6)",
-          border: `0.5px solid ${C.border}`,
-          borderRadius: 12,
-          padding: "14px 22px",
-          marginBottom: 12,
-          display: "flex",
-          alignItems: "center",
-        }}>
-          {[
-            { label: "TOTAL VALUE",    value: fmtUsd(totals.totalValue, 2), color: C.green },
-            { label: "UNREALIZED P&L", value: `${totals.unrealizedPnl >= 0 ? "+" : ""}${fmtUsd(totals.unrealizedPnl, 2)}`, color: totals.unrealizedPnl >= 0 ? C.green : C.red },
-            { label: "BASKETS",        value: fmtUsd(totals.basketValue, 0), sub: `${state.basketPositions.length} position${state.basketPositions.length === 1 ? "" : "s"}` },
-            { label: "PPN",            value: fmtUsd(totals.ppnValue, 0), color: C.violet, sub: `${state.ppnVaults.length} vault${state.ppnVaults.length === 1 ? "" : "s"}` },
-          ].map((s, i, arr) => (
-            <React.Fragment key={s.label}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: FM, letterSpacing: "0.16em", marginBottom: 5 }}>
-                  {s.label}
-                </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                  <span style={{ fontSize: 17, fontWeight: 500, color: s.color ?? C.textPrimary, fontFamily: FD, lineHeight: 1, letterSpacing: "-0.01em" }}>
-                    {s.value}
-                  </span>
-                  {s.sub && (
-                    <span style={{ fontSize: 10, color: C.textMuted, fontFamily: FS, letterSpacing: "0.02em" }}>
-                      {s.sub}
-                    </span>
-                  )}
-                </div>
-              </div>
-              {i < arr.length - 1 && (
-                <div style={{ width: 1, height: 28, background: C.border, margin: "0 18px", flexShrink: 0 }} />
-              )}
-            </React.Fragment>
-          ))}
-        </div>
-
         {/* ORBITAL DONUT CARD — centrepiece, sized to fit above the fold */}
         <div style={{
           background: "linear-gradient(180deg, rgba(13, 19, 28, 0.9) 0%, rgba(5, 8, 12, 0.95) 100%)",
@@ -191,17 +150,81 @@ export default function PortfolioPage() {
           {/* Active color wash */}
           <div style={{ position: "absolute", inset: 0, background: activeId && activeColor ? `radial-gradient(ellipse 60% 50% at 50% 45%, ${activeColor}22 0%, transparent 70%)` : "transparent", transition: "background 0.6s cubic-bezier(0.32, 0.72, 0, 1)", pointerEvents: "none" }} />
 
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0 16px", position: "relative" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 56, padding: "14px 40px", position: "relative", flexWrap: "wrap" }}>
 
-            {/* Header strip */}
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, position: "relative", zIndex: 5 }}>
-              <span style={{ width: 24, height: 1, background: C.textMuted }} />
-              <span style={{ fontFamily: FM, fontSize: 10, letterSpacing: "0.22em", color: C.textMuted }}>YOUR ORBIT</span>
-              <span style={{ width: 24, height: 1, background: C.textMuted }} />
+            {/* Left-side stats panel — totals + per-bucket breakdown. */}
+            <div style={{ width: 300, flexShrink: 0, alignSelf: "center", position: "relative", zIndex: 5 }}>
+              <div style={{ paddingBottom: 16, marginBottom: 14, borderBottom: `0.5px solid ${C.border}` }}>
+                <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.18em", marginBottom: 6 }}>
+                  TOTAL VALUE
+                </div>
+                <div style={{ fontSize: 24, color: C.textPrimary, fontFamily: FD, fontWeight: 500, letterSpacing: "-0.015em", lineHeight: 1 }}>
+                  {fmtUsd(totals.totalValue, 2)}
+                </div>
+              </div>
+              <div style={{ paddingBottom: 16, marginBottom: 14, borderBottom: `0.5px solid ${C.border}` }}>
+                <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.18em", marginBottom: 6 }}>
+                  UNREALIZED P&L
+                </div>
+                <div style={{ fontSize: 24, color: totals.unrealizedPnl >= 0 ? C.green : C.red, fontFamily: FD, fontWeight: 500, letterSpacing: "-0.015em", lineHeight: 1 }}>
+                  {totals.unrealizedPnl >= 0 ? "+" : ""}{fmtUsd(totals.unrealizedPnl, 2)}
+                </div>
+              </div>
+              {(() => {
+                const rows = [
+                  { id: "baskets",  label: "Constellations", color: C.teal,   value: totals.basketValue },
+                  { id: "tranches", label: "Tranches",       color: C.amber,  value: totals.trancheValue },
+                  { id: "ppn",      label: "PPNs",           color: C.violet, value: totals.ppnValue },
+                ];
+                const breakdownTotal = rows.reduce((s, r) => s + r.value, 0);
+                return rows.map((r) => {
+                  const pct = breakdownTotal > 0 ? (r.value / breakdownTotal) * 100 : 0;
+                  const dim = r.value <= 0;
+                  const isActive = activeId === r.id;
+                  return (
+                    <div
+                      key={r.id}
+                      onMouseEnter={() => !dim && setActiveId(r.id)}
+                      onMouseLeave={() => setActiveId(null)}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "14px 1fr auto",
+                        gap: 12,
+                        alignItems: "center",
+                        padding: "12px 8px",
+                        borderRadius: 6,
+                        opacity: dim ? 0.42 : 1,
+                        cursor: dim ? "default" : "pointer",
+                        transition: `opacity 0.15s ${EASE}, background 0.15s ${EASE}`,
+                        background: isActive ? `${r.color}12` : "transparent",
+                      }}
+                    >
+                      <span style={{
+                        width: 9, height: 9, borderRadius: "50%",
+                        background: r.color,
+                        boxShadow: isActive ? `0 0 12px ${r.color}80` : "none",
+                        transition: `box-shadow 0.2s ${EASE}`,
+                        justifySelf: "center",
+                      }} />
+                      <div style={{ fontSize: 14, color: C.textPrimary, fontFamily: FD, fontWeight: 500, letterSpacing: "-0.005em" }}>
+                        {r.label}
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <span style={{ fontSize: 14, color: C.textPrimary, fontFamily: FD, fontWeight: 500 }}>
+                          {fmtUsd(r.value, 0)}
+                        </span>
+                        <span style={{ fontSize: 11, color: C.textMuted, fontFamily: FM, marginLeft: 8, letterSpacing: "0.02em" }}>
+                          {pct.toFixed(0)}%
+                        </span>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
             </div>
 
             {/* Orbital system - rings + corona around donut */}
-            <div style={{ position: "relative", width: systemSize, height: systemSize, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ position: "relative", width: systemSize, height: systemSize, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
 
               {/* Corona glow */}
               <div style={{
@@ -275,6 +298,7 @@ export default function PortfolioPage() {
                 </div>
               </div>
             </div>
+
           </div>
         </div>
 

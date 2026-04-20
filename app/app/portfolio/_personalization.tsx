@@ -11,40 +11,29 @@
  */
 
 import React, { useMemo, useState } from "react";
+import Link from "next/link";
 import { C, FS, FD, FM, EASE, BACKEND_URL, fmtUsd } from "../_lib/tokens";
 import { MetricTile } from "../_components/charts";
+import { bundleById, type Bundle } from "../_lib/bundles";
+import { useLiveBaskets } from "../_lib/use-live-baskets";
 
 type Objective = "income" | "balanced" | "speculation";
 type Horizon = "short" | "medium" | "long";
 type Status = "idle" | "loading" | "success" | "error";
 
 interface AllocationTrancheDetails {
+  basket_id?: string;
   basket_name?: string;
   tier: "senior" | "mezzanine" | "junior";
   expected_yield_pct: number;
   price_per_token: number;
 }
-interface AllocationLendingDetails {
-  supply_apy_pct: number;
-  utilization: number;
-}
-interface AllocationMarketDetails {
-  market_id: string;
-  question: string;
-  side: "YES" | "NO";
-  implied_prob: number;
-  category?: string;
-}
-type AllocationDetails =
-  | AllocationTrancheDetails
-  | AllocationLendingDetails
-  | AllocationMarketDetails;
 
 interface Allocation {
-  kind: "tranche" | "lending" | "market";
+  kind: "tranche";
   weight: number;
   usd_amount: number;
-  details: AllocationDetails;
+  details: AllocationTrancheDetails;
   rationale: string;
 }
 
@@ -71,9 +60,34 @@ const HORIZONS: { id: Horizon; label: string; sub: string }[] = [
 
 const CAPITAL_CAP = 100_000;
 
+// Map user inputs to a real Senthos basket from the frontend's universe so
+// recommendations always link to a basket the purchase page can resolve.
+// Risk → tier: 0-29 HIGH (safest 90%+), 30-69 MID, 70-100 LOW (long-tail).
+// Horizon → window: short/medium/long.
+function pickReferenceBasket(risk: number, horizon: Horizon, live: Bundle[] | null): Bundle | null {
+  const tierCode = risk < 30 ? "HIGH" : risk < 70 ? "MID" : "LOW";
+  const windowCode = horizon === "short" ? "SHORT" : horizon === "long" ? "LONG" : "MED";
+  const id = `STHS-${tierCode}-${windowCode}`;
+  if (live) {
+    const hit = live.find((b) => b.id === id);
+    if (hit) return hit;
+  }
+  return bundleById(id) ?? null;
+}
+
+// Objective -> implicit risk_pct. The backend prompt was built around a
+// granular 0-100 risk dial, so we derive one from the chosen objective
+// instead of showing a separate slider (the two were effectively asking
+// the same question from the user's point of view).
+const RISK_BY_OBJECTIVE: Record<Objective, number> = {
+  income: 15,       // conservative: heavy senior tranche
+  balanced: 50,     // middle of the road
+  speculation: 85,  // aggressive: mezzanine/junior
+};
+
 export function Personalization() {
+  const basketState = useLiveBaskets();
   const [capital, setCapital] = useState<string>("1000");
-  const [risk, setRisk] = useState<number>(50);
   const [objective, setObjective] = useState<Objective>("balanced");
   const [horizon, setHorizon] = useState<Horizon>("medium");
   const [status, setStatus] = useState<Status>("idle");
@@ -88,14 +102,17 @@ export function Personalization() {
   const capitalValid =
     Number.isFinite(capitalNum) && capitalNum > 0 && capitalNum <= CAPITAL_CAP;
 
-  const riskLabel =
-    risk < 30 ? "Conservative" : risk < 70 ? "Balanced" : "Aggressive";
-  const riskColor =
-    risk < 30 ? C.tealLight : risk < 70 ? C.amber : C.coral;
-
   async function generate() {
     if (!capitalValid) {
       setErrMsg(`Capital must be between $1 and $${CAPITAL_CAP.toLocaleString()}`);
+      setStatus("error");
+      return;
+    }
+    const risk = RISK_BY_OBJECTIVE[objective];
+    const liveBaskets = basketState.status === "ok" ? basketState.baskets : null;
+    const ref = pickReferenceBasket(risk, horizon, liveBaskets);
+    if (!ref) {
+      setErrMsg("No matching basket is available right now. Try again in a moment.");
       setStatus("error");
       return;
     }
@@ -106,20 +123,41 @@ export function Personalization() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          risk_pct: risk,
+          risk_pct: risk, // derived from objective above
           capital_usd: capitalNum,
           objective,
           horizon,
+          basket: {
+            id: ref.id,
+            name: ref.id,
+            risk_tier: ref.tier,
+            nav: Math.max(0.01, Math.min(0.99, ref.nav)),
+            days: Math.max(1, Math.round(ref.daysLeft)),
+            legs: Math.max(1, Math.round(ref.totalLegs)),
+          },
         }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        // Zod validation failures come back as { error: "validation", details: {...} }.
+        // Flatten the first field issue so users see what to fix, not "400".
+        let validationDetail: string | null = null;
+        if (body.error === "validation" && body.details) {
+          const fields = body.details.fieldErrors ?? {};
+          const firstKey = Object.keys(fields)[0];
+          if (firstKey && Array.isArray(fields[firstKey]) && fields[firstKey][0]) {
+            validationDetail = `${firstKey}: ${fields[firstKey][0]}`;
+          } else if (Array.isArray(body.details.formErrors) && body.details.formErrors[0]) {
+            validationDetail = body.details.formErrors[0];
+          }
+        }
         const msg =
+          validationDetail ||
           body.message ||
           (body.error === "timeout"
-            ? "Claude took too long. Try again."
+            ? "The request took too long. Try again."
             : body.error === "upstream_rate_limit"
-              ? "Claude is rate-limited right now. One moment."
+              ? "Rate-limited right now. One moment."
               : `Request failed (${res.status})`);
         throw new Error(msg);
       }
@@ -211,20 +249,12 @@ export function Personalization() {
             Tell us what you want, get an allocation
           </div>
           <div style={{ fontSize: 13, color: C.textSecondary, fontFamily: FS, lineHeight: 1.55 }}>
-            Senthos builds an allocation across the pool, tranche quotes, and curated markets from the risk profile and objective you set
+            Senthos builds a tranche allocation on the current basket from the risk profile, objective, and horizon you set. Every row below links straight to the purchase page.
           </div>
         </div>
 
-        {/* Two-column on desktop */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)",
-            gap: 28,
-            position: "relative",
-          }}
-        >
-          {/* Capital */}
+        {/* Capital — stands on its own now that Risk is derived from Objective */}
+        <div style={{ position: "relative" }}>
           <Field label="Capital">
             <div
               style={{
@@ -274,55 +304,6 @@ export function Personalization() {
               }}
             >
               $1 – ${CAPITAL_CAP.toLocaleString()} USD
-            </div>
-          </Field>
-
-          {/* Risk */}
-          <Field label={`Risk · ${riskLabel}`} labelColor={riskColor}>
-            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-              <div style={{ flex: 1, position: "relative" }}>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={risk}
-                  onChange={(e) => setRisk(parseInt(e.target.value, 10))}
-                  style={{
-                    width: "100%",
-                    accentColor: riskColor,
-                  }}
-                />
-              </div>
-              <div
-                style={{
-                  width: 70,
-                  textAlign: "right",
-                  fontSize: 30,
-                  fontFamily: FD,
-                  fontWeight: 400,
-                  color: riskColor,
-                  letterSpacing: "-0.02em",
-                  lineHeight: 1,
-                }}
-              >
-                {risk}
-                <span style={{ fontSize: 14, color: C.textMuted, marginLeft: 2 }}>/100</span>
-              </div>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 10,
-                color: C.textMuted,
-                fontFamily: FM,
-                letterSpacing: "0.12em",
-                marginTop: 8,
-              }}
-            >
-              <span>SAFE</span>
-              <span>BALANCED</span>
-              <span>AGGRESSIVE</span>
             </div>
           </Field>
         </div>
@@ -742,38 +723,24 @@ function ResultView({ result }: { result: PortfolioResponse }) {
 }
 
 function AllocationRow({ a }: { a: Allocation }) {
-  let accent: string = C.textSecondary;
-  let tag = "";
-  let title = "";
-  let sub = "";
-
-  if (a.kind === "tranche") {
-    const d = a.details as AllocationTrancheDetails;
-    accent = d.tier === "senior" ? C.tealLight : d.tier === "mezzanine" ? C.amber : C.coral;
-    tag = `TRANCHE · ${String(d.tier ?? "").toUpperCase()}`;
-    title = d.basket_name || "Senthos basket";
-    const yield_ = Number.isFinite(d.expected_yield_pct) ? d.expected_yield_pct.toFixed(1) : "—";
-    const price = Number.isFinite(d.price_per_token) ? d.price_per_token.toFixed(4) : "—";
-    sub = `Expected yield ${yield_}% · price $${price} / $1 face`;
-  } else if (a.kind === "lending") {
-    const d = a.details as AllocationLendingDetails;
-    accent = C.blue;
-    tag = "LENDING";
-    title = "USDC money market";
-    const apy = Number.isFinite(d.supply_apy_pct) ? d.supply_apy_pct.toFixed(2) : "—";
-    const util = Number.isFinite(d.utilization) ? (d.utilization * 100).toFixed(1) : "—";
-    sub = `Supply APY ${apy}% · utilization ${util}%`;
-  } else if (a.kind === "market") {
-    const d = a.details as AllocationMarketDetails;
-    accent = d.side === "YES" ? C.tealLight : C.coral;
-    tag = `MARKET · ${d.side}`;
-    title = d.question || "Prediction market";
-    const implied = Number.isFinite(d.implied_prob) ? (d.implied_prob * 100).toFixed(1) : "—";
-    sub = `${d.category ? d.category.toUpperCase() + " · " : ""}implied ${implied}%`;
-  }
+  const d = a.details;
+  const accent =
+    d.tier === "senior" ? C.tealLight : d.tier === "mezzanine" ? C.amber : C.coral;
+  const tag = `TRANCHE · ${String(d.tier ?? "").toUpperCase()}`;
+  const title = d.basket_name || "Senthos basket";
+  const yield_ = Number.isFinite(d.expected_yield_pct) ? d.expected_yield_pct.toFixed(1) : "—";
+  const price = Number.isFinite(d.price_per_token) ? d.price_per_token.toFixed(4) : "—";
+  const sub = `Expected yield ${yield_}% · price $${price} / $1 face`;
+  const qs = new URLSearchParams();
+  if (d.tier) qs.set("tier", d.tier);
+  if (Number.isFinite(a.usd_amount)) qs.set("amount", a.usd_amount.toFixed(2));
+  const href = d.basket_id
+    ? `/app/tranche/${d.basket_id}?${qs.toString()}`
+    : `/app/tranche?${qs.toString()}`;
 
   return (
-    <div
+    <Link
+      href={href}
       style={{
         display: "grid",
         gridTemplateColumns: "4px minmax(0, 1fr) auto",
@@ -782,30 +749,54 @@ function AllocationRow({ a }: { a: Allocation }) {
         border: `0.5px solid ${C.border}`,
         borderRadius: 14,
         padding: "18px 22px",
-        transition: `border-color 0.2s ${EASE}, background 0.2s ${EASE}`,
+        transition: `border-color 0.2s ${EASE}, background 0.2s ${EASE}, transform 0.2s ${EASE}`,
+        textDecoration: "none",
+        cursor: "pointer",
       }}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLElement).style.borderColor = `${accent}44`;
-        (e.currentTarget as HTMLElement).style.background = "rgba(15, 22, 32, 0.8)";
+        const el = e.currentTarget as HTMLElement;
+        el.style.borderColor = `${accent}55`;
+        el.style.background = "rgba(15, 22, 32, 0.85)";
+        el.style.transform = "translateY(-1px)";
+        const chev = el.querySelector("[data-chev]") as HTMLElement | null;
+        if (chev) chev.style.transform = "translateX(2px)";
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLElement).style.borderColor = C.border;
-        (e.currentTarget as HTMLElement).style.background = "rgba(13, 19, 28, 0.65)";
+        const el = e.currentTarget as HTMLElement;
+        el.style.borderColor = C.border;
+        el.style.background = "rgba(13, 19, 28, 0.65)";
+        el.style.transform = "translateY(0)";
+        const chev = el.querySelector("[data-chev]") as HTMLElement | null;
+        if (chev) chev.style.transform = "translateX(0)";
       }}
     >
       <div style={{ background: accent, borderRadius: 2, alignSelf: "stretch" }} />
       <div style={{ minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 10,
-            color: accent,
-            fontFamily: FM,
-            letterSpacing: "0.18em",
-            marginBottom: 6,
-            fontWeight: 500,
-          }}
-        >
-          {tag}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <span
+            style={{
+              fontSize: 10,
+              color: accent,
+              fontFamily: FM,
+              letterSpacing: "0.18em",
+              fontWeight: 500,
+            }}
+          >
+            {tag}
+          </span>
+          <span
+            style={{
+              fontSize: 9,
+              color: C.textMuted,
+              fontFamily: FM,
+              letterSpacing: "0.14em",
+              padding: "2px 7px",
+              border: `0.5px solid ${C.border}`,
+              borderRadius: 4,
+            }}
+          >
+            BUY →
+          </span>
         </div>
         <div
           style={{
@@ -846,7 +837,7 @@ function AllocationRow({ a }: { a: Allocation }) {
           {a.rationale}
         </div>
       </div>
-      <div style={{ textAlign: "right", alignSelf: "start", minWidth: 96 }}>
+      <div style={{ textAlign: "right", alignSelf: "start", minWidth: 96, display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
         <div
           style={{
             fontSize: 22,
@@ -870,7 +861,22 @@ function AllocationRow({ a }: { a: Allocation }) {
         >
           {fmtUsd(a.usd_amount, 0)}
         </div>
+        <div
+          data-chev
+          aria-hidden
+          style={{
+            marginTop: 10,
+            color: accent,
+            opacity: 0.8,
+            transition: `transform 0.2s ${EASE}`,
+            display: "inline-flex",
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 6 L15 12 L9 18" />
+          </svg>
+        </div>
       </div>
-    </div>
+    </Link>
   );
 }

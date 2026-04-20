@@ -2552,18 +2552,20 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
            Products → CTA). A soft vertical gradient sits behind everything so
            the scroll doesn't fall off a cliff into pure black. The per-section
            opacity falloff handles the brief overlap with Layer B. */}
-      <main style={{position:"relative",zIndex:10,pointerEvents:"none",marginTop:"-8vh"}}>
+      <main style={{position:"relative",zIndex:10,pointerEvents:"none",marginTop:"-6vh"}}>
         <div aria-hidden style={{
           position:"absolute", inset:0, pointerEvents:"none", zIndex:-1,
-          background:"linear-gradient(180deg, rgba(5, 8, 12, 0) 0%, rgba(8, 14, 22, 0.55) 20%, rgba(10, 18, 28, 0.7) 60%, rgba(5, 8, 12, 0.9) 100%)",
+          background:"linear-gradient(180deg, rgba(5, 8, 12, 0) 0%, rgba(6, 10, 16, 0.15) 30%, rgba(7, 11, 17, 0.25) 70%, rgba(5, 8, 12, 0.4) 100%)",
         }} />
         <section
           ref={el=>{sectionRefs.current[0]=el;}}
-          style={{minHeight:"88vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+          style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
         >
           <div style={{margin:"0 auto",maxWidth:700,textAlign:"center"}}>
-            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
+            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500,display:"inline-flex",alignItems:"center",gap:12,justifyContent:"center"}}>
+              <span aria-hidden style={{width:22,height:1,background:C.tealLight,opacity:0.45}} />
               01 · CONSTELLATIONS
+              <span aria-hidden style={{width:22,height:1,background:C.tealLight,opacity:0.45}} />
             </div>
             <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 72px)", fontWeight:200, lineHeight:1.08, letterSpacing:"-0.03em", marginBottom:24, color:C.textPrimary}}>
               A constellation, not a bet
@@ -2575,11 +2577,13 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
         <section
           ref={el=>{sectionRefs.current[1]=el;}}
-          style={{minHeight:"88vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+          style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
         >
           <div style={{margin:"0 auto",maxWidth:720,textAlign:"center"}}>
-            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
+            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500,display:"inline-flex",alignItems:"center",gap:12,justifyContent:"center"}}>
+              <span aria-hidden style={{width:22,height:1,background:C.tealLight,opacity:0.45}} />
               02 · RISK TIERS
+              <span aria-hidden style={{width:22,height:1,background:C.tealLight,opacity:0.45}} />
             </div>
             <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 72px)", fontWeight:200, lineHeight:1.08, letterSpacing:"-0.03em", marginBottom:24, color:C.textPrimary}}>
               Three tiers, three prices
@@ -2603,11 +2607,13 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
         <section
           ref={el=>{sectionRefs.current[2]=el;}}
-          style={{minHeight:"88vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+          style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
         >
           <div style={{margin:"0 auto",maxWidth:700,textAlign:"center"}}>
-            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
+            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500,display:"inline-flex",alignItems:"center",gap:12,justifyContent:"center"}}>
+              <span aria-hidden style={{width:22,height:1,background:C.tealLight,opacity:0.45}} />
               03 · MECHANICS
+              <span aria-hidden style={{width:22,height:1,background:C.tealLight,opacity:0.45}} />
             </div>
             <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 72px)", fontWeight:200, lineHeight:1.08, letterSpacing:"-0.03em", marginBottom:24, color:C.textPrimary}}>
               Deposit, hold, auto-settle
@@ -2619,7 +2625,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
         <section
           ref={el=>{sectionRefs.current[3]=el;}}
-          style={{minHeight:"92vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform",overflow:"hidden"}}
+          style={{minHeight:"78vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform",overflow:"hidden"}}
         >
           {/* Orbital rings bloom behind the product grid so the black void
               gets a visible scroll-past detail in brand colours. */}
@@ -2632,8 +2638,10 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
             }} />
           </div>
           <div style={{margin:"0 auto",maxWidth:1180,textAlign:"center",position:"relative",zIndex:1,width:"100%"}}>
-            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
+            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500,display:"inline-flex",alignItems:"center",gap:12,justifyContent:"center"}}>
+              <span aria-hidden style={{width:22,height:1,background:C.tealLight,opacity:0.45}} />
               04 · PRODUCTS
+              <span aria-hidden style={{width:22,height:1,background:C.tealLight,opacity:0.45}} />
             </div>
             <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 72px)", fontWeight:200, lineHeight:1.08, letterSpacing:"-0.03em", marginBottom:20, color:C.textPrimary}}>
               One position, four products
@@ -2679,11 +2687,13 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
         <section
           ref={el=>{sectionRefs.current[4]=el;}}
-          style={{minHeight:"80vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+          style={{minHeight:"68vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
         >
           <div style={{margin:"0 auto",maxWidth:720,textAlign:"center"}}>
-            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
+            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500,display:"inline-flex",alignItems:"center",gap:12,justifyContent:"center"}}>
+              <span aria-hidden style={{width:22,height:1,background:C.tealLight,opacity:0.45}} />
               05 · ENTER
+              <span aria-hidden style={{width:22,height:1,background:C.tealLight,opacity:0.45}} />
             </div>
             <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(36px, 9vw, 56px)" : "clamp(56px, 5.6vw, 88px)", fontWeight:200, lineHeight:1.02, letterSpacing:"-0.04em", marginBottom:isMobile?20:24, color:C.textPrimary}}>
               Explore <span style={{fontWeight:500, color:C.tealLight}}>markets</span>

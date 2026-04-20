@@ -16,6 +16,21 @@ const RequestSchema = z.object({
     .enum(["short", "medium", "long"])
     .optional()
     .default("medium"),
+  // Optional client-picked reference basket. When the frontend passes this,
+  // the backend skips its Supabase lookup and uses these values directly so
+  // recommendations link to a basket the frontend can actually resolve.
+  basket: z
+    .object({
+      id: z.string().min(1).max(128),
+      name: z.string().min(1).max(128),
+      risk_tier: z.number().finite().min(0).max(100),
+      nav: z.number().finite().min(0).max(1),
+      // Days / legs are positive numbers (not strictly integers) so live
+      // baskets with fractional days-to-resolution don't 400 the request.
+      days: z.number().finite().min(0.5).max(365),
+      legs: z.number().finite().min(1).max(500),
+    })
+    .optional(),
 });
 
 /**
