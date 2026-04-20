@@ -14,6 +14,7 @@ import { useLiveBaskets } from "../../_lib/use-live-baskets";
 import { useSandbox } from "../../_lib/demo-state";
 import {
   fetchOrderbooks,
+  quoteBidSideImpact,
   quoteSideImpact,
   SLIPPAGE_BPS_CEILING,
   type Orderbook,
@@ -23,7 +24,11 @@ import {
   useUsdcBalance,
   explorerTxUrl,
 } from "../../_lib/wallet-bridge";
-import { depositIntoBundle, DepositError } from "../../_lib/deposit-client";
+import {
+  depositIntoBundle,
+  redeemFromBundle,
+  DepositError,
+} from "../../_lib/deposit-client";
 
 type ResolvedBasket =
   | { kind: "live"; basket: LiveBasket }
@@ -331,7 +336,7 @@ const HOW_IT_WORKS: Array<{ num: string; title: string; body: string }> = [
     num: "01",
     title: "Quote assembly",
     body:
-      "Your quote is the basket NAV (weighted sum of each leg’s Polymarket price) plus the protocol fee, the market-maker spread, and live slippage pulled from the CLOB book.",
+      "Your quote is the basket NAV (weighted sum of each leg’s Polymarket price) plus the protocol fee, market-maker fees, and live slippage pulled from the CLOB book. Sells also pay an adverse-selection premium because the desk has to dynamically hedge redemptions in the underlying legs.",
   },
   {
     num: "02",
@@ -353,11 +358,34 @@ const HOW_IT_WORKS: Array<{ num: string; title: string; body: string }> = [
 // Enforced at the button disable gate so the label reads “Over limit”.
 const MAX_ORDER_USDC = 250_000;
 
-// Fee structure (in basis points). Protocol + MM spread are flat at 25
+// Fee structure (in basis points). Protocol + MM fees are flat at 25
 // bps each (= 0.25% each). Slippage is computed live off the Polymarket
 // CLOB — see `quoteFeesBps`.
 const PROTOCOL_FEE_BPS = 25;
 const MM_SPREAD_BPS = 25;
+
+// -------- Sell-side adverse-selection premium ----------------------------
+//
+// When a user redeems a basket, the MM can't just pocket the NAV. They
+// bought the underlying Polymarket legs when the user originally
+// deposited, and to buy those legs back they cross the bid/ask on each
+// leg plus carry the inventory while they unwind. The slippage row
+// already captures the CLOB walk, but the slippage alone under-prices
+// the flow cost because it assumes an instant fill — real dynamic
+// hedging forces the desk to re-hedge as legs drift, and informed
+// redemption flow tends to arrive right when NAVs are moving most.
+//
+// The adverse premium is calibrated so:
+//   • a $1k sell pays ~ADVERSE_BPS_BASE (15 bps, the minimum round-trip cost)
+//   • a $25k sell on a typical basket (~$5M aggregate leg volume) pays ~40 bps
+//   • a $250k sell pays ~105 bps
+//
+// k = 350 gives that curve when the volume proxy is floored at $100k,
+// which keeps thin baskets from reporting microscopic adverse fees
+// that would be pure arb for bigger tickets.
+const ADVERSE_BPS_BASE = 15;
+const ADVERSE_SQRT_K = 350;
+const ADVERSE_VOLUME_FLOOR = 100_000;
 
 /**
  * Per-leg slippage estimate from a live CLOB snapshot.
@@ -423,6 +451,94 @@ function quoteFeesBpsFromBooks(
     mmSpreadBps: MM_SPREAD_BPS,
     slippageBps,
     totalBps: PROTOCOL_FEE_BPS + MM_SPREAD_BPS + slippageBps,
+    hasLiveBooks,
+  };
+}
+
+/**
+ * Sell-side quote. Mirrors the buy-side helper but walks the BID of
+ * each leg's book and adds an adverse-selection premium on top of the
+ * protocol + MM fees + slippage stack.
+ *
+ * The bid walk produces honest redemption impact: each leg's visible
+ * bid ladder tells us how much USDC the desk can actually recover by
+ * unwinding the hedge, and the shortfall vs. mid is slippage we pass
+ * through to the user. The adverse premium then captures the residual
+ * flow cost (dynamic re-hedging of the basket's leg-level greeks over
+ * the unwind window, plus the informed-flow tilt baked into redemption
+ * timing).
+ *
+ * Calibration: a $1k sell pays ~15 bps adverse; a $25k sell on a
+ * $5M-volume basket pays ~40 bps; a $250k sell pays ~105 bps. The
+ * `ADVERSE_VOLUME_FLOOR` keeps ultra-thin baskets from under-pricing
+ * the premium (which would otherwise tend toward infinity at 0 volume).
+ */
+function quoteSellFeesBpsFromBooks(
+  usdcNotional: number,
+  markets: Array<{ weight?: number; volumeUsd: number; tokenId: string }>,
+  books: Map<string, Orderbook>,
+): {
+  protocolBps: number;
+  mmSpreadBps: number;
+  slippageBps: number;
+  adverseBps: number;
+  totalBps: number;
+  hasLiveBooks: boolean;
+} {
+  const size = Math.max(0, usdcNotional);
+  let slippageBps = 0;
+  let coveredWeight = 0;
+  let hasLiveBooks = false;
+
+  if (markets.length > 0 && size > 0) {
+    for (const m of markets) {
+      const w = m.weight && m.weight > 0 ? m.weight : 1 / markets.length;
+      const legSize = size * w;
+      const book = m.tokenId ? books.get(m.tokenId) : undefined;
+      if (book && book.bids.length > 0) {
+        hasLiveBooks = true;
+        const impact = quoteBidSideImpact(legSize, book);
+        slippageBps += impact.slippageBps * w;
+        coveredWeight += w;
+      }
+    }
+  }
+
+  // Fallback / residual coverage uses the same volume-proxy model as
+  // the buy path. The model is size-driven and signs the impact as a
+  // non-negative slippage — direction of flow doesn't change the
+  // scaling, only the sign of the spread component (which we strip by
+  // taking the absolute value inside the volume proxy).
+  if (!hasLiveBooks) {
+    slippageBps = volumeProxySlippageBps(size, markets);
+  } else if (coveredWeight > 0 && coveredWeight < 1) {
+    const proxy = volumeProxySlippageBps(
+      size * (1 - coveredWeight),
+      markets,
+    );
+    slippageBps = slippageBps + proxy * (1 - coveredWeight);
+  }
+  slippageBps = Math.max(1, Math.min(SLIPPAGE_BPS_CEILING, slippageBps));
+
+  // Adverse-selection / flow premium: 15 bps base + k × sqrt(size / volume).
+  // The basket volume proxy is the sum of leg lifetime volumes, floored
+  // at $100k so demo / thin baskets don't collapse the denominator.
+  const totalVolume = markets.reduce(
+    (s, m) => s + (m.volumeUsd ?? 0),
+    0,
+  );
+  const volumeProxy = Math.max(ADVERSE_VOLUME_FLOOR, totalVolume);
+  const adverseBps =
+    ADVERSE_BPS_BASE +
+    ADVERSE_SQRT_K * Math.sqrt(Math.max(0, size) / volumeProxy);
+
+  return {
+    protocolBps: PROTOCOL_FEE_BPS,
+    mmSpreadBps: MM_SPREAD_BPS,
+    slippageBps,
+    adverseBps,
+    totalBps:
+      PROTOCOL_FEE_BPS + MM_SPREAD_BPS + slippageBps + adverseBps,
     hasLiveBooks,
   };
 }
@@ -516,6 +632,8 @@ function sizeOnlySlippageBps(size: number): number {
   return Math.min(SLIPPAGE_BPS_CEILING, bps);
 }
 
+type TradeMode = "buy" | "sell";
+
 function BasketBuyPanel({
   bundle,
   accent,
@@ -527,10 +645,12 @@ function BasketBuyPanel({
 }) {
   const { connected } = useWallet();
   const { setVisible: setWalletModalVisible } = useWalletModal();
-  const { dispatch } = useSandbox();
+  const { state, dispatch } = useSandbox();
   const wallet = useWalletSigner();
   const usdc = useUsdcBalance();
+  const [mode, setMode] = useState<TradeMode>("buy");
   const [amount, setAmount] = useState<string>("100");
+  const [sellQtyInput, setSellQtyInput] = useState<string>("");
   const [books, setBooks] = useState<Map<string, Orderbook>>(new Map());
   const [bookStatus, setBookStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
   // On-chain submission state — mirrors the prepare/sign/confirm lifecycle of
@@ -587,8 +707,13 @@ function BasketBuyPanel({
     };
   }, [topTokenIds]);
 
-  const usdcAmount = Math.max(0, Number.parseFloat(amount) || 0);
+  // Live NAV anchor: every quote in this panel (buy + sell) uses this
+  // instead of the seed Bundle's nav, so when the live pipeline
+  // refreshes the panel follows.
   const navPrice = bundle.nav > 0 ? bundle.nav : 1;
+
+  // ---- Buy quote ----------------------------------------------------
+  const usdcAmount = Math.max(0, Number.parseFloat(amount) || 0);
   const fees = useMemo(
     () => quoteFeesBpsFromBooks(usdcAmount, topLegs, books),
     [usdcAmount, topLegs, books],
@@ -608,83 +733,180 @@ function BasketBuyPanel({
     txStage === "signing" ||
     txStage === "confirming" ||
     txStage === "persisting";
-  const canSubmit =
-    connected && hasAmount && !insufficient && !overCap && !txBusy;
 
-  // The button is always actionable so users can simulate the trade
-  // without wallet friction. Wallet picker only opens on real submit.
-  // Once the user has a connected wallet and a valid amount this does the
-  // real on-chain flow: prepare tx at the backend, Phantom signs + sends,
-  // we poll for confirmation, backend persists the position. The sandbox
-  // dispatch still runs on success so the UI bookkeeping (positions list
-  // etc.) stays in sync until every view has been migrated off the
-  // sandbox reducer.
+  // ---- Sell quote ---------------------------------------------------
+  //
+  // Sell semantics: user inputs a token quantity (STHS). The MM buys
+  // the tokens back, marks-to-market at `qty × navPrice`, and charges
+  // protocol + MM fees + bid-side slippage + adverse-selection premium
+  // against that notional. `payoutUsdc` is what the user actually
+  // receives after fees. The on-chain `redeem` instruction takes no
+  // amount — it always closes the full position; `sellQty` is still
+  // used for the UI quote and the sandbox reducer's optimistic update.
+  const existingPosition = state.basketPositions.find(
+    (p) => p.bundleId === bundle.id,
+  );
+  const heldQty = existingPosition?.qty ?? 0;
+  const sellQty = Math.max(0, Number.parseFloat(sellQtyInput) || 0);
+  const sellUsdcNotional = sellQty * navPrice;
+  const sellFees = useMemo(
+    () => quoteSellFeesBpsFromBooks(sellUsdcNotional, topLegs, books),
+    [sellUsdcNotional, topLegs, books],
+  );
+  const sellPayoutUsdc =
+    sellUsdcNotional * (1 - sellFees.totalBps / 10_000);
+  const hasSellQty = sellQty > 0;
+  const sellOverPosition = hasSellQty && sellQty > heldQty + 1e-9;
+  const sellOverCap = hasSellQty && sellUsdcNotional > MAX_ORDER_USDC;
+
+  const canBuy =
+    connected && hasAmount && !insufficient && !overCap && !txBusy;
+  const canSell =
+    connected &&
+    hasSellQty &&
+    !sellOverPosition &&
+    !sellOverCap &&
+    heldQty > 0 &&
+    !txBusy;
+
+  // ---- Submit -------------------------------------------------------
+  //
+  // Both Buy and Sell run the real prepare → Phantom sign → confirm →
+  // persist flow via the deposit-client helpers. The sandbox dispatch
+  // fires only after the on-chain tx confirms, so the portfolio card
+  // mirrors authoritative state (not a simulation).
   async function handlePrimary() {
     if (!connected) {
       setWalletModalVisible(true);
       return;
     }
-    if (!canSubmit) return;
-    setTxError(null);
-    setTxSignature(null);
-    setTxStage("preparing");
-    try {
-      const result = await depositIntoBundle({
-        wallet,
-        bundleId: bundle.id,
-        amountUsdc: usdcAmount,
-      });
-      // No per-stage hook in `depositIntoBundle`; jump to the final stage
-      // once it resolves. The intermediate UI is cosmetic — `txBusy` is
-      // the only thing that actually gates the button.
-      setTxStage("done");
-      setTxSignature(result.signature);
-      // Keep the sandbox reducer in sync so the portfolio card reflects
-      // the new position until we re-source that view from the chain.
-      dispatch({
-        type: "basket/deposit",
-        bundleId: bundle.id,
-        usdcAmount,
-      });
-      // Kick the balance poll right away so the UI updates before the
-      // 12-second interval tick.
-      void usdc.refresh();
-    } catch (err) {
-      setTxStage("idle");
-      if (err instanceof DepositError) {
-        setTxError(err.message);
-      } else if (err instanceof Error) {
-        // Phantom's reject string is long and unhelpful — shorten it.
-        setTxError(
-          /user rejected/i.test(err.message)
-            ? "Transaction was rejected in your wallet."
-            : err.message,
-        );
-      } else {
-        setTxError(String(err));
+    if (mode === "buy") {
+      if (!canBuy) return;
+      setTxError(null);
+      setTxSignature(null);
+      setTxStage("preparing");
+      try {
+        const result = await depositIntoBundle({
+          wallet,
+          bundleId: bundle.id,
+          amountUsdc: usdcAmount,
+        });
+        setTxStage("done");
+        setTxSignature(result.signature);
+        dispatch({
+          type: "basket/deposit",
+          bundleId: bundle.id,
+          usdcAmount,
+          nav: navPrice,
+          tokensOut,
+        });
+        void usdc.refresh();
+      } catch (err) {
+        setTxStage("idle");
+        if (err instanceof DepositError) {
+          setTxError(err.message);
+        } else if (err instanceof Error) {
+          setTxError(
+            /user rejected/i.test(err.message)
+              ? "Transaction was rejected in your wallet."
+              : err.message,
+          );
+        } else {
+          setTxError(String(err));
+        }
+      }
+    } else {
+      if (!canSell) return;
+      setTxError(null);
+      setTxSignature(null);
+      setTxStage("preparing");
+      try {
+        const result = await redeemFromBundle({
+          wallet,
+          bundleId: bundle.id,
+        });
+        setTxStage("done");
+        setTxSignature(result.signature);
+        dispatch({
+          type: "basket/redeem",
+          bundleId: bundle.id,
+          qty: sellQty,
+          payoutUsdc: sellPayoutUsdc,
+        });
+        setSellQtyInput("");
+        void usdc.refresh();
+      } catch (err) {
+        setTxStage("idle");
+        if (err instanceof DepositError) {
+          setTxError(err.message);
+        } else if (err instanceof Error) {
+          setTxError(
+            /user rejected/i.test(err.message)
+              ? "Transaction was rejected in your wallet."
+              : err.message,
+          );
+        } else {
+          setTxError(String(err));
+        }
       }
     }
   }
 
-  const buttonLabel = !hasAmount
-    ? "Enter an amount"
-    : overCap
-      ? `Max $${MAX_ORDER_USDC.toLocaleString()} per order`
-      : insufficient
-        ? "Insufficient USDC"
-        : txStage === "preparing"
-          ? "Preparing transaction…"
-          : txStage === "signing"
-            ? "Awaiting wallet signature…"
-            : txStage === "confirming"
-              ? "Confirming on Solana…"
-              : txStage === "persisting"
-                ? "Finalising…"
-                : txStage === "done"
-                  ? "✓ Position opened"
-                  : "Buy position";
+  const buttonLabel =
+    mode === "buy"
+      ? !hasAmount
+        ? "Enter an amount"
+        : overCap
+          ? `Max $${MAX_ORDER_USDC.toLocaleString()} per order`
+          : insufficient
+            ? "Insufficient USDC"
+            : txStage === "preparing"
+              ? "Preparing transaction…"
+              : txStage === "signing"
+                ? "Awaiting wallet signature…"
+                : txStage === "confirming"
+                  ? "Confirming on Solana…"
+                  : txStage === "persisting"
+                    ? "Finalising…"
+                    : txStage === "done"
+                      ? "✓ Position opened"
+                      : "Buy position"
+      : !hasSellQty
+        ? "Enter a quantity"
+        : sellOverCap
+          ? `Max $${MAX_ORDER_USDC.toLocaleString()} per redemption`
+          : connected && heldQty <= 0
+            ? "No position to sell"
+            : connected && sellOverPosition
+              ? "Exceeds held position"
+              : txStage === "preparing"
+                ? "Preparing redeem…"
+                : txStage === "signing"
+                  ? "Awaiting wallet signature…"
+                  : txStage === "confirming"
+                    ? "Confirming on Solana…"
+                    : txStage === "persisting"
+                      ? "Finalising…"
+                      : txStage === "done"
+                        ? "✓ Position redeemed"
+                        : "Sell position";
+
+  // Sell button follows the same simulate-first pattern as Buy: users
+  // without a wallet can still click it to open the wallet picker
+  // (`handlePrimary` handles the `!connected` branch). Position +
+  // balance checks only block the click once the wallet is connected.
   const buttonActive =
-    hasAmount && !insufficient && !overCap && !txBusy && txStage !== "done";
+    mode === "buy"
+      ? hasAmount &&
+        !insufficient &&
+        !overCap &&
+        !txBusy &&
+        txStage !== "done"
+      : hasSellQty &&
+        !sellOverCap &&
+        !txBusy &&
+        txStage !== "done" &&
+        (!connected || (heldQty > 0 && !sellOverPosition));
 
   return (
     <div
@@ -702,7 +924,7 @@ function BasketBuyPanel({
         padding: "22px 22px 24px",
       }}
     >
-      {/* ---- Buy section ---- */}
+      {/* ---- Trade section (Buy / Sell tabs) ---- */}
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div
           style={{
@@ -714,7 +936,7 @@ function BasketBuyPanel({
             textAlign: "center",
           }}
         >
-          Buy {bundle.id}
+          {mode === "buy" ? `Buy ${bundle.id}` : `Sell ${bundle.id}`}
         </div>
         <div
           style={{
@@ -726,146 +948,84 @@ function BasketBuyPanel({
             fontWeight: 300,
           }}
         >
-          {bundle.totalLegs}-leg basket at ${bundle.nav.toFixed(3)}
+          {bundle.totalLegs}-leg basket at ${navPrice.toFixed(3)}
         </div>
 
-        {/* Amount input (always enabled) */}
+        {/* Buy / Sell segmented control */}
         <div
+          role="tablist"
+          aria-label="Trade direction"
           style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 4,
+            padding: 3,
             background: C.surface,
             border: `0.5px solid ${C.border}`,
-            borderRadius: 12,
-            padding: "12px 14px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
+            borderRadius: 10,
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontFamily: FM,
-              fontSize: 10,
-              letterSpacing: "0.14em",
-              color: C.textMuted,
-              textTransform: "uppercase",
-              fontWeight: 500,
-            }}
-          >
-            <span>Amount</span>
-            <span>
-              Wallet balance{" "}
-              <span style={{ color: connected ? C.textSecondary : C.textMuted }}>
-                {connected
-                  ? usdc.loading && usdc.uiAmount === 0
-                    ? "…"
-                    : `$${liveUsdc.toFixed(2)}`
-                  : "connect"}
-              </span>
-            </span>
-          </div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <input
-              inputMode="decimal"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-              placeholder="0.00"
-              style={{
-                flex: 1,
-                minWidth: 0,
-                background: "transparent",
-                border: "none",
-                outline: "none",
-                color: C.textPrimary,
-                fontFamily: FD,
-                fontSize: 22,
-                fontWeight: 400,
-                letterSpacing: "-0.01em",
-                padding: 0,
-              }}
-            />
-            <span
-              style={{
-                fontFamily: FM,
-                fontSize: 11,
-                color: C.textSecondary,
-                letterSpacing: "0.06em",
-                fontWeight: 400,
-              }}
-            >
-              USDC
-            </span>
-          </div>
+          {(["buy", "sell"] as const).map((m) => {
+            const active = mode === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setMode(m)}
+                style={{
+                  padding: "8px 0",
+                  borderRadius: 7,
+                  border: "none",
+                  background: active ? `${accent}22` : "transparent",
+                  color: active ? accent : C.textSecondary,
+                  fontFamily: FD,
+                  fontSize: 12,
+                  fontWeight: active ? 600 : 500,
+                  letterSpacing: "0.04em",
+                  textTransform: "capitalize",
+                  cursor: "pointer",
+                  transition: `color 0.15s ${EASE}, background 0.15s ${EASE}`,
+                }}
+              >
+                {m}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Fee breakdown — dynamic, appears only when there's an amount */}
-        {hasAmount && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-              padding: "10px 14px",
-              background: "rgba(10, 15, 24, 0.45)",
-              borderRadius: 10,
-              border: `0.5px solid ${C.border}`,
-            }}
-          >
-            <FeeRow
-              label="Protocol fee"
-              bps={fees.protocolBps}
-              usd={usdcAmount * fees.protocolBps / 10_000}
-            />
-            <FeeRow
-              label="Market-maker spread"
-              bps={fees.mmSpreadBps}
-              usd={usdcAmount * fees.mmSpreadBps / 10_000}
-            />
-            <FeeRow
-              label="Slippage"
-              bps={fees.slippageBps}
-              usd={usdcAmount * fees.slippageBps / 10_000}
-              hint="scales with order size"
-            />
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontFamily: FM,
-                fontSize: 11,
-                color: C.textSecondary,
-                fontWeight: 500,
-                borderTop: `0.5px solid ${C.border}`,
-                paddingTop: 8,
-                marginTop: 2,
-                letterSpacing: "0.02em",
-              }}
-            >
-              <span>You receive</span>
-              <span style={{ color: accent, fontWeight: 600 }}>
-                {tokensOut.toFixed(2)} STHS
-              </span>
-            </div>
-            <div
-              style={{
-                fontFamily: FS,
-                fontSize: 10,
-                color: C.textMuted,
-                letterSpacing: "0.02em",
-                fontWeight: 300,
-                marginTop: 2,
-              }}
-            >
-              {bookStatus === "loading"
-                ? "Quoting slippage from live Polymarket books…"
-                : fees.hasLiveBooks
-                  ? `Slippage quoted live from Polymarket CLOB (${topLegs.length} legs sampled).`
-                  : bookStatus === "error"
-                    ? "CLOB feed unavailable. Slippage estimated from leg volume."
-                    : "Slippage estimated from leg volume. Live book kicks in once a wallet connects."}
-            </div>
-          </div>
+        {mode === "buy" ? (
+          <BuySection
+            connected={connected}
+            amount={amount}
+            setAmount={setAmount}
+            usdcAmount={usdcAmount}
+            stateUsdc={state.usdc}
+            fees={fees}
+            tokensOut={tokensOut}
+            accent={accent}
+            bookStatus={bookStatus}
+            topLegCount={topLegs.length}
+            hasAmount={hasAmount}
+          />
+        ) : (
+          <SellSection
+            connected={connected}
+            heldQty={heldQty}
+            avgCost={existingPosition?.avgCost ?? 0}
+            navPrice={navPrice}
+            sellQtyInput={sellQtyInput}
+            setSellQtyInput={setSellQtyInput}
+            sellQty={sellQty}
+            sellUsdcNotional={sellUsdcNotional}
+            sellFees={sellFees}
+            sellPayoutUsdc={sellPayoutUsdc}
+            sellOverPosition={sellOverPosition}
+            accent={accent}
+            bookStatus={bookStatus}
+            topLegCount={topLegs.length}
+          />
         )}
 
         {/* Single primary action. Wallet connection is implicit: the
@@ -1031,6 +1191,429 @@ function BasketBuyPanel({
         </ol>
       </div>
     </div>
+  );
+}
+
+/**
+ * BUY side of the trade panel. Amount in USDC, tokens-out at the live
+ * NAV after protocol + MM fees + slippage. Pure presentational: the
+ * parent panel owns all state and dispatch, we just render the inputs
+ * and fee breakdown.
+ */
+function BuySection({
+  connected,
+  amount,
+  setAmount,
+  usdcAmount,
+  stateUsdc,
+  fees,
+  tokensOut,
+  accent,
+  bookStatus,
+  topLegCount,
+  hasAmount,
+}: {
+  connected: boolean;
+  amount: string;
+  setAmount: (v: string) => void;
+  usdcAmount: number;
+  stateUsdc: number;
+  fees: {
+    protocolBps: number;
+    mmSpreadBps: number;
+    slippageBps: number;
+    hasLiveBooks: boolean;
+  };
+  tokensOut: number;
+  accent: string;
+  bookStatus: "idle" | "loading" | "ok" | "error";
+  topLegCount: number;
+  hasAmount: boolean;
+}) {
+  return (
+    <>
+      <div
+        style={{
+          background: C.surface,
+          border: `0.5px solid ${C.border}`,
+          borderRadius: 12,
+          padding: "12px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            fontFamily: FM,
+            fontSize: 10,
+            letterSpacing: "0.14em",
+            color: C.textMuted,
+            textTransform: "uppercase",
+            fontWeight: 500,
+          }}
+        >
+          <span>Amount</span>
+          {connected && (
+            <span>
+              Available{" "}
+              <span style={{ color: C.textSecondary }}>
+                ${stateUsdc.toFixed(2)}
+              </span>
+            </span>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <input
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+            placeholder="0.00"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              color: C.textPrimary,
+              fontFamily: FD,
+              fontSize: 22,
+              fontWeight: 400,
+              letterSpacing: "-0.01em",
+              padding: 0,
+            }}
+          />
+          <span
+            style={{
+              fontFamily: FM,
+              fontSize: 11,
+              color: C.textSecondary,
+              letterSpacing: "0.06em",
+              fontWeight: 400,
+            }}
+          >
+            USDC
+          </span>
+        </div>
+      </div>
+
+      {hasAmount && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            padding: "10px 14px",
+            background: "rgba(10, 15, 24, 0.45)",
+            borderRadius: 10,
+            border: `0.5px solid ${C.border}`,
+          }}
+        >
+          <FeeRow
+            label="Protocol fee"
+            bps={fees.protocolBps}
+            usd={(usdcAmount * fees.protocolBps) / 10_000}
+          />
+          <FeeRow
+            label="Market-maker fees"
+            bps={fees.mmSpreadBps}
+            usd={(usdcAmount * fees.mmSpreadBps) / 10_000}
+          />
+          <FeeRow
+            label="Slippage"
+            bps={fees.slippageBps}
+            usd={(usdcAmount * fees.slippageBps) / 10_000}
+            hint="scales with order size"
+          />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontFamily: FM,
+              fontSize: 11,
+              color: C.textSecondary,
+              fontWeight: 500,
+              borderTop: `0.5px solid ${C.border}`,
+              paddingTop: 8,
+              marginTop: 2,
+              letterSpacing: "0.02em",
+            }}
+          >
+            <span>You receive</span>
+            <span style={{ color: accent, fontWeight: 600 }}>
+              {tokensOut.toFixed(2)} STHS
+            </span>
+          </div>
+          <div
+            style={{
+              fontFamily: FS,
+              fontSize: 10,
+              color: C.textMuted,
+              letterSpacing: "0.02em",
+              fontWeight: 300,
+              marginTop: 2,
+            }}
+          >
+            {bookStatus === "loading"
+              ? "Quoting slippage from live Polymarket books…"
+              : fees.hasLiveBooks
+                ? `Slippage quoted live from Polymarket CLOB (${topLegCount} legs sampled).`
+                : bookStatus === "error"
+                  ? "CLOB feed unavailable. Slippage estimated from leg volume."
+                  : "Slippage estimated from leg volume. Live book kicks in once a wallet connects."}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * SELL side of the trade panel. Quantity in STHS (with a Max fill from
+ * the held position), USDC-out at the live NAV minus protocol + MM fees
+ * + bid-side slippage + adverse-selection premium.
+ *
+ * The section is ALWAYS simulatable — matching the Buy tab's behaviour.
+ * Users without a wallet or without a position still see the quote UI
+ * and live fee breakdown; the primary button (owned by the parent
+ * panel) is what routes them to either the wallet modal or a disabled
+ * "No position to sell" state. Keeping the inputs visible lets users
+ * explore redemption pricing before they ever connect.
+ */
+function SellSection({
+  connected,
+  heldQty,
+  avgCost,
+  navPrice,
+  sellQtyInput,
+  setSellQtyInput,
+  sellQty,
+  sellUsdcNotional,
+  sellFees,
+  sellPayoutUsdc,
+  sellOverPosition,
+  accent,
+  bookStatus,
+  topLegCount,
+}: {
+  connected: boolean;
+  heldQty: number;
+  avgCost: number;
+  navPrice: number;
+  sellQtyInput: string;
+  setSellQtyInput: (v: string) => void;
+  sellQty: number;
+  sellUsdcNotional: number;
+  sellFees: {
+    protocolBps: number;
+    mmSpreadBps: number;
+    slippageBps: number;
+    adverseBps: number;
+    hasLiveBooks: boolean;
+  };
+  sellPayoutUsdc: number;
+  sellOverPosition: boolean;
+  accent: string;
+  bookStatus: "idle" | "loading" | "ok" | "error";
+  topLegCount: number;
+}) {
+  const hasPosition = heldQty > 0;
+  const unrealized = hasPosition ? heldQty * (navPrice - avgCost) : 0;
+  return (
+    <>
+      <div
+        style={{
+          background: C.surface,
+          border: `0.5px solid ${C.border}`,
+          borderRadius: 12,
+          padding: "12px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            fontFamily: FM,
+            fontSize: 10,
+            letterSpacing: "0.14em",
+            color: C.textMuted,
+            textTransform: "uppercase",
+            fontWeight: 500,
+          }}
+        >
+          <span>Quantity</span>
+          {connected && (
+            <span>
+              Held{" "}
+              <span style={{ color: C.textSecondary }}>
+                {heldQty.toFixed(2)} STHS
+              </span>
+              {hasPosition && (
+                <span style={{ color: C.textMuted, marginLeft: 8 }}>
+                  ({unrealized >= 0 ? "+" : ""}${unrealized.toFixed(2)})
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <input
+            inputMode="decimal"
+            value={sellQtyInput}
+            onChange={(e) =>
+              setSellQtyInput(e.target.value.replace(/[^0-9.]/g, ""))
+            }
+            placeholder="0.00"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              color: sellOverPosition ? C.red : C.textPrimary,
+              fontFamily: FD,
+              fontSize: 22,
+              fontWeight: 400,
+              letterSpacing: "-0.01em",
+              padding: 0,
+            }}
+          />
+          <button
+            type="button"
+            disabled={!hasPosition}
+            onClick={() =>
+              hasPosition && setSellQtyInput(heldQty.toFixed(6))
+            }
+            style={{
+              background: hasPosition
+                ? `${accent}22`
+                : "rgba(255,255,255,0.04)",
+              border: `1px solid ${
+                hasPosition ? `${accent}55` : "rgba(255,255,255,0.08)"
+              }`,
+              color: hasPosition ? accent : C.textMuted,
+              borderRadius: 6,
+              padding: "4px 10px",
+              fontFamily: FM,
+              fontSize: 10,
+              letterSpacing: "0.1em",
+              fontWeight: 600,
+              cursor: hasPosition ? "pointer" : "not-allowed",
+            }}
+          >
+            MAX
+          </button>
+          <span
+            style={{
+              fontFamily: FM,
+              fontSize: 11,
+              color: C.textSecondary,
+              letterSpacing: "0.06em",
+              fontWeight: 400,
+              marginLeft: 4,
+            }}
+          >
+            STHS
+          </span>
+        </div>
+      </div>
+
+      {sellQty > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            padding: "10px 14px",
+            background: "rgba(10, 15, 24, 0.45)",
+            borderRadius: 10,
+            border: `0.5px solid ${C.border}`,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontFamily: FM,
+              fontSize: 11,
+              color: C.textSecondary,
+              letterSpacing: "0.02em",
+              fontWeight: 400,
+              marginBottom: 2,
+            }}
+          >
+            <span>Mid notional</span>
+            <span style={{ color: C.textPrimary, fontFamily: FM }}>
+              ${sellUsdcNotional.toFixed(2)}
+            </span>
+          </div>
+          <FeeRow
+            label="Protocol fee"
+            bps={sellFees.protocolBps}
+            usd={(sellUsdcNotional * sellFees.protocolBps) / 10_000}
+          />
+          <FeeRow
+            label="Market-maker fees"
+            bps={sellFees.mmSpreadBps}
+            usd={(sellUsdcNotional * sellFees.mmSpreadBps) / 10_000}
+          />
+          <FeeRow
+            label="Slippage (bid side)"
+            bps={sellFees.slippageBps}
+            usd={(sellUsdcNotional * sellFees.slippageBps) / 10_000}
+            hint="live CLOB walk"
+          />
+          <FeeRow
+            label="Adverse-selection"
+            bps={sellFees.adverseBps}
+            usd={(sellUsdcNotional * sellFees.adverseBps) / 10_000}
+            hint="dynamic-hedging premium"
+          />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontFamily: FM,
+              fontSize: 11,
+              color: C.textSecondary,
+              fontWeight: 500,
+              borderTop: `0.5px solid ${C.border}`,
+              paddingTop: 8,
+              marginTop: 2,
+              letterSpacing: "0.02em",
+            }}
+          >
+            <span>You receive</span>
+            <span style={{ color: accent, fontWeight: 600 }}>
+              ${sellPayoutUsdc.toFixed(2)}
+            </span>
+          </div>
+          <div
+            style={{
+              fontFamily: FS,
+              fontSize: 10,
+              color: C.textMuted,
+              letterSpacing: "0.02em",
+              fontWeight: 300,
+              marginTop: 2,
+            }}
+          >
+            {bookStatus === "loading"
+              ? "Quoting redemption impact from live Polymarket books…"
+              : sellFees.hasLiveBooks
+                ? `Redemption slippage quoted live from ${topLegCount} CLOB legs. Adverse premium scales with size vs. basket volume.`
+                : "CLOB feed unavailable. Slippage estimated from leg volume."}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

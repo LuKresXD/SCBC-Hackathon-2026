@@ -134,3 +134,83 @@ export function quoteSideImpact(
 
   return { slippageBps, filledUsdc, avgPrice, midPrice };
 }
+
+/**
+ * Compute the slippage (in basis points) of SELLING a position worth
+ * `usdcNotional` (mid-valued) into the bid side of a market's CLOB book.
+ *
+ * Mirror of `quoteSideImpact` but in the opposite direction: the user is
+ * unwinding a long, the MM is bidding. We walk the bids in descending
+ * price order until we've delivered the mid-valued token quantity, then
+ * compare the weighted-average fill price to the top-of-book mid. A
+ * positive slippage number means the user received LESS than mid per
+ * token — which is exactly what happens on any real redemption.
+ *
+ * Same scarcity-penalty logic as the ask-side walk, so very large
+ * redemptions on thin books report honest (huge) numbers rather than
+ * silently capping.
+ */
+export function quoteBidSideImpact(
+  usdcNotional: number,
+  book: Orderbook,
+): { slippageBps: number; filledUsdc: number; avgPrice: number; midPrice: number } {
+  if (!book || book.bids.length === 0 || usdcNotional <= 0) {
+    return { slippageBps: 0, filledUsdc: 0, avgPrice: 0, midPrice: 0 };
+  }
+  const topAsk = book.asks[0]?.price ?? 0;
+  const topBid = book.bids[0]?.price ?? 0;
+  const midPrice =
+    topBid > 0 && topAsk > 0 ? (topBid + topAsk) / 2 : topBid;
+  if (midPrice <= 0) {
+    return { slippageBps: 0, filledUsdc: 0, avgPrice: 0, midPrice: 0 };
+  }
+
+  // Mid-valued token quantity the user is trying to deliver into the
+  // market. We translate USDC notional → token count at mid so the
+  // semantics mirror the ask-side function (which takes USDC in).
+  const targetTokens = usdcNotional / midPrice;
+  let remainingTokens = targetTokens;
+  let receivedUsd = 0;
+  let totalTokens = 0;
+  let worstPrice = topBid;
+  for (const level of book.bids) {
+    if (remainingTokens <= 0) break;
+    worstPrice = level.price;
+    const take = Math.min(level.size, remainingTokens);
+    receivedUsd += take * level.price;
+    totalTokens += take;
+    remainingTokens -= take;
+  }
+
+  if (totalTokens <= 0) {
+    return {
+      slippageBps: SLIPPAGE_BPS_CEILING,
+      filledUsdc: 0,
+      avgPrice: 0,
+      midPrice,
+    };
+  }
+
+  const avgPrice = receivedUsd / totalTokens;
+  // Sell-side slippage: positive when avgPrice < mid (user gets less).
+  const baseBps = ((midPrice - avgPrice) / midPrice) * 10_000;
+
+  const unfilledFrac = Math.max(
+    0,
+    Math.min(1, remainingTokens / targetTokens),
+  );
+  let unfilledBps = 0;
+  if (unfilledFrac > 0) {
+    const worstBps = Math.max(
+      0,
+      ((midPrice - worstPrice) / midPrice) * 10_000,
+    );
+    unfilledBps =
+      worstBps * (1 + unfilledFrac * 3) + unfilledFrac * 5_000;
+  }
+
+  const rawBps = Math.max(0, baseBps) + unfilledBps;
+  const slippageBps = Math.min(SLIPPAGE_BPS_CEILING, rawBps);
+
+  return { slippageBps, filledUsdc: receivedUsd, avgPrice, midPrice };
+}

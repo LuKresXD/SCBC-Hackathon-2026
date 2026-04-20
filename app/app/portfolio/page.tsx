@@ -6,6 +6,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { Header, PageFrame } from "../_components/Header";
 import { SvgDonut } from "../_components/charts";
 import { C, FS, FD, FM, EASE, tc, trancheColor, fmtUsd } from "../_lib/tokens";
+import { useLiveBaskets } from "../_lib/use-live-baskets";
 import { bundleById } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
 import { useUsdcBalance } from "../_lib/wallet-bridge";
@@ -17,6 +18,7 @@ export default function PortfolioPage() {
   const { state, totals } = useSandbox();
   const { connected } = useWallet();
   const usdc = useUsdcBalance();
+  const basketState = useLiveBaskets();
   // Cash line is the real on-chain USDC in the connected wallet. When
   // disconnected we fall back to 0 so the donut + positions list simply
   // omit the cash slice instead of flashing a stale sandbox counter.
@@ -28,6 +30,27 @@ export default function PortfolioPage() {
     const t = setInterval(() => setRenderNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  // Live-first basket metadata lookup: if the live pipeline has this
+  // id we use the live NAV so open positions track the real feed, and
+  // fall back to the seed Bundle only when the live feed doesn't have
+  // coverage for that id (offline mode, missing live row, etc.).
+  const resolveBasket = (id: string) => {
+    if (basketState.status === "ok") {
+      const live = basketState.baskets.find((b) => b.id === id);
+      if (live) {
+        return {
+          id: live.id,
+          tier: live.tier,
+          nav: live.nav,
+        };
+      }
+    }
+    const seed = bundleById(id);
+    return seed
+      ? { id: seed.id, tier: seed.tier, nav: seed.nav }
+      : null;
+  };
 
   const donutData: Array<{ id: string; value: number; color: string }> = [
     ...(liveUsdc > 0 ? [{ id: "cash", value: liveUsdc, color: "#4a5a6a" }] : []),
@@ -316,7 +339,7 @@ export default function PortfolioPage() {
           const rows: { value: number; el: React.ReactNode; key: string }[] = [];
 
           state.basketPositions.forEach((p) => {
-            const b = bundleById(p.bundleId);
+            const b = resolveBasket(p.bundleId);
             if (!b) return;
             const value = p.qty * b.nav;
             const pnl = p.qty * (b.nav - p.avgCost);

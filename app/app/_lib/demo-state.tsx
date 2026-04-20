@@ -82,7 +82,24 @@ export type SandboxState = {
 
 type Action =
   | { type: "reset" }
-  | { type: "basket/deposit"; bundleId: string; usdcAmount: number }
+  | {
+      type: "basket/deposit";
+      bundleId: string;
+      usdcAmount: number;
+      /**
+       * Live NAV the UI priced the ticket against. Optional so legacy
+       * call sites keep working — when omitted we fall back to the seed
+       * bundle's NAV via `bundleById`, matching the pre-live behaviour.
+       */
+      nav?: number;
+      /**
+       * Exact tokens-out the UI quoted (post-fee). When present we
+       * credit this directly so the portfolio matches the panel's
+       * "You receive X STHS" line to the penny. Absent → reducer falls
+       * back to a flat 50 bp fee estimate from `usdcAmount / nav`.
+       */
+      tokensOut?: number;
+    }
   | { type: "basket/redeem"; bundleId: string; qty: number; payoutUsdc: number }
   | {
       type: "tranche/deposit";
@@ -123,10 +140,36 @@ function reducer(state: SandboxState, action: Action): SandboxState {
       return initialSandboxState;
 
     case "basket/deposit": {
-      const bundle = bundleById(action.bundleId);
-      if (!bundle) return state;
       if (action.usdcAmount <= 0 || action.usdcAmount > state.usdc) return state;
-      const tokensReceived = (action.usdcAmount * 0.995) / bundle.nav;
+      // Prefer the NAV the UI actually priced against; only fall back
+      // to the seed bundle's NAV if the caller didn't supply one (e.g.
+      // a legacy unit test). The seed NAV can lag the live feed, so
+      // trusting the UI-provided number keeps the reducer consistent
+      // with what the user saw when they submitted.
+      const seedNav = bundleById(action.bundleId)?.nav;
+      const nav =
+        action.nav && action.nav > 0
+          ? action.nav
+          : seedNav && seedNav > 0
+            ? seedNav
+            : 0;
+      if (nav <= 0) return state;
+      // Use the UI-quoted tokensOut when provided so the portfolio
+      // reflects the "You receive X STHS" line exactly. Without this
+      // the reducer applied a flat 50 bp fee (0.995) which only agreed
+      // with the UI when slippage+fees summed to exactly 50 bp — a
+      // coincidence for any real order. Fall back preserved for legacy
+      // call sites that don't pass `tokensOut`.
+      const tokensReceived =
+        action.tokensOut && action.tokensOut > 0
+          ? action.tokensOut
+          : (action.usdcAmount * 0.995) / nav;
+      if (tokensReceived <= 0) return state;
+      // Effective cost per token: total USDC paid divided by tokens
+      // actually credited. When the UI passes `tokensOut`, this equals
+      // the fee-inclusive fill price, so avgCost tracks the real entry
+      // rather than the fee-less NAV mid.
+      const effectivePrice = action.usdcAmount / tokensReceived;
       const existing = state.basketPositions.find((p) => p.bundleId === action.bundleId);
       const nextPositions = existing
         ? state.basketPositions.map((p) =>
@@ -135,7 +178,7 @@ function reducer(state: SandboxState, action: Action): SandboxState {
                   bundleId: p.bundleId,
                   qty: p.qty + tokensReceived,
                   avgCost:
-                    (p.qty * p.avgCost + tokensReceived * bundle.nav) /
+                    (p.qty * p.avgCost + tokensReceived * effectivePrice) /
                     (p.qty + tokensReceived),
                 }
               : p,
@@ -145,7 +188,7 @@ function reducer(state: SandboxState, action: Action): SandboxState {
             {
               bundleId: action.bundleId,
               qty: tokensReceived,
-              avgCost: bundle.nav,
+              avgCost: effectivePrice,
             },
           ];
       return {
@@ -158,6 +201,13 @@ function reducer(state: SandboxState, action: Action): SandboxState {
     case "basket/redeem": {
       const pos = state.basketPositions.find((p) => p.bundleId === action.bundleId);
       if (!pos) return state;
+      // Defensive guards: the UI already blocks over-sells and negative
+      // qty, but we repeat the checks here so the reducer stays
+      // authoritative. Redeeming > held would silently mint USDC; a
+      // negative payout would drain the wallet. Neither is reachable
+      // from the current UI but better to hard-fail than half-trust.
+      if (action.qty <= 0 || action.payoutUsdc < 0) return state;
+      if (action.qty > pos.qty + 1e-9) return state;
       const nextQty = Math.max(0, pos.qty - action.qty);
       const nextPositions = nextQty === 0
         ? state.basketPositions.filter((p) => p.bundleId !== action.bundleId)

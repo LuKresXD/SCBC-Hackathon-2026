@@ -2443,20 +2443,26 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         const p = cur + delta * k;
         scrollProgressRef.current = p;
 
-        // Hero text clears early, before the sphere edges fade in, so the
-        // random-constellation reveal has the stage to itself.
+        // Hero text dissolves across a longer window so the top copy
+        // gradually lifts and fades instead of snapping off the screen.
         if (text) {
-          const tFade = 1 - easeInOut(clamp((p - 0.05) / 0.22, 0, 1));
+          const tFade = 1 - easeInOut(clamp((p - 0.04) / 0.32, 0, 1));
           text.style.opacity = String(tFade);
           const imp = 1 - tFade;
-          text.style.transform = `translate(-50%, ${-imp * 32}px)`;
+          text.style.transform = `translate(-50%, ${-imp * 40}px)`;
         }
         // Layer A wrapper stays fully lit — the canvas and text children
         // handle their own fades. No stacked opacity to fight with the morph.
         a.style.opacity = "1";
-        // Layer B blooms in only after the rings have dispersed (canvas
-        // disperse finishes at p≈0.90) so stars and tagline never overlap.
-        b.style.opacity = String(easeOut(clamp((p - 0.90) / 0.10, 0, 1)));
+        // Layer B holds off until the planet's arc-resolve phase has
+        // completed (p≈0.70). The planet canvas disperses itself at
+        // p≈0.78–0.90, so letting the tagline bloom in from 0.72 to 0.96
+        // gives the morph a clean, unobstructed stage and then overlaps
+        // the tagline with the dispersal gracefully — no more competing
+        // copy behind the Senthos arcs while they're resolving.
+        const bP = easeInOut(clamp((p - 0.72) / 0.24, 0, 1));
+        b.style.opacity = String(bP);
+        b.style.transform = `translateY(${(1 - bP) * 24}px)`;
       }
 
       const vh = window.innerHeight;
@@ -2465,10 +2471,17 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         const rect = sec.getBoundingClientRect();
         const center = rect.top + rect.height / 2;
         const distFromCenter = Math.abs(center - vh / 2);
-        // Wider readable window (0.9 vh either side) and a gentler power curve
-        // so sections stay at full opacity longer and don't blip past.
-        const falloff = clamp(1 - distFromCenter / (vh * 0.9), 0, 1);
-        sec.style.opacity = String(Math.pow(falloff, 0.75));
+        // Tighter readable window (0.7 vh either side) so only one
+        // section's copy and backdrop art is visible at a time. The
+        // previous 0.9vh + pow(0.75) curve kept adjacent sections
+        // lingering near 25–30% opacity simultaneously, so the
+        // OrbitalRings behind the PRODUCTS section bled up through
+        // the MECHANICS and CTA gaps as faint tilted edges — the
+        // "cooked" horizontal seam. Steeper pow(1.1) lets sections
+        // fully resolve at centre and cleanly dissolve into pure
+        // black at the seams.
+        const falloff = clamp(1 - distFromCenter / (vh * 0.7), 0, 1);
+        sec.style.opacity = String(Math.pow(falloff, 1.1));
         // Halved parallax so text doesn't skate past the eye while reading.
         const parallax = (center - vh / 2) * 0.05;
         sec.style.transform = `translateY(${parallax}px)`;
@@ -2541,6 +2554,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
               display:"flex",flexDirection:"column",
               alignItems:"center",justifyContent:"center",
               textAlign:"center",padding:"0 2rem",pointerEvents:"auto",
+              willChange:"opacity, transform",
             }}
           >
             <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:isMobile?18:22,fontWeight:500}}>
@@ -2558,14 +2572,13 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
       </div>
 
       {/* Post-runway sections (Constellations → Risk Tiers → Mechanics →
-           Products → CTA). A soft vertical gradient sits behind everything so
-           the scroll doesn't fall off a cliff into pure black. The per-section
-           opacity falloff handles the brief overlap with Layer B. */}
-      <main style={{position:"relative",zIndex:10,pointerEvents:"none",marginTop:"-6vh"}}>
-        <div aria-hidden style={{
-          position:"absolute", inset:0, pointerEvents:"none", zIndex:-1,
-          background:"linear-gradient(180deg, rgba(5, 8, 12, 0) 0%, rgba(6, 10, 16, 0.15) 30%, rgba(7, 11, 17, 0.25) 70%, rgba(5, 8, 12, 0.4) 100%)",
-        }} />
+           Products → CTA). No full-height backdrop gradient here: the
+           previous 0→40% black overlay stacked with the sticky runway's
+           bg and produced a visible horizontal seam at the sticky/main
+           boundary. The body background already carries the base void,
+           and each section's own opacity falloff handles the transition
+           into Layer B below without extra tint. */}
+      <main style={{position:"relative",zIndex:10,pointerEvents:"none",marginTop:"-2vh"}}>
         <section
           ref={el=>{sectionRefs.current[0]=el;}}
           style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
@@ -2634,18 +2647,14 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
         <section
           ref={el=>{sectionRefs.current[3]=el;}}
-          style={{minHeight:"78vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform",overflow:"hidden"}}
+          style={{minHeight:"78vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
         >
-          {/* Orbital rings bloom behind the product grid so the black void
-              gets a visible scroll-past detail in brand colours. */}
-          <div style={{position:"absolute",inset:0,pointerEvents:"none",zIndex:0}}>
-            <OrbitalRings size={isMobile ? 780 : 1200} />
-            {/* soft vignette so text contrast wins over the rings */}
-            <div style={{
-              position:"absolute",inset:0,
-              background:"radial-gradient(ellipse 55% 45% at 50% 50%, rgba(5, 8, 12, 0.65) 0%, rgba(5, 8, 12, 0) 75%)",
-            }} />
-          </div>
+          {/* OrbitalRings backdrop removed. The tilted ellipse kept
+              bleeding into the section seam above no matter how the
+              mask was tuned; rather than keep chasing the clip, the
+              PRODUCTS section now sits on the same clean black void
+              as the other post-hero sections and lets the product
+              grid carry the visual weight on its own. */}
           <div style={{margin:"0 auto",maxWidth:1180,textAlign:"center",position:"relative",zIndex:1,width:"100%"}}>
             <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500,display:"inline-flex",alignItems:"center",gap:12,justifyContent:"center"}}>
               <span aria-hidden style={{width:22,height:1,background:C.tealLight,opacity:0.45}} />
