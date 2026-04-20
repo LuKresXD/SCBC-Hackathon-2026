@@ -3,14 +3,211 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Header, PageFrame } from "../_components/Header";
 import { SvgDonut } from "../_components/charts";
 import { C, FS, FD, FM, EASE, tc, trancheColor, fmtUsd } from "../_lib/tokens";
 import { useLiveBaskets } from "../_lib/use-live-baskets";
 import { bundleById } from "../_lib/bundles";
-import { useSandbox } from "../_lib/demo-state";
-import { useUsdcBalance } from "../_lib/wallet-bridge";
+import { useSandbox, type TrancheKind } from "../_lib/demo-state";
+import {
+  useUsdcBalance,
+  useWalletSigner,
+  explorerTxUrl,
+} from "../_lib/wallet-bridge";
+import { redeemFromBundle, DepositError } from "../_lib/deposit-client";
+import { ppnRedeem, PpnError } from "../_lib/ppn-client";
 import { Personalization } from "./_personalization";
+
+type RedeemTarget =
+  | { kind: "basket"; bundleId: string; ownedQty: number }
+  | { kind: "tranche"; bundleId: string; trancheKind: TrancheKind; ownedQty: number }
+  | { kind: "ppn"; bundleId: string; localVaultId: string };
+
+/**
+ * Per-row redeem control. Mirrors the prepare → signing → confirming →
+ * persisting → done lifecycle from BasketBuyPanel so the Buy and Redeem
+ * paths feel symmetric. Renders a compact button + an inline error/success
+ * strip directly beneath the position row it belongs to.
+ *
+ * Baskets call `redeemFromBundle` (only resolves once the vault is
+ * finalized on-chain). Tranches and PPNs both flow through `ppnRedeem`
+ * (only resolves past maturity). All three update sandbox state on
+ * success and refresh the on-chain USDC balance.
+ */
+function RedeemRowButton({
+  target,
+  estimatedPayoutUsdc,
+  accent,
+}: {
+  target: RedeemTarget;
+  estimatedPayoutUsdc: number;
+  accent: string;
+}) {
+  const wallet = useWalletSigner();
+  const { dispatch } = useSandbox();
+  const usdc = useUsdcBalance();
+  const { connected } = useWallet();
+  const { setVisible: setWalletModalVisible } = useWalletModal();
+  const [txStage, setTxStage] = useState<
+    "idle" | "preparing" | "signing" | "confirming" | "persisting" | "done"
+  >("idle");
+  const [txError, setTxError] = useState<string | null>(null);
+  const [txSignature, setTxSignature] = useState<string | null>(null);
+  const busy =
+    txStage !== "idle" && txStage !== "done";
+
+  async function handleRedeem(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!connected) {
+      setWalletModalVisible(true);
+      return;
+    }
+    setTxError(null);
+    setTxSignature(null);
+    setTxStage("preparing");
+    try {
+      if (target.kind === "basket") {
+        const result = await redeemFromBundle({
+          wallet,
+          bundleId: target.bundleId,
+        });
+        setTxStage("done");
+        setTxSignature(result.signature);
+        dispatch({
+          type: "basket/redeem",
+          bundleId: target.bundleId,
+          qty: target.ownedQty,
+          payoutUsdc: result.confirm.payout_usdc ?? estimatedPayoutUsdc,
+        });
+      } else if (target.kind === "tranche") {
+        const result = await ppnRedeem({
+          wallet,
+          bundleId: target.bundleId,
+        });
+        setTxStage("done");
+        setTxSignature(result.signature);
+        dispatch({
+          type: "tranche/redeem",
+          bundleId: target.bundleId,
+          kind: target.trancheKind,
+          payoutUsdc: result.confirm.principal_returned ?? estimatedPayoutUsdc,
+        });
+      } else {
+        const result = await ppnRedeem({
+          wallet,
+          bundleId: target.bundleId,
+        });
+        setTxStage("done");
+        setTxSignature(result.signature);
+        dispatch({
+          type: "ppn/close",
+          vaultId: target.localVaultId,
+          payoutUsdc: result.confirm.principal_returned ?? estimatedPayoutUsdc,
+        });
+      }
+      void usdc.refresh();
+    } catch (err) {
+      setTxStage("idle");
+      if (err instanceof DepositError || err instanceof PpnError) {
+        setTxError(err.message);
+      } else if (err instanceof Error) {
+        setTxError(
+          /user rejected/i.test(err.message)
+            ? "Transaction was rejected in your wallet."
+            : err.message,
+        );
+      } else {
+        setTxError(String(err));
+      }
+    }
+  }
+
+  const label = busy
+    ? txStage === "preparing"
+      ? "Preparing…"
+      : txStage === "signing"
+        ? "Sign in wallet…"
+        : txStage === "confirming"
+          ? "Confirming…"
+          : "Finalising…"
+    : txStage === "done"
+      ? "✓ Redeemed"
+      : !connected
+        ? "Connect to redeem"
+        : "Redeem";
+
+  const disabled = busy || txStage === "done";
+
+  return (
+    <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+      <button
+        type="button"
+        onClick={handleRedeem}
+        disabled={disabled}
+        style={{
+          alignSelf: "flex-end",
+          padding: "7px 16px",
+          borderRadius: 8,
+          border: `0.5px solid ${accent}55`,
+          background:
+            txStage === "done"
+              ? `${accent}1a`
+              : disabled
+                ? "transparent"
+                : `${accent}14`,
+          color: accent,
+          fontFamily: FD,
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          cursor: disabled ? "default" : "pointer",
+          opacity: busy ? 0.75 : 1,
+          transition: `background 0.15s ${EASE}`,
+        }}
+      >
+        {label}
+      </button>
+      {txError && (
+        <div
+          style={{
+            fontFamily: FM,
+            fontSize: 11,
+            lineHeight: 1.45,
+            color: "#ff8570",
+            background: "rgba(255, 90, 70, 0.08)",
+            border: "0.5px solid rgba(255, 90, 70, 0.35)",
+            borderRadius: 6,
+            padding: "7px 10px",
+            letterSpacing: "0.02em",
+          }}
+        >
+          {txError}
+        </div>
+      )}
+      {txSignature && (
+        <a
+          href={explorerTxUrl(txSignature)}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            alignSelf: "flex-end",
+            fontFamily: FM,
+            fontSize: 11,
+            color: accent,
+            textDecoration: "none",
+            opacity: 0.85,
+            letterSpacing: "0.02em",
+          }}
+        >
+          View tx ↗
+        </a>
+      )}
+    </div>
+  );
+}
 
 type View = "positions" | "personalization";
 
@@ -365,6 +562,11 @@ export default function PortfolioPage() {
                       <div style={{ fontSize: 11, color: pnl >= 0 ? C.green : C.red, fontFamily: FS, marginTop: 2 }}>{pnl >= 0 ? "+" : ""}{fmtUsd(pnl, 2)}</div>
                     </div>
                   </Link>
+                  <RedeemRowButton
+                    target={{ kind: "basket", bundleId: p.bundleId, ownedQty: p.qty }}
+                    estimatedPayoutUsdc={value}
+                    accent={tc(b.tier)}
+                  />
                 </div>
               ),
             });
@@ -391,6 +593,11 @@ export default function PortfolioPage() {
                     </div>
                     <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(value, 2)}</div>
                   </Link>
+                  <RedeemRowButton
+                    target={{ kind: "tranche", bundleId: p.bundleId, trancheKind: p.kind, ownedQty: p.qty }}
+                    estimatedPayoutUsdc={value}
+                    accent={trancheColor(p.kind)}
+                  />
                 </div>
               ),
             });
@@ -422,6 +629,11 @@ export default function PortfolioPage() {
                       <div style={{ fontSize: 11, color: C.green, fontFamily: FS, marginTop: 2 }}>+{fmtUsd(accrued, 2)}</div>
                     </div>
                   </div>
+                  <RedeemRowButton
+                    target={{ kind: "ppn", bundleId: v.bundleId, localVaultId: v.id }}
+                    estimatedPayoutUsdc={value}
+                    accent={C.violet}
+                  />
                 </div>
               ),
             });

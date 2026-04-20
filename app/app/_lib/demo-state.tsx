@@ -108,6 +108,12 @@ type Action =
       usdcAmount: number;
       pricePerToken: number;
     }
+  | {
+      type: "tranche/redeem";
+      bundleId: string;
+      kind: TrancheKind;
+      payoutUsdc: number;
+    }
   | { type: "ppn/open"; bundleId: string; usdcAmount: number; apy: number; maturityDays: number }
   | { type: "ppn/close"; vaultId: string; payoutUsdc: number }
   | {
@@ -250,6 +256,19 @@ function reducer(state: SandboxState, action: Action): SandboxState {
         ...state,
         usdc: state.usdc - action.usdcAmount,
         tranchePositions: nextPositions,
+      };
+    }
+
+    case "tranche/redeem": {
+      const idx = state.tranchePositions.findIndex(
+        (p) => p.bundleId === action.bundleId && p.kind === action.kind,
+      );
+      if (idx < 0) return state;
+      if (action.payoutUsdc < 0) return state;
+      return {
+        ...state,
+        usdc: state.usdc + action.payoutUsdc,
+        tranchePositions: state.tranchePositions.filter((_, i) => i !== idx),
       };
     }
 
