@@ -13,7 +13,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { BACKEND_URL } from "./tokens";
-import { fetchTokenBalance, useWallet } from "./wallet";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { fetchTokenBalance } from "./wallet";
 
 // ---------- Bundle list (with on-chain addresses) ----------
 
@@ -91,7 +92,7 @@ export function useStshBalances(): {
   totalValueUsd: number;
   refresh: () => Promise<void>;
 } {
-  const { publicKey, status } = useWallet();
+  const { publicKey, connected } = useWallet();
   const [bundles, setBundles] = useState<BundleOnchainRow[] | null>(null);
   const [balances, setBalances] = useState<StshBalanceEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -118,7 +119,7 @@ export function useStshBalances(): {
   // Re-fetch every bundle's balance whenever owner / bundles / refreshToken change.
   useEffect(() => {
     if (!bundles) return;
-    if (status !== "connected" || !owner) {
+    if (!connected || !owner) {
       // Not connected → show zero rows.
       setBalances(
         bundles.map((b) => ({
@@ -181,7 +182,7 @@ export function useStshBalances(): {
       cancelled = true;
       clearInterval(id);
     };
-  }, [bundles, owner, status, refreshToken]);
+  }, [bundles, owner, connected, refreshToken]);
 
   const refresh = useMemo(
     () =>

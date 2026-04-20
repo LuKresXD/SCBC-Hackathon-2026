@@ -139,6 +139,12 @@ router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
           created_at: vault.created_at,
           // Total value = principal (always protected) + accrued yield
           total_value: Math.round((vault.principal_usdc + accruedYield) * 100) / 100,
+          // Tranche overlay (null for plain PPN deposits). Pass-through so the
+          // portfolio UI can distinguish a tranche note from a vanilla PPN
+          // without a second round trip.
+          tranche_kind: vault.tranche_kind ?? null,
+          tranche_attach: vault.tranche_attach ?? null,
+          tranche_detach: vault.tranche_detach ?? null,
         };
       })
     );

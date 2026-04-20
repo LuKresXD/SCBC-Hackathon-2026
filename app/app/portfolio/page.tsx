@@ -1,15 +1,12 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Header, PageFrame } from "../_components/Header";
 import { SvgDonut } from "../_components/charts";
 import { C, FS, FD, FM, EASE, tc, trancheColor, fmtUsd } from "../_lib/tokens";
-import { useLiveBaskets } from "../_lib/use-live-baskets";
-import { bundleById } from "../_lib/bundles";
-import { useSandbox, type TrancheKind } from "../_lib/demo-state";
 import {
   useUsdcBalance,
   useWalletSigner,
@@ -17,35 +14,48 @@ import {
 } from "../_lib/wallet-bridge";
 import { redeemFromBundle, DepositError } from "../_lib/deposit-client";
 import { ppnRedeem, PpnError } from "../_lib/ppn-client";
+import {
+  useOnchainPortfolio,
+  type BasketPositionOnchain,
+  type TranchePositionOnchain,
+  type PpnVaultOnchain,
+} from "../_lib/use-onchain-portfolio";
 import { Personalization } from "./_personalization";
 
+/**
+ * A redeem target lives on-chain, so we pass the backend/program
+ * identifiers the relevant client needs:
+ *   - `basket`: uses the bundle UUID because `redeemFromBundle` looks
+ *     up the wallet's vault position via `(bundle_id, wallet)`.
+ *   - `tranche` / `ppn`: both ride the PPN rail; we pass `vaultId` so
+ *     the backend resolves the exact note to redeem. `bundleId` is
+ *     carried alongside purely for display consistency if a future
+ *     prepare call needs it.
+ */
 type RedeemTarget =
-  | { kind: "basket"; bundleId: string; ownedQty: number }
-  | { kind: "tranche"; bundleId: string; trancheKind: TrancheKind; ownedQty: number }
-  | { kind: "ppn"; bundleId: string; localVaultId: string };
+  | { kind: "basket"; bundleId: string }
+  | { kind: "tranche"; vaultId: string; bundleId: string }
+  | { kind: "ppn"; vaultId: string; bundleId: string };
 
 /**
  * Per-row redeem control. Mirrors the prepare → signing → confirming →
- * persisting → done lifecycle from BasketBuyPanel so the Buy and Redeem
- * paths feel symmetric. Renders a compact button + an inline error/success
- * strip directly beneath the position row it belongs to.
+ * done lifecycle from BasketBuyPanel so the Buy and Redeem paths feel
+ * symmetric.
  *
- * Baskets call `redeemFromBundle` (only resolves once the vault is
- * finalized on-chain). Tranches and PPNs both flow through `ppnRedeem`
- * (only resolves past maturity). All three update sandbox state on
- * success and refresh the on-chain USDC balance.
+ * After a successful redeem we call `onRedeemed()` which triggers a
+ * refresh of the on-chain portfolio sources so the row disappears
+ * immediately without waiting for the 15 s poll tick.
  */
 function RedeemRowButton({
   target,
-  estimatedPayoutUsdc,
   accent,
+  onRedeemed,
 }: {
   target: RedeemTarget;
-  estimatedPayoutUsdc: number;
   accent: string;
+  onRedeemed: () => Promise<void> | void;
 }) {
   const wallet = useWalletSigner();
-  const { dispatch } = useSandbox();
   const usdc = useUsdcBalance();
   const { connected } = useWallet();
   const { setVisible: setWalletModalVisible } = useWalletModal();
@@ -54,8 +64,7 @@ function RedeemRowButton({
   >("idle");
   const [txError, setTxError] = useState<string | null>(null);
   const [txSignature, setTxSignature] = useState<string | null>(null);
-  const busy =
-    txStage !== "idle" && txStage !== "done";
+  const busy = txStage !== "idle" && txStage !== "done";
 
   async function handleRedeem(e: React.MouseEvent) {
     e.preventDefault();
@@ -68,46 +77,26 @@ function RedeemRowButton({
     setTxSignature(null);
     setTxStage("preparing");
     try {
+      let signature: string;
       if (target.kind === "basket") {
         const result = await redeemFromBundle({
           wallet,
           bundleId: target.bundleId,
         });
-        setTxStage("done");
-        setTxSignature(result.signature);
-        dispatch({
-          type: "basket/redeem",
-          bundleId: target.bundleId,
-          qty: target.ownedQty,
-          payoutUsdc: result.confirm.payout_usdc ?? estimatedPayoutUsdc,
-        });
-      } else if (target.kind === "tranche") {
-        const result = await ppnRedeem({
-          wallet,
-          bundleId: target.bundleId,
-        });
-        setTxStage("done");
-        setTxSignature(result.signature);
-        dispatch({
-          type: "tranche/redeem",
-          bundleId: target.bundleId,
-          kind: target.trancheKind,
-          payoutUsdc: result.confirm.principal_returned ?? estimatedPayoutUsdc,
-        });
+        signature = result.signature;
       } else {
         const result = await ppnRedeem({
           wallet,
-          bundleId: target.bundleId,
+          vaultId: target.vaultId,
         });
-        setTxStage("done");
-        setTxSignature(result.signature);
-        dispatch({
-          type: "ppn/close",
-          vaultId: target.localVaultId,
-          payoutUsdc: result.confirm.principal_returned ?? estimatedPayoutUsdc,
-        });
+        signature = result.signature;
       }
+      setTxStage("done");
+      setTxSignature(signature);
+      // Kick both caches: live USDC balance (cash line) and the
+      // portfolio sources (so the redeemed row disappears).
       void usdc.refresh();
+      void onRedeemed();
     } catch (err) {
       setTxStage("idle");
       if (err instanceof DepositError || err instanceof PpnError) {
@@ -212,49 +201,27 @@ function RedeemRowButton({
 type View = "positions" | "personalization";
 
 export default function PortfolioPage() {
-  const { state, totals } = useSandbox();
   const { connected } = useWallet();
   const usdc = useUsdcBalance();
-  const basketState = useLiveBaskets();
+  const portfolio = useOnchainPortfolio();
   // Cash line is the real on-chain USDC in the connected wallet. When
   // disconnected we fall back to 0 so the donut + positions list simply
-  // omit the cash slice instead of flashing a stale sandbox counter.
+  // omit the cash slice instead of flashing a stale balance.
   const liveUsdc = connected ? usdc.uiAmount : 0;
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [renderNow, setRenderNow] = useState<number>(() => Date.now());
   const [view, setView] = useState<View>("positions");
-  useEffect(() => {
-    const t = setInterval(() => setRenderNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
 
-  // Live-first basket metadata lookup: if the live pipeline has this
-  // id we use the live NAV so open positions track the real feed, and
-  // fall back to the seed Bundle only when the live feed doesn't have
-  // coverage for that id (offline mode, missing live row, etc.).
-  const resolveBasket = (id: string) => {
-    if (basketState.status === "ok") {
-      const live = basketState.baskets.find((b) => b.id === id);
-      if (live) {
-        return {
-          id: live.id,
-          tier: live.tier,
-          nav: live.nav,
-        };
-      }
-    }
-    const seed = bundleById(id);
-    return seed
-      ? { id: seed.id, tier: seed.tier, nav: seed.nav }
-      : null;
-  };
+  const { baskets, tranches, ppns, totals } = portfolio;
+
+  // Total value includes cash so the donut centre matches the real
+  // "what my wallet is worth right now" number.
+  const totalValueWithCash = liveUsdc + totals.totalValue;
 
   const donutData: Array<{ id: string; value: number; color: string }> = [
     ...(liveUsdc > 0 ? [{ id: "cash", value: liveUsdc, color: "#4a5a6a" }] : []),
     ...(totals.basketValue > 0 ? [{ id: "baskets", value: totals.basketValue, color: C.teal }] : []),
     ...(totals.trancheValue > 0 ? [{ id: "tranches", value: totals.trancheValue, color: C.amber }] : []),
     ...(totals.ppnValue > 0 ? [{ id: "ppn", value: totals.ppnValue, color: C.violet }] : []),
-    ...(totals.lendValue > 0 ? [{ id: "lending", value: totals.lendValue, color: C.blue }] : []),
   ];
   const empty = donutData.length === 0;
 
@@ -387,7 +354,7 @@ export default function PortfolioPage() {
                   TOTAL VALUE
                 </div>
                 <div style={{ fontSize: 24, color: C.textPrimary, fontFamily: FD, fontWeight: 500, letterSpacing: "-0.015em", lineHeight: 1 }}>
-                  {fmtUsd(totals.totalValue, 2)}
+                  {fmtUsd(totalValueWithCash, 2)}
                 </div>
               </div>
               <div style={{ paddingBottom: 16, marginBottom: 14, borderBottom: `0.5px solid ${C.border}` }}>
@@ -516,7 +483,7 @@ export default function PortfolioPage() {
                     <>
                       <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 10 }}>TOTAL VALUE</div>
                       <div style={{ fontSize: 34, fontWeight: 600, color: C.textPrimary, fontFamily: FS, lineHeight: 1, marginBottom: 10, letterSpacing: "-0.03em" }}>
-                        {fmtUsd(totals.totalValue, 0)}
+                        {fmtUsd(totalValueWithCash, 0)}
                       </div>
                       <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FM, letterSpacing: "0.08em" }}>
                         {donutData.length} POSITION{donutData.length !== 1 ? "S" : ""}
@@ -530,88 +497,103 @@ export default function PortfolioPage() {
           </div>
         </div>
 
-        {/* Positions - sorted by value descending, USDC included */}
+        {/* Positions list — sorted by value descending, USDC included.
+            Rows are composed into a single array first so the three
+            product families mix together when the user holds them all;
+            the sort is purely by USD value so what's most material
+            floats to the top. */}
         {(() => {
-          // Build all position rows with value for sorting
           const rows: { value: number; el: React.ReactNode; key: string }[] = [];
 
-          state.basketPositions.forEach((p) => {
-            const b = resolveBasket(p.bundleId);
-            if (!b) return;
-            const value = p.qty * b.nav;
-            const pnl = p.qty * (b.nav - p.avgCost);
+          baskets.forEach((p: BasketPositionOnchain) => {
+            const pnl =
+              p.avgCost == null ? null : p.qty * (p.nav - p.avgCost);
+            const accent = p.tier != null ? tc(p.tier) : C.teal;
             rows.push({
-              key: p.bundleId,
-              value,
+              key: `basket-${p.bundleId}`,
+              value: p.valueUsd,
               el: (
-                <div key={p.bundleId} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
+                <div key={`basket-${p.bundleId}`} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
                     <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, letterSpacing: "0.08em" }}>BASKET</div>
                     <Link href="/app/basket" style={{ fontSize: 11, color: C.teal, fontFamily: FS, textDecoration: "none" }}>View all →</Link>
                   </div>
                   <Link href={`/app/basket/${p.bundleId}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", textDecoration: "none" }}>
                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      <div style={{ width: 4, height: 24, borderRadius: 2, background: tc(b.tier) }} />
+                      <div style={{ width: 4, height: 24, borderRadius: 2, background: accent }} />
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>{b.id}</div>
-                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>{p.qty.toFixed(2)} tokens · avg ${p.avgCost.toFixed(3)}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>{p.bundleName}</div>
+                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>
+                          {p.qty.toFixed(2)} tokens
+                          {p.avgCost != null && <> · avg ${p.avgCost.toFixed(3)}</>}
+                        </div>
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(value, 2)}</div>
-                      <div style={{ fontSize: 11, color: pnl >= 0 ? C.green : C.red, fontFamily: FS, marginTop: 2 }}>{pnl >= 0 ? "+" : ""}{fmtUsd(pnl, 2)}</div>
+                      <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(p.valueUsd, 2)}</div>
+                      {pnl != null && (
+                        <div style={{ fontSize: 11, color: pnl >= 0 ? C.green : C.red, fontFamily: FS, marginTop: 2 }}>
+                          {pnl >= 0 ? "+" : ""}{fmtUsd(pnl, 2)}
+                        </div>
+                      )}
                     </div>
                   </Link>
                   <RedeemRowButton
-                    target={{ kind: "basket", bundleId: p.bundleId, ownedQty: p.qty }}
-                    estimatedPayoutUsdc={value}
-                    accent={tc(b.tier)}
+                    target={{ kind: "basket", bundleId: p.bundleId }}
+                    accent={accent}
+                    onRedeemed={portfolio.refresh}
                   />
                 </div>
               ),
             });
           });
 
-          state.tranchePositions.forEach((p, i) => {
-            const value = p.qty * p.avgCost;
+          tranches.forEach((p: TranchePositionOnchain) => {
+            const accent = trancheColor(p.kind);
             rows.push({
-              key: `tranche-${i}`,
-              value,
+              key: `tranche-${p.vaultId}`,
+              value: p.totalValue,
               el: (
-                <div key={`tranche-${i}`} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
+                <div key={`tranche-${p.vaultId}`} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
                     <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, letterSpacing: "0.08em" }}>TRANCHE</div>
                     <Link href="/app/tranche" style={{ fontSize: 11, color: C.teal, fontFamily: FS, textDecoration: "none" }}>View all →</Link>
                   </div>
                   <Link href={`/app/tranche/${p.bundleId}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", textDecoration: "none" }}>
                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      <div style={{ width: 4, height: 24, borderRadius: 2, background: trancheColor(p.kind) }} />
+                      <div style={{ width: 4, height: 24, borderRadius: 2, background: accent }} />
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD, textTransform: "capitalize" }}>{p.bundleId} · {p.kind}</div>
-                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>{p.qty.toFixed(2)} tokens · issued ${p.avgCost.toFixed(2)}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD, textTransform: "capitalize" }}>
+                          {p.bundleName} · {p.kind}
+                        </div>
+                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>
+                          Principal ${p.principalUsdc.toFixed(2)} · {p.daysRemaining}d remaining
+                        </div>
                       </div>
                     </div>
-                    <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(value, 2)}</div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(p.totalValue, 2)}</div>
+                      {p.accruedYield > 0 && (
+                        <div style={{ fontSize: 11, color: C.green, fontFamily: FS, marginTop: 2 }}>+{fmtUsd(p.accruedYield, 2)}</div>
+                      )}
+                    </div>
                   </Link>
                   <RedeemRowButton
-                    target={{ kind: "tranche", bundleId: p.bundleId, trancheKind: p.kind, ownedQty: p.qty }}
-                    estimatedPayoutUsdc={value}
-                    accent={trancheColor(p.kind)}
+                    target={{ kind: "tranche", vaultId: p.vaultId, bundleId: p.bundleId }}
+                    accent={accent}
+                    onRedeemed={portfolio.refresh}
                   />
                 </div>
               ),
             });
           });
 
-          state.ppnVaults.forEach((v) => {
-            const elapsed = Math.max(0, (renderNow - v.createdAt) / 86_400_000);
-            const accrued = v.principal * (v.apy / 100 / 365) * Math.min(elapsed, v.maturityDays);
-            const value = v.principal + accrued;
+          ppns.forEach((v: PpnVaultOnchain) => {
             rows.push({
-              key: v.id,
-              value,
+              key: `ppn-${v.vaultId}`,
+              value: v.totalValue,
               el: (
-                <div key={v.id} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
+                <div key={`ppn-${v.vaultId}`} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
                     <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, letterSpacing: "0.08em" }}>PPN VAULT</div>
                     <Link href="/app/ppn" style={{ fontSize: 11, color: C.violet, fontFamily: FS, textDecoration: "none" }}>View all →</Link>
@@ -620,19 +602,21 @@ export default function PortfolioPage() {
                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                       <div style={{ width: 4, height: 24, borderRadius: 2, background: C.violet }} />
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>{v.bundleId}</div>
-                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>{v.apy.toFixed(2)}% APY · {v.maturityDays}d maturity</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>{v.bundleName}</div>
+                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>
+                          {v.apy.toFixed(2)}% APY · {v.daysRemaining}d remaining
+                        </div>
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(v.principal, 2)}</div>
-                      <div style={{ fontSize: 11, color: C.green, fontFamily: FS, marginTop: 2 }}>+{fmtUsd(accrued, 2)}</div>
+                      <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(v.principalUsdc, 2)}</div>
+                      <div style={{ fontSize: 11, color: C.green, fontFamily: FS, marginTop: 2 }}>+{fmtUsd(v.accruedYield, 2)}</div>
                     </div>
                   </div>
                   <RedeemRowButton
-                    target={{ kind: "ppn", bundleId: v.bundleId, localVaultId: v.id }}
-                    estimatedPayoutUsdc={value}
+                    target={{ kind: "ppn", vaultId: v.vaultId, bundleId: v.bundleId }}
                     accent={C.violet}
+                    onRedeemed={portfolio.refresh}
                   />
                 </div>
               ),
@@ -669,6 +653,25 @@ export default function PortfolioPage() {
           rows.sort((a, b) => b.value - a.value);
           return rows.map(r => r.el);
         })()}
+
+        {portfolio.error && (
+          <div
+            style={{
+              fontFamily: FM,
+              fontSize: 11,
+              lineHeight: 1.45,
+              color: "#ff8570",
+              background: "rgba(255, 90, 70, 0.08)",
+              border: "0.5px solid rgba(255, 90, 70, 0.35)",
+              borderRadius: 6,
+              padding: "7px 10px",
+              letterSpacing: "0.02em",
+              marginTop: 8,
+            }}
+          >
+            Portfolio refresh issue: {portfolio.error}
+          </div>
+        )}
         </>
         )}
       </PageFrame>
