@@ -15,6 +15,7 @@ import { C, FS, FD, FM, EASE, BACKEND_URL, fmtUsd } from "../_lib/tokens";
 import { MetricTile } from "../_components/charts";
 
 type Objective = "income" | "balanced" | "speculation";
+type Horizon = "short" | "medium" | "long";
 type Status = "idle" | "loading" | "success" | "error";
 
 interface AllocationTrancheDetails {
@@ -62,12 +63,19 @@ const OBJECTIVES: { id: Objective; label: string; sub: string }[] = [
   { id: "speculation", label: "Speculation", sub: "Maximise dispersion" },
 ];
 
+const HORIZONS: { id: Horizon; label: string; sub: string }[] = [
+  { id: "short",  label: "Short",  sub: "Under a month" },
+  { id: "medium", label: "Medium", sub: "One to three months" },
+  { id: "long",   label: "Long",   sub: "Three months or more" },
+];
+
 const CAPITAL_CAP = 100_000;
 
 export function Personalization() {
   const [capital, setCapital] = useState<string>("1000");
   const [risk, setRisk] = useState<number>(50);
   const [objective, setObjective] = useState<Objective>("balanced");
+  const [horizon, setHorizon] = useState<Horizon>("medium");
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<PortfolioResponse | null>(null);
   const [errMsg, setErrMsg] = useState<string | null>(null);
@@ -101,6 +109,7 @@ export function Personalization() {
           risk_pct: risk,
           capital_usd: capitalNum,
           objective,
+          horizon,
         }),
       });
       if (!res.ok) {
@@ -202,7 +211,7 @@ export function Personalization() {
             Tell us what you want, get an allocation
           </div>
           <div style={{ fontSize: 13, color: C.textSecondary, fontFamily: FS, lineHeight: 1.55 }}>
-            Claude reads the live Senthos pool, tranche quotes, and curated markets and writes you a plan that matches your risk and objective
+            Senthos builds an allocation across the pool, tranche quotes, and curated markets from the risk profile and objective you set
           </div>
         </div>
 
@@ -318,59 +327,24 @@ export function Personalization() {
           </Field>
         </div>
 
-        {/* Objective */}
+        {/* Objective + Horizon — stacked full-width rows so each pill
+             matches the Objective pill size. Keeps the form uniform. */}
         <div style={{ marginTop: 28 }}>
           <Field label="Objective">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
-              {OBJECTIVES.map((o) => {
-                const active = objective === o.id;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={() => setObjective(o.id)}
-                    style={{
-                      textAlign: "left",
-                      padding: "14px 16px",
-                      borderRadius: 10,
-                      border: `1px solid ${active ? `${C.tealLight}66` : "rgba(255, 255, 255, 0.08)"}`,
-                      background: active
-                        ? "rgba(45, 212, 191, 0.08)"
-                        : "rgba(10, 15, 24, 0.5)",
-                      color: active ? C.textPrimary : C.textSecondary,
-                      cursor: "pointer",
-                      transition: `background 0.15s ${EASE}, border-color 0.15s ${EASE}, color 0.15s ${EASE}`,
-                    }}
-                    onMouseEnter={(e) => {
-                      if (active) return;
-                      (e.currentTarget as HTMLElement).style.borderColor = "rgba(255, 255, 255, 0.14)";
-                      (e.currentTarget as HTMLElement).style.background = "rgba(14, 21, 30, 0.75)";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (active) return;
-                      (e.currentTarget as HTMLElement).style.borderColor = "rgba(255, 255, 255, 0.08)";
-                      (e.currentTarget as HTMLElement).style.background = "rgba(10, 15, 24, 0.5)";
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 14,
-                        fontWeight: 500,
-                        color: active ? C.tealLight : C.textPrimary,
-                        fontFamily: FD,
-                        letterSpacing: "-0.005em",
-                        marginBottom: 4,
-                      }}
-                    >
-                      {o.label}
-                    </div>
-                    <div style={{ fontSize: 12, color: C.textMuted, fontFamily: FS, lineHeight: 1.35 }}>
-                      {o.sub}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            <PillGroup
+              options={OBJECTIVES}
+              value={objective}
+              onChange={setObjective}
+            />
+          </Field>
+        </div>
+        <div style={{ marginTop: 24 }}>
+          <Field label="Horizon">
+            <PillGroup
+              options={HORIZONS}
+              value={horizon}
+              onChange={setHorizon}
+            />
           </Field>
         </div>
 
@@ -414,7 +388,7 @@ export function Personalization() {
             {status === "loading" ? (
               <>
                 <LoadingDot />
-                Consulting Claude
+                Constructing
               </>
             ) : (
               <>Build my portfolio →</>
@@ -505,6 +479,71 @@ function Field({
         {label}
       </div>
       {children}
+    </div>
+  );
+}
+
+// Reusable 3-card pill picker. Generic in the option id so Objective and
+// Horizon can share the same render path without type loss.
+function PillGroup<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { id: T; label: string; sub: string }[];
+  value: T;
+  onChange: (next: T) => void;
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))`, gap: 10 }}>
+      {options.map((o) => {
+        const active = value === o.id;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            onClick={() => onChange(o.id)}
+            style={{
+              textAlign: "left",
+              padding: "14px 16px",
+              borderRadius: 10,
+              border: `1px solid ${active ? `${C.tealLight}66` : "rgba(255, 255, 255, 0.08)"}`,
+              background: active
+                ? "rgba(45, 212, 191, 0.08)"
+                : "rgba(10, 15, 24, 0.5)",
+              color: active ? C.textPrimary : C.textSecondary,
+              cursor: "pointer",
+              transition: `background 0.15s ${EASE}, border-color 0.15s ${EASE}, color 0.15s ${EASE}`,
+            }}
+            onMouseEnter={(e) => {
+              if (active) return;
+              (e.currentTarget as HTMLElement).style.borderColor = "rgba(255, 255, 255, 0.14)";
+              (e.currentTarget as HTMLElement).style.background = "rgba(14, 21, 30, 0.75)";
+            }}
+            onMouseLeave={(e) => {
+              if (active) return;
+              (e.currentTarget as HTMLElement).style.borderColor = "rgba(255, 255, 255, 0.08)";
+              (e.currentTarget as HTMLElement).style.background = "rgba(10, 15, 24, 0.5)";
+            }}
+          >
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 500,
+                color: active ? C.tealLight : C.textPrimary,
+                fontFamily: FD,
+                letterSpacing: "-0.005em",
+                marginBottom: 4,
+              }}
+            >
+              {o.label}
+            </div>
+            <div style={{ fontSize: 12, color: C.textMuted, fontFamily: FS, lineHeight: 1.35 }}>
+              {o.sub}
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }

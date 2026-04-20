@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { Header, PageFrame } from "../_components/Header";
-import { SvgDonut, MetricTile } from "../_components/charts";
+import { SvgDonut } from "../_components/charts";
 import { C, FS, FD, FM, EASE, tc, trancheColor, fmtUsd } from "../_lib/tokens";
 import { bundleById } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
@@ -47,7 +47,7 @@ export default function PortfolioPage() {
       `}</style>
       <Header />
       <PageFrame>
-        <div style={{ marginBottom: 24, position: "relative", paddingBottom: 22, borderBottom: "0.5px solid rgba(45, 212, 191, 0.1)" }}>
+        <div style={{ marginBottom: 10, position: "relative", paddingBottom: 12, borderBottom: "0.5px solid rgba(45, 212, 191, 0.1)" }}>
           <div style={{ position: "absolute", top: 0, right: 0, width: 220, height: 140, background: "radial-gradient(ellipse at top right, rgba(45, 212, 191, 0.1) 0%, transparent 70%)", pointerEvents: "none" }} />
           {/* Segmented Positions / Personalization tab — top-right of the header */}
           <div style={{
@@ -124,8 +124,8 @@ export default function PortfolioPage() {
           </div>
           <div style={{ fontSize: 13, color: C.textSecondary, fontFamily: FS, position: "relative" }}>
             {view === "positions"
-              ? "Unified view across cash, baskets, tranches, PPN vaults, and lending"
-              : "Let Claude build an allocation from your risk tolerance, capital, and objective"}
+              ? "Unified view across cash, constellations, tranches, and PPN vaults"
+              : "Build an allocation shaped by your risk tolerance, capital, and objective"}
           </div>
         </div>
 
@@ -133,20 +133,53 @@ export default function PortfolioPage() {
           <Personalization />
         ) : (
         <>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 20 }}>
-          <MetricTile label="TOTAL VALUE" value={fmtUsd(totals.totalValue, 2)} color={C.green} />
-          <MetricTile label="UNREALIZED P&L" value={`${totals.unrealizedPnl >= 0 ? "+" : ""}${fmtUsd(totals.unrealizedPnl, 2)}`} color={totals.unrealizedPnl >= 0 ? C.green : C.red} />
-          <MetricTile label="BASKETS" value={fmtUsd(totals.basketValue, 0)} sub={`${state.basketPositions.length} positions`} />
-          <MetricTile label="PPN" value={fmtUsd(totals.ppnValue, 0)} color={C.violet} sub={`${state.ppnVaults.length} vaults`} />
-          <MetricTile label="DEBT" value={fmtUsd(totals.loanDebt, 0)} color={totals.loanDebt > 0 ? C.coral : C.textMuted} sub={`${state.loans.length} open loans`} />
+        {/* Single stats bar — four metrics inside one card divided by
+             hairlines. Stops the "awkwardly stretched" look that separate
+             full-width tiles produced. */}
+        <div style={{
+          background: "rgba(13, 19, 28, 0.6)",
+          border: `0.5px solid ${C.border}`,
+          borderRadius: 12,
+          padding: "14px 22px",
+          marginBottom: 12,
+          display: "flex",
+          alignItems: "center",
+        }}>
+          {[
+            { label: "TOTAL VALUE",    value: fmtUsd(totals.totalValue, 2), color: C.green },
+            { label: "UNREALIZED P&L", value: `${totals.unrealizedPnl >= 0 ? "+" : ""}${fmtUsd(totals.unrealizedPnl, 2)}`, color: totals.unrealizedPnl >= 0 ? C.green : C.red },
+            { label: "BASKETS",        value: fmtUsd(totals.basketValue, 0), sub: `${state.basketPositions.length} position${state.basketPositions.length === 1 ? "" : "s"}` },
+            { label: "PPN",            value: fmtUsd(totals.ppnValue, 0), color: C.violet, sub: `${state.ppnVaults.length} vault${state.ppnVaults.length === 1 ? "" : "s"}` },
+          ].map((s, i, arr) => (
+            <React.Fragment key={s.label}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 9, color: C.textMuted, fontFamily: FM, letterSpacing: "0.16em", marginBottom: 5 }}>
+                  {s.label}
+                </div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <span style={{ fontSize: 17, fontWeight: 500, color: s.color ?? C.textPrimary, fontFamily: FD, lineHeight: 1, letterSpacing: "-0.01em" }}>
+                    {s.value}
+                  </span>
+                  {s.sub && (
+                    <span style={{ fontSize: 10, color: C.textMuted, fontFamily: FS, letterSpacing: "0.02em" }}>
+                      {s.sub}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {i < arr.length - 1 && (
+                <div style={{ width: 1, height: 28, background: C.border, margin: "0 18px", flexShrink: 0 }} />
+              )}
+            </React.Fragment>
+          ))}
         </div>
 
-        {/* ORBITAL DONUT CARD */}
+        {/* ORBITAL DONUT CARD — centrepiece, sized to fit above the fold */}
         <div style={{
           background: "linear-gradient(180deg, rgba(13, 19, 28, 0.9) 0%, rgba(5, 8, 12, 0.95) 100%)",
           border: "0.5px solid rgba(45, 212, 191, 0.1)",
           borderRadius: 24,
-          marginBottom: 20,
+          marginBottom: 14,
           overflow: "hidden",
           position: "relative",
           boxShadow: "0 1px 0 rgba(255,255,255,0.03) inset, 0 20px 60px rgba(0,0,0,0.2)",
@@ -158,10 +191,10 @@ export default function PortfolioPage() {
           {/* Active color wash */}
           <div style={{ position: "absolute", inset: 0, background: activeId && activeColor ? `radial-gradient(ellipse 60% 50% at 50% 45%, ${activeColor}22 0%, transparent 70%)` : "transparent", transition: "background 0.6s cubic-bezier(0.32, 0.72, 0, 1)", pointerEvents: "none" }} />
 
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "56px 0 44px", position: "relative" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0 16px", position: "relative" }}>
 
             {/* Header strip */}
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 32, position: "relative", zIndex: 5 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, position: "relative", zIndex: 5 }}>
               <span style={{ width: 24, height: 1, background: C.textMuted }} />
               <span style={{ fontFamily: FM, fontSize: 10, letterSpacing: "0.22em", color: C.textMuted }}>YOUR ORBIT</span>
               <span style={{ width: 24, height: 1, background: C.textMuted }} />

@@ -12,6 +12,10 @@ const RequestSchema = z.object({
     .enum(["income", "speculation", "balanced"])
     .optional()
     .default("balanced"),
+  horizon: z
+    .enum(["short", "medium", "long"])
+    .optional()
+    .default("medium"),
 });
 
 /**

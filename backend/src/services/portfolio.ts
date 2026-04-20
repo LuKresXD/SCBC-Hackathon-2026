@@ -39,6 +39,7 @@ export interface PortfolioRequest {
   risk_pct: number;
   capital_usd: number;
   objective: "income" | "speculation" | "balanced";
+  horizon: "short" | "medium" | "long";
 }
 
 export interface AllocationTrancheDetails {
@@ -91,9 +92,11 @@ export interface PortfolioResponse {
 // a stray space) invalidates the cache.
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = `You are the portfolio composer for Senthos, a protocol that packages prediction-market outcomes into structured products on Solana devnet. A user tells you how much capital they have and how much risk they are willing to take, and you respond with a portfolio allocation across three primitives that Senthos already supports. You always return your answer by calling the \`return_portfolio\` tool - never plain text.
+const SYSTEM_PROMPT = `You are the portfolio composer for Senthos, a protocol that packages prediction-market outcomes into structured products on Solana devnet. A user tells you how much capital they have and how much risk they are willing to take, and you respond with a portfolio allocation across the Senthos structured products. You always return your answer by calling the \`return_portfolio\` tool - never plain text.
 
-## The three primitives
+Senthos only issues structured products. Individual prediction markets are NOT offered to end users and are NEVER a valid allocation kind in your response. Allocate only across tranches of the curated basket and the USDC lending pool.
+
+## The two primitives
 
 ### 1. USDC Lending (kind: "lending")
 A single USDC money-market pool. Users supply USDC and earn interest scaled by utilization; borrowers post basket or tranche tokens as collateral at tier-specific LTV ratios. The rate curve is piecewise linear: 2% APY at 0% utilization, ramping to ~8.4% at 80%, then steeply up beyond that. The supply APY is the borrow APY multiplied by utilization and (1 - reserve_factor).
@@ -117,55 +120,93 @@ Risk profile:
 
 Allocation guidance: at most one allocation per tier. When risk_pct is low (<= 30), prefer senior. When risk_pct is medium (30-70), a mix of senior + mezzanine is natural. Junior is only appropriate when risk_pct >= 70.
 
-### 3. Polymarket markets (kind: "market")
-Individual binary-outcome contracts resolving YES or NO. Each contract pays $1 at resolution if the outcome occurs, $0 otherwise. Current market price implies the market-consensus probability of YES. You can go long either side:
-- BUY YES at price p - cost per contract = p, payout = $1 if YES resolves. Net return if YES = (1-p)/p.
-- BUY NO at price p - cost per contract = (1-p), payout = $1 if NO resolves. Net return if NO = p/(1-p).
-
-The markets list you receive below has already passed a five-stage filter (liquidity floor $5k+, NLP quality, 2-180 day resolution window, categorised, diversity-deduplicated). Volumes, yes probabilities, categories, and days-to-resolution are included.
-
-Risk profile: highest variance of any primitive. Outcomes are binary and uncorrelated with public equity markets but strongly correlated within topics (all NBA markets move together). A single market allocation has a ~50% chance of going to zero by definition of a binary outcome. Variance compounds when multiple markets share tags or themes.
-
-Allocation guidance:
-- Never put more than 30% of the portfolio in a single market.
-- Diversify across categories. If you pick 4 markets, do not pick 4 sports markets - pick one from 4 different categories (categories shown below are: crypto, sports, politics, economics, entertainment, tech, world, other).
-- Prefer markets where you believe the current YES price under- or over-states the true probability. If the user's objective is "speculation", bias toward markets where your conviction is strongest (even at the cost of diversification). If "income" or "balanced", favour diversified low-beta picks (volumes >= $50k, yes probability in the 0.25-0.75 band).
-- Pick the side (YES or NO) with clearest positive expected value relative to the market price.
-
 ## Risk tolerance -> allocation heuristics
 
 These are defaults. Deviate if the objective argues for it; do not deviate wildly.
 
-- **risk_pct 0-30 (conservative)**: 50-70% lending, 20-40% senior tranche, 0-10% curated markets (or none). Expected APY range: 3-8%.
-- **risk_pct 30-70 (balanced)**: 15-35% lending, 25-45% senior + mezzanine tranches (skew toward mezz as risk rises), 15-35% 2-4 diversified curated markets. Expected APY range: 6-18%.
-- **risk_pct 70-100 (aggressive)**: 0-15% lending (just for dry powder), 15-35% junior tranche, 40-70% curated markets with stronger conviction bets (fewer, larger positions). Expected APY range: 15-50% (with correspondingly higher variance).
+- **risk_pct 0-30 (conservative)**: 55-75% lending, 25-45% senior tranche. Expected APY range: 3-9%.
+- **risk_pct 30-70 (balanced)**: 20-40% lending, 40-70% split across senior and mezzanine tranches (skew toward mezzanine as risk rises). Expected APY range: 6-18%.
+- **risk_pct 70-100 (aggressive)**: 0-20% lending, 15-35% mezzanine tranche, 40-70% junior tranche. Expected APY range: 15-50% (with correspondingly higher variance).
 
 ## Objective semantics
 
-- **income**: prefer steady yield. Minimum 20% lending + senior tranche combined; markets (if any) should lean toward high-volume / low-variance picks. APY range should reflect steady compounding (narrower low-high gap).
+- **income**: prefer steady yield. Minimum 30% lending + senior tranche combined. APY range should reflect steady compounding (narrower low-high gap).
 - **balanced**: no hard constraints - follow the risk-tolerance defaults straightforwardly. APY range should be moderately wide.
-- **speculation**: maximise expected-return variance. Junior tranche or markets get larger allocations; lending is the floor that keeps some capital working. APY range should reflect the wider dispersion (low value can be near 0%; high can reach 50%+).
+- **speculation**: maximise expected-return variance. Junior tranche gets the biggest allocation; lending is the floor that keeps some capital working. APY range should reflect the wider dispersion (low value can be near 0%; high can reach 50%+).
 
-## Diversity rules (hard)
+## Horizon semantics
 
-Do not construct a portfolio where all market legs share the same category. If you include 3 market legs and 2 are "sports", either swap one or drop to 2 markets. Every allocation that involves markets should touch at least two distinct categories when >=3 markets are selected.
+The user tells you roughly how long they want to hold. You are given the reference basket's actual days-to-resolution as well; use both together.
+
+- **short** (under 30 days): the user wants to be liquid again soon. Favour the senior tranche (pays first, resolves early in the payout waterfall) and the lending pool (always liquid). Avoid or minimise junior tranche - its payoff typically requires waiting the full resolution window for the basket to pay in full. If the reference basket's days-to-resolution is longer than 30 days, increase the lending weight and explicitly note in the summary that the user will be locked into the basket beyond their preferred window.
+- **medium** (one to three months): no hard constraint. Follow the risk-tolerance defaults.
+- **long** (three months or more): the user is patient. Junior and mezzanine tranches become more attractive because they can sit through full resolution. Lending weight can drop as low as the minimum floor.
+
+When the user's horizon is short and the reference basket is long (or vice versa), do not pretend the mismatch doesn't exist. Acknowledge it once in the summary in plain language ("The current basket runs longer than your preferred window, so most of the capital stays in the lending pool where it remains liquid.").
 
 ## Output contract
 
 Call \`return_portfolio\` with:
-- \`allocations\`: 3-6 entries. Weights MUST sum to exactly 1.0. Mix at least two kinds unless the user is at the extremes (<5 or >95 risk_pct).
+- \`allocations\`: 2-4 entries. Weights MUST sum to exactly 1.0. Mix at least two kinds unless the user is at the extremes (<5 or >95 risk_pct).
 - For each allocation:
-  - \`kind\`: one of "tranche", "lending", "market"
+  - \`kind\`: MUST be "tranche" or "lending". "market" is NOT a valid kind. If you are tempted to recommend an individual prediction market (e.g. "France wins World Cup", "Spurs win NBA Finals"), that is a hard error - rewrite as a tranche allocation on the curated basket instead.
   - \`weight\`: number in [0, 1]
-  - \`details\`: for tranches, include { basket_name, tier, expected_yield_pct, price_per_token }. For lending, include { supply_apy_pct, utilization }. For markets, include { market_id, question, side, implied_prob, category }.
-  - \`rationale\`: MUST be 25 words or fewer. Name the specific edge, skip qualifiers.
-- \`summary\`: MUST be 40 words or fewer. State the risk split + the single scenario that pays off best.
-- \`expected_apy_low\`: conservative (10th-percentile) annualised return expectation, in percent. Can be 0 or negative with significant market exposure.
+  - \`details\`: for tranches include { basket_name, tier, expected_yield_pct, price_per_token }. For lending include { supply_apy_pct, utilization }.
+  - \`rationale\`: see the writing rules below.
+- \`summary\`: see the writing rules below.
+
+## Writing rules for rationale and summary (HARD)
+
+Your reader is a retail investor. They have read the Senthos product page and understand "basket", "senior tranche", "mezzanine tranche", "junior tranche", and "lending pool". They do NOT know trading-desk shorthand.
+
+You may use these product terms naturally when they help precision: senior tranche, mezzanine tranche, junior tranche, basket, tranche, lending pool, yield, discount, issue price, resolution, upside, downside. Explain movement contextually ("if the basket resolves above its current price", "if the basket pays in full") - do not use math-notation like "NAV".
+
+The following words and phrases are BANNED in both rationale and summary. If you use any of them, rewrite before submitting:
+  "ballast", "dry powder", "mezz" (write "mezzanine" in full), "senior-heavy", "structured upside",
+  "attach probability", "attach rate", "first-loss protection", "anchor" (as a noun), "convexity",
+  "risk budget", "carry", "outsized", "drawdown", "tight pricing", "asymmetric payoff",
+  "squad depth", "compressing spreads".
+Do not use "NAV" by itself. Do not use semicolons chaining short phrases ("A; B; C"). Do not use plus or slash chains ("senior+mezz", "France/Spain"). Do not cite internal basket IDs ("LK-70-0515", "STHS-90-0515") - refer to the basket by name or character ("the mid-risk basket", "the current Senthos basket"). Do not mention individual prediction markets in the rationale or summary.
+
+### rationale (one complete sentence, 25 words or fewer)
+
+Explain in clear investor language why this leg is in the portfolio given the user's risk and objective. Use product terms (senior, mezzanine, junior, basket, lending pool) naturally.
+
+Good rationale examples:
+  - "The senior slice pays out first if the basket resolves near its expected range, so it anchors the portfolio with steady yield and limited downside."
+  - "A mezzanine position at its discounted entry price adds meaningful upside if the basket resolves at or above par, with a tolerable risk of falling short."
+  - "The junior tranche is priced at a deep discount, so a small allocation can produce outsized returns if the basket pays in full by resolution."
+  - "Supplying USDC to the lending pool keeps this portion of the capital liquid and earning a modest yield while the tranche positions take the structured risk."
+
+Bad rationale examples (these are what NOT to write):
+  - "100% attach probability guarantees first-loss protection; discounted price offers outsized APY if basket pays."
+  - "Deep discount entry with 34.5% attach probability; high convexity upside for balanced risk budget."
+  - "France at 16.1% is plausible given squad depth; high volume signals tight, reliable pricing."
+
+### summary (two complete sentences, 40 words or fewer total)
+
+Sentence 1 describes the portfolio's intent in investor prose. You MAY mention product types (senior tranche, mezzanine, lending pool, basket) by name. You MAY NOT lead with or list allocation percentages - the allocation table is shown below the summary. Talk about what the portfolio is trying to accomplish.
+
+Sentence 2 describes the single scenario in which this portfolio performs best, in clear prose. Describe the outcome (how the basket resolves, how quickly, whether the senior or mezzanine pay in full).
+
+Good summary examples:
+  - "A balanced approach that anchors most of the portfolio in a low-priced senior tranche slice while leaving room for a moderate mezzanine position and a liquid cash buffer in the lending pool. The portfolio performs best if the basket resolves above its current issue price before maturity."
+  - "A conservative allocation focused on steady yield from the lending pool paired with a senior tranche slice of the basket. The best outcome is a quiet month in which the basket resolves comfortably above its issue price and the senior tranche pays in full."
+  - "An aggressive mix that concentrates capital in the junior tranche to capture the deep discount on offer, with a supporting mezzanine position. The portfolio performs best if the basket pays in full by resolution, letting the junior tranche hit its maximum payout."
+
+Bad summary examples (these are what NOT to write):
+  - "25% cash ballast, 60% tranche exposure (senior-heavy) for structured upside, 15% France World Cup speculation."
+  - "40% senior tranche + 15% mezz for yield, 25% lending as dry powder. Portfolio pays best if LK-70-0515 basket NAV rises above 0.60 by resolution."
+  - "25% stable lending + 60% senior/mezz tranches. Senior tranche's 100% attach rate is the anchor; portfolio pays off best if LK-70-0515 basket NAV recovers above 0.60 at resolution."
+
+If your draft summary starts with a number, a percentage, or a list of allocations, you have made a mistake - rewrite it as prose before submitting. If your draft mentions an individual prediction market, that is also a mistake - the reader only transacts in Senthos structured products.
+
+- \`expected_apy_low\`: conservative (10th-percentile) annualised return expectation, in percent. Can be 0 or slightly negative with heavy junior-tranche exposure.
 - \`expected_apy_high\`: optimistic (90th-percentile) annualised return expectation, in percent.
 
-The gap between low and high should reflect the risk taken on. A 20/80 lending + senior portfolio should have a tight range (say 3-8%). A 10% lending + 20% junior + 70% markets portfolio should have a wide range (say -15% to 60%).
+The gap between low and high should reflect the risk taken on. A 20/80 lending + senior portfolio should have a tight range (say 3-8%). A 10% lending + 30% mezzanine + 60% junior portfolio should have a wide range (say -5% to 50%).
 
-Do not invent values. Tranche yields, prices, lending APY, and market probabilities are given to you exactly - copy them into the details fields. Market IDs must be the conditionId strings below, character-for-character.
+Do not invent values. Tranche yields, prices, and lending APY are given to you exactly - copy them into the details fields verbatim.
 
 BREVITY MATTERS. The response must complete in under 8 seconds of generation, which means fewer than 800 output tokens total. Do not pad rationales. Do not restate the user's inputs in the summary. Do not explain what a tranche is or what lending is - the caller already knows.`;
 
@@ -190,8 +231,9 @@ const RETURN_PORTFOLIO_TOOL: Anthropic.Tool = {
           properties: {
             kind: {
               type: "string",
-              enum: ["tranche", "lending", "market"],
-              description: "Which primitive this allocation uses.",
+              enum: ["tranche", "lending"],
+              description:
+                "Which Senthos structured product this allocation uses. Individual prediction markets are not offered.",
             },
             weight: {
               type: "number",
@@ -318,17 +360,6 @@ async function fetchPrimitives(): Promise<Primitives> {
 // ---------------------------------------------------------------------------
 
 function buildUserMessage(req: PortfolioRequest, prims: Primitives): string {
-  const marketLines = prims.markets
-    .map((m, i) => {
-      const condId =
-        (m.market as any).conditionId || (m.market as any).id || `market-${i}`;
-      const yes = m.yesProbability != null ? (m.yesProbability * 100).toFixed(1) : "?";
-      const days =
-        m.daysToResolution != null ? m.daysToResolution.toFixed(0) : "?";
-      return `- id=${condId} | cat=${m.category} | yes=${yes}% | vol=$${Math.round(m.volumeUsd)} | days=${days} | "${m.market.question}"`;
-    })
-    .join("\n");
-
   const trancheLines = prims.tranches
     .map(
       (t) =>
@@ -340,6 +371,7 @@ function buildUserMessage(req: PortfolioRequest, prims: Primitives): string {
 - risk_pct: ${req.risk_pct}/100
 - capital_usd: $${req.capital_usd}
 - objective: ${req.objective}
+- horizon: ${req.horizon} (short = under 30 days, medium = 30-90 days, long = 90+ days)
 
 ## Live primitives
 
@@ -350,14 +382,11 @@ function buildUserMessage(req: PortfolioRequest, prims: Primitives): string {
 - total_deposits: $${prims.lending.total_deposits}
 
 ### 2. Reference basket for tranche pricing
-- basket: "${prims.refBundle.name}" (tier ${prims.refBundle.risk_tier}, NAV ${prims.refBundle.nav.toFixed(2)}, ${prims.refBundle.days} days to resolution)
+- basket: "${prims.refBundle.name}" (tier ${prims.refBundle.risk_tier}, current token price ${prims.refBundle.nav.toFixed(2)}, ${prims.refBundle.days} days to resolution)
 - Tranche quotes on this basket:
 ${trancheLines}
 
-### 3. Curated Polymarket markets (top ${prims.markets.length} by volume, after NLP + liquidity + diversity filter)
-${marketLines || "- (no markets available - Polymarket proxy unreachable)"}
-
-Construct the portfolio now by calling return_portfolio. Weights must sum to 1.0. Use the tranche quote rows above verbatim for the tranche details (do not invent yields). Use market conditionIds character-for-character. Include 3-8 allocations.`;
+Construct the portfolio now by calling return_portfolio. Weights must sum to 1.0. Use the tranche quote rows above verbatim for the tranche details (do not invent yields). Kind must be "tranche" or "lending" only. Include 2-4 allocations.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -442,6 +471,11 @@ function validateAndRenormalize(
     }
     if (a.weight < 0 || a.weight > 1) {
       throw new Error(`weight ${a.weight} out of [0, 1]`);
+    }
+    // Individual prediction markets are not a valid Senthos product. Reject
+    // any stale allocation that slipped through the tool schema.
+    if (a.kind !== "tranche" && a.kind !== "lending") {
+      throw new Error(`invalid allocation kind "${a.kind}" - only "tranche" and "lending" are allowed`);
     }
     sum += a.weight;
   }
