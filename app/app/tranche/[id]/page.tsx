@@ -27,6 +27,7 @@ import {
   type TrancheQuote,
   type TrancheKind,
 } from "../_quote";
+import { computeHedgeability } from "../_risk";
 
 const WINDOW_LABEL: Record<"week" | "month" | "long", string> = {
   week: "Short term",
@@ -271,7 +272,7 @@ export default function TrancheDetail() {
                 letterSpacing: "0.02em",
               }}
             >
-              fair ${selected.fairPrice.toFixed(4)} · risk-neutral E[ret]{" "}
+              fair ${selected.fairPrice.toFixed(4)} · mean return {" "}
               {formatYieldPct(selected.expectedReturnApyPct)}
             </div>
           </div>
@@ -287,20 +288,21 @@ export default function TrancheDetail() {
             gap: 20,
           }}
         >
-          {/* Left column: the chart + metric tiles group pins to the top,
-              the waterfall card pins to the bottom via space-between. The
-              right column's buy panel uses the same pattern (action stack
-              at top, "How it works" at bottom), so the TOP of the chart
-              aligns with the TOP of the buy panel and the BOTTOM of the
-              waterfall card aligns with the BOTTOM of "How it works". Any
-              extra vertical space from the grid-stretch falls INTO the gap
-              between the top group and the waterfall, matching the right
-              panel's layout exactly. */}
+          {/* Left column: chart + metric tiles at top, waterfall at
+              bottom. The TOP GROUP is `flex: 1` so it absorbs any
+              extra vertical space the grid gives us (driven by the
+              right column's taller content). Inside the top group the
+              chart itself is `flex: 1`, so the slack lands on the
+              chart — which grows its bell curve — rather than as an
+              empty gap between the tiles and the waterfall. Metric
+              tiles stay fixed-height; waterfall stays pinned to the
+              bottom. Result: top of chart aligns with top of buy
+              panel, bottom of waterfall aligns with bottom of "How it
+              works", and there's no awkward gap in between. */}
           <div
             style={{
               display: "flex",
               flexDirection: "column",
-              justifyContent: "space-between",
               gap: 14,
               minWidth: 0,
               height: "100%",
@@ -311,6 +313,8 @@ export default function TrancheDetail() {
                 display: "flex",
                 flexDirection: "column",
                 gap: 14,
+                flex: 1,
+                minHeight: 0,
               }}
             >
               <DistributionChart
@@ -324,6 +328,7 @@ export default function TrancheDetail() {
                   display: "grid",
                   gridTemplateColumns: "repeat(4, 1fr)",
                   gap: 12,
+                  flexShrink: 0,
                 }}
               >
                 <MetricTile
@@ -403,18 +408,24 @@ function DistributionChart({
   selectedKind: TrancheKind;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const svgWrapRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState<{ w: number; h: number }>({
     w: 700,
     h: 320,
   });
 
+  // Observe the SVG wrapper (NOT the card wrapper) for both width and
+  // height. Height observation is what lets the chart grow to fill any
+  // extra vertical space the flex parent gives us — which is what
+  // kills the gap between the metric tiles and the waterfall card.
   useEffect(() => {
-    const el = wrapRef.current;
+    const el = svgWrapRef.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
       for (const e of entries) {
         const w = Math.max(220, Math.floor(e.contentRect.width));
-        setSize((prev) => (prev.w === w ? prev : { ...prev, w }));
+        const h = Math.max(220, Math.floor(e.contentRect.height));
+        setSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
       }
     });
     ro.observe(el);
@@ -501,6 +512,12 @@ function DistributionChart({
         border: `0.5px solid ${C.border}`,
         borderRadius: 14,
         padding: "16px 18px 12px",
+        // Fill whatever vertical space the column gives us. The SVG
+        // wrapper below uses `flex: 1` to grow into this card.
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+        flex: 1,
       }}
     >
       <div
@@ -509,6 +526,7 @@ function DistributionChart({
           justifyContent: "space-between",
           alignItems: "baseline",
           marginBottom: 8,
+          flexShrink: 0,
         }}
       >
         <span
@@ -533,12 +551,26 @@ function DistributionChart({
           μ {(mu * 100).toFixed(1)}% · σ {(sigma * 100).toFixed(2)}%
         </span>
       </div>
-      <svg
-        width={W}
-        height={H}
-        viewBox={`0 0 ${W} ${H}`}
-        style={{ display: "block" }}
+      <div
+        ref={svgWrapRef}
+        style={{
+          flex: 1,
+          minHeight: 240,
+          position: "relative",
+        }}
       >
+        <svg
+          width={W}
+          height={H}
+          viewBox={`0 0 ${W} ${H}`}
+          style={{
+            display: "block",
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+          }}
+        >
         {/* Tranche slice fills */}
         {quotes.map((q) => {
           const active = q.kind === selectedKind;
@@ -640,7 +672,8 @@ function DistributionChart({
             );
           });
         })()}
-      </svg>
+        </svg>
+      </div>
     </div>
   );
 }
@@ -667,6 +700,9 @@ function WaterfallCard({
         border: `0.5px solid ${C.border}`,
         borderRadius: 14,
         padding: "16px 18px 14px",
+        // Pin to its natural size so the flex parent's slack lands on
+        // the chart above, not on the waterfall.
+        flexShrink: 0,
       }}
     >
       <div
@@ -877,45 +913,45 @@ function TrancheBuyPanel({
   const { state, dispatch } = useSandbox();
   const [amount, setAmount] = useState<string>("100");
   const [books, setBooks] = useState<Map<string, Orderbook>>(new Map());
-  const [bookStatus, setBookStatus] = useState<
-    "idle" | "loading" | "ok" | "error"
-  >("idle");
 
   const selected = quotes.find((q) => q.kind === selectedKind) ?? quotes[0];
   const accent = trancheColor(selected.kind);
 
-  // Live CLOB pull for the top 10 weighted legs — same pattern as
-  // the basket buy panel, so slippage estimates stay consistent
-  // across the two products.
+  // Top 10 weighted legs, regardless of tokenId availability. These
+  // are used for the volume-proxy slippage calculation (which only
+  // needs `volumeUsd`, not a CLOB token id). Without this, any basket
+  // whose legs don't have CLOB tokens would report $0 slippage — the
+  // volume-proxy fallback was never reached because the old `topLegs`
+  // filtered by `tokenId` and returned an empty array.
   const topLegs = useMemo(() => {
-    const withTokens = markets.filter((m) => m.tokenId);
-    return [...withTokens]
+    return [...markets]
       .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
       .slice(0, 10);
   }, [markets]);
+  // CLOB-eligible subset — only legs with a `tokenId` can have their
+  // order books fetched. The tokenIds are what we pass to the live
+  // orderbook endpoint; legs without tokenIds fall back to volume
+  // proxy inside `basketSlippageBps`.
   const topTokenIds = useMemo(
-    () => topLegs.map((m) => m.tokenId),
+    () => topLegs.map((m) => m.tokenId).filter((t): t is string => !!t),
     [topLegs],
   );
 
   useEffect(() => {
     if (topTokenIds.length === 0) {
       setBooks(new Map());
-      setBookStatus("idle");
       return;
     }
     const ac = new AbortController();
     let cancelled = false;
-    setBookStatus("loading");
     fetchOrderbooks(topTokenIds, ac.signal)
       .then((map) => {
         if (cancelled) return;
         setBooks(map);
-        setBookStatus(map.size > 0 ? "ok" : "error");
       })
       .catch(() => {
-        if (cancelled) return;
-        setBookStatus("error");
+        // Silent failure: the volume-proxy fallback inside
+        // `basketSlippageBps` handles the no-books case automatically.
       });
     return () => {
       cancelled = true;
@@ -984,12 +1020,23 @@ function TrancheBuyPanel({
     return Math.min(SLIPPAGE_BPS_CEILING, Math.max(0, slippage));
   }, [usdcAmount, topLegs, books, selected.notionalShare]);
 
-  const order = useMemo(
-    () => quoteTrancheOrder(selected, usdcAmount, basketSlippageBps),
-    [selected, usdcAmount, basketSlippageBps],
+  // Basket-wide hedgeability: derived from all legs (not just the top
+  // 10) plus any live CLOB books we fetched. Single source of truth
+  // for position caps + size-dependent MM risk.
+  const hedgeability = useMemo(
+    () => computeHedgeability(markets, books),
+    [markets, books],
   );
 
-  const hasLiveBooks = bookStatus === "ok";
+  const order = useMemo(
+    () =>
+      quoteTrancheOrder(selected, usdcAmount, basketSlippageBps, {
+        stats,
+        hedgeability,
+      }),
+    [selected, usdcAmount, basketSlippageBps, stats, hedgeability],
+  );
+
   const hasAmount = usdcAmount > 0;
   // Effective per-order cap is the tighter of the static (tier, kind) ceiling
   // and the dynamic depth cap derived from the basket's weakest leg. Junior
@@ -998,7 +1045,39 @@ function TrancheBuyPanel({
   const capacityUsdc = order.capacityUsdc;
   const overCap = hasAmount && order.overCapacity;
   const insufficient = connected && hasAmount && usdcAmount > state.usdc;
-  const canSubmit = connected && hasAmount && !insufficient && !overCap;
+
+  // -----------------------------------------------------------------
+  // Liquidity-based block thresholds. We refuse the ticket whenever
+  // any of the following trip, even if the order is under the static
+  // position cap:
+  //
+  //   • slippage + market-impact > SLIPPAGE_BLOCK_BPS (15%)
+  //     — CLOB walk is so expensive the quote is noise
+  //   • warehouse fraction > WAREHOUSE_BLOCK_FRAC (70%)
+  //     — desk would be carrying >70% of the hedge as naked risk
+  //   • total fees > TOTAL_FEE_BLOCK_BPS (20%)
+  //     — economics no longer make sense for the user
+  //
+  // These are USER-visible blocks surfaced via an "Insufficient
+  // liquidity" button state, distinct from the "Insufficient USDC"
+  // wallet-balance block.
+  // -----------------------------------------------------------------
+  const SLIPPAGE_BLOCK_BPS = 1_500;     // 15% slippage ceiling
+  const WAREHOUSE_BLOCK_FRAC = 0.70;    // 70% naked warehouse ceiling
+  const TOTAL_FEE_BLOCK_BPS = 2_000;    // 20% total fee ceiling
+  const effectiveSlippageBps =
+    order.slippageBps + (order.risk?.marketImpactBps ?? 0);
+  const slippageBlocked =
+    hasAmount && effectiveSlippageBps > SLIPPAGE_BLOCK_BPS;
+  const warehouseBlocked =
+    hasAmount && order.warehouseFraction > WAREHOUSE_BLOCK_FRAC;
+  const feeBlocked =
+    hasAmount && order.totalFeeBps > TOTAL_FEE_BLOCK_BPS;
+  const liquidityBlocked =
+    overCap || slippageBlocked || warehouseBlocked || feeBlocked;
+
+  const canSubmit =
+    connected && hasAmount && !insufficient && !liquidityBlocked;
 
   function handlePrimary() {
     if (!connected) {
@@ -1017,12 +1096,12 @@ function TrancheBuyPanel({
 
   const buttonLabel = !hasAmount
     ? "Enter an amount"
-    : overCap
-      ? `Max $${Math.round(capacityUsdc).toLocaleString()} per order`
+    : liquidityBlocked
+      ? `Insufficient liquidity — max $${Math.round(capacityUsdc).toLocaleString()}`
       : insufficient
         ? "Insufficient USDC"
         : `Buy ${selected.kind} tranche`;
-  const buttonActive = hasAmount && !insufficient && !overCap;
+  const buttonActive = hasAmount && !insufficient && !liquidityBlocked;
 
   return (
     <div
@@ -1222,23 +1301,46 @@ function TrancheBuyPanel({
               label="Protocol fee"
               bps={order.protocolFeeBps}
               usd={(usdcAmount * order.protocolFeeBps) / 10_000}
+              hint="Senthos protocol take"
             />
             <FeeRow
-              label="MM premium"
+              label="Dealer risk premium"
               bps={order.mmSpreadBps + order.underwritingBps}
               usd={
                 (usdcAmount *
                   (order.mmSpreadBps + order.underwritingBps)) /
                 10_000
               }
-              hint="markup over fair: delta/gamma hedge + capital-at-risk"
+              hint="pays the desk for hedging the basket and carrying any residual tail risk it can't lay off"
             />
             <FeeRow
               label="Slippage"
               bps={order.slippageBps}
               usd={(usdcAmount * order.slippageBps) / 10_000}
-              hint="CLOB walk on basket hedge"
+              hint="price impact from walking the underlying order books"
             />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontFamily: FM,
+                fontSize: 10.5,
+                color: C.textMuted,
+                fontWeight: 400,
+                paddingTop: 4,
+                letterSpacing: "0.02em",
+                opacity: 0.75,
+              }}
+            >
+              <span>Total fees</span>
+              <span>
+                {(order.totalFeeBps / 100).toFixed(2)}% · $
+                {((usdcAmount * order.totalFeeBps) / 10_000).toLocaleString(
+                  "en-US",
+                  { maximumFractionDigits: 2 },
+                )}
+              </span>
+            </div>
             <div
               style={{
                 display: "flex",
@@ -1258,24 +1360,6 @@ function TrancheBuyPanel({
                 {order.tokensOut.toFixed(2)} STHS-
                 {selected.kind.slice(0, 3).toUpperCase()}
               </span>
-            </div>
-            <div
-              style={{
-                fontFamily: FS,
-                fontSize: 10,
-                color: C.textMuted,
-                letterSpacing: "0.02em",
-                fontWeight: 300,
-                marginTop: 2,
-              }}
-            >
-              {bookStatus === "loading"
-                ? "Quoting slippage from live Polymarket books…"
-                : hasLiveBooks
-                  ? `Slippage quoted live from Polymarket CLOB (${topLegs.length} legs sampled). Capacity $${Math.round(capacityUsdc).toLocaleString()} per order.`
-                  : bookStatus === "error"
-                    ? `CLOB feed unavailable. Slippage estimated from leg volume. Capacity $${Math.round(capacityUsdc).toLocaleString()} per order.`
-                    : `Slippage estimated from leg volume. Capacity $${Math.round(capacityUsdc).toLocaleString()} per order.`}
             </div>
           </div>
         )}

@@ -21,7 +21,6 @@ const NAV_LEFT = [
 
 export function Header() {
   const pathname = usePathname();
-  const portfolioActive = pathname === "/app/portfolio" || !!pathname?.startsWith("/app/portfolio/");
 
   return (
     <>
@@ -118,45 +117,6 @@ export function Header() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-          <Link
-            href="/app/portfolio"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 7,
-              height: 32,
-              padding: "0 13px",
-              borderRadius: 6,
-              border: `0.5px solid ${portfolioActive ? C.tealLight : C.border}`,
-              background: portfolioActive ? "rgba(45, 212, 191, 0.08)" : "transparent",
-              color: portfolioActive ? C.tealLight : C.textPrimary,
-              fontFamily: FD,
-              fontSize: 12,
-              fontWeight: 500,
-              letterSpacing: "0.02em",
-              textDecoration: "none",
-              transition: "color 0.15s linear, background 0.15s linear, border-color 0.15s linear",
-            }}
-            onMouseEnter={(e) => {
-              if (portfolioActive) return;
-              const el = e.currentTarget as HTMLElement;
-              el.style.background = C.surface;
-              el.style.borderColor = C.borderHover;
-            }}
-            onMouseLeave={(e) => {
-              if (portfolioActive) return;
-              const el = e.currentTarget as HTMLElement;
-              el.style.background = "transparent";
-              el.style.borderColor = C.border;
-            }}
-          >
-            {/* Mini donut glyph — echoes the positions chart on the page */}
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2.2" opacity="0.55" />
-              <path d="M12 4 A8 8 0 0 1 20 12 L12 12 Z" fill="currentColor" />
-            </svg>
-            Portfolio
-          </Link>
           <ConnectButton variant="header" />
         </div>
       </header>

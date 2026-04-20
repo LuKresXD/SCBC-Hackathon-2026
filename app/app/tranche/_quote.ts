@@ -14,13 +14,23 @@
  * contracts with independent per-leg probabilities) into:
  *
  *   1. An outcome distribution for the basket's NAV at resolution.
- *   2. Call-spread fair value per tranche under that distribution.
- *   3. A decomposed ask price = fair × (1 + MM spread) × (1 + underwriting)
- *      where each component is derived from greeks, adverse selection,
- *      liquidity, CVaR, and capital-at-risk rather than hard-coded.
+ *   2. Call-spread fair value per tranche under that distribution,
+ *      computed in closed form under a Normal(μ, σ²) approximation
+ *      of the basket outcome.
+ *   3. A fair-anchored ask price
+ *          ask = fair × (1 − target_apy · τ)
+ *      where `target_apy` is a tranche-kind yield pickup that scales
+ *      linearly with basket σ. The ask is always ≤ fair, so a buyer's
+ *      risk-neutral expected annualised return equals the yield pickup.
  *   4. A per-order slippage + protocol-fee quote that also imposes
  *      aggressive per-(tier, kind) capacity caps so tail-risk tranches
  *      are never quoted for size the market can't absorb.
+ *
+ * The old engine priced via `ask = 1 / (1 + target_apy · τ)` without
+ * referencing fair value at all — producing e.g. a $0.94 ask on a LOW
+ * junior whose fair value was $0.004, and advertising +75% APY on a
+ * position with ~99.6% expected loss. The fair-anchored formula here
+ * is mathematically sound across all 9 (tier, window) cells.
  *
  * Everything below is derived from the LiveBasket + LiveMarket data
  * surfaced by /app/_lib/live-baskets.ts — there are NO hard-coded per-
@@ -30,6 +40,8 @@
  */
 
 import type { LiveMarket } from "../_lib/live-baskets";
+import type { BasketHedgeability, OrderRisk } from "./_risk";
+import { computeOrderRisk, computeMaxPositionUsdc } from "./_risk";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -98,11 +110,26 @@ export interface TrancheQuote {
   detach: number;               // upper bound of tranche slice, 0..1
   notionalShare: number;        // = detach - attach
   fairPrice: number;            // risk-neutral E[payoff] per $1 face
-  marketPrice: number;          // ask price per token (incl. MM + UW)
-  /** Yield-to-maturity at face (annualised). Headline APY shown in UI. */
+  marketPrice: number;          // ask price per token (≤ fair under current pricing)
+  /**
+   * Headline APY shown in UI. Yield-to-maturity at face, lightly
+   * risk-adjusted by clamping against the mean return:
+   *   ytm     = (1 / ask − 1) / max(30 days, τ)
+   *   mean    = (fair / ask − 1) / max(30 days, τ)
+   *   apy     = min(ytm, LOTTERY_UPSIDE_CAP · mean)
+   * The cap prevents deep-OTM junior tranches (where ytm can reach
+   * tens of thousands of percent because P[full pay] is near zero)
+   * from displaying as absurd figures, while still showing an
+   * amplified "lottery upside" number above the pure expected return.
+   * On senior/mezz the ytm bind is usually below the cap, so the
+   * display reads as plain yield-to-maturity.
+   */
   expectedApyPct: number;
-  /** Risk-neutral expected annualised return (fair/ask - 1 annualised).
-   *  Always ≤ expectedApyPct; equals it only when there is no spread. */
+  /** Risk-neutral EXPECTED annualised return: (fair/ask − 1)/τ, true
+   *  horizon, no 30-day floor. This is the MEAN of the payoff
+   *  distribution annualised — what a holder earns on expectation
+   *  under the Normal basket-outcome model. Always ≤ expectedApyPct;
+   *  equals it only when fair = 1. */
   expectedReturnApyPct: number;
   attachProbability: number;    // P[basket pays anything to this tranche]
   fullPayProbability: number;   // P[basket pays the tranche fully]
@@ -132,6 +159,13 @@ export interface OrderQuote {
   capacityUsdc: number;
   /** True if the order size exceeded the effective capacity. */
   overCapacity: boolean;
+  /** Full risk breakdown when live hedgeability data is passed in. */
+  risk?: OrderRisk;
+  /**
+   * Fraction of the order that the MM would have to warehouse
+   * (couldn't hedge immediately in the underlying CLOB). 0..1.
+   */
+  warehouseFraction: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,18 +185,16 @@ export interface OrderQuote {
  * Junior sits on [μ+σ, 1]: the right tail.
  *
  * This differs from the prior tier-specific design which pushed
- * senior down to μ - 1.5σ on HIGH-tier baskets. That made senior so
- * safe (fair ≈ 0.998) that no meaningful APY could be priced without
- * the MM quoting below fair. Senior anchored at the median gives
- * fair ≈ 0.90-0.99 on HIGH baskets with room to offer 3-8% APY, and
- * still delivers 50%+ full-pay probability.
+ * senior down to μ − 1.5σ on HIGH-tier baskets. Senior anchored at
+ * the median gives fair ≈ 0.90–0.99 on HIGH baskets with room for a
+ * meaningful yield pickup, while still delivering 50%+ full-pay
+ * probability.
  *
- * The PROTOCOL (not the MM) is the risk-bearer across the 3-tranche
- * stack: the user pays more than fair on mezz/junior, and that
- * over-payment cross-subsidises the safe-senior yield. Across all
- * three tranches the total ask always exceeds E[basket payoff] = μ,
- * so the stack is profitable as a WHOLE even when senior individually
- * prices below fair.
+ * Under the current fair-anchored pricing each tranche is sold at
+ * (1 − pickup · τ) × fair, so the user's expected return is the
+ * yield pickup regardless of which slice is widest — HIGH senior,
+ * LOW junior, etc. Protocol revenue is collected via per-order
+ * `PROTOCOL_FEE_BPS` rather than from a markup over fair.
  */
 const ATTACH_K1_SIGMA = 0.0; // K1 = μ + 0·σ = μ (median)
 const ATTACH_K2_SIGMA = 1.0; // K2 = μ + 1·σ (~84th pct)
@@ -194,62 +226,123 @@ const UW_TAIL_MULT: Record<TrancheKind, number> = {
 const UW_COST_OF_CAPITAL = 0.15;
 
 /**
- * Target annualised yield per tranche kind (linear in basket σ).
+ * Target annualised yield-pickup per tranche kind, linear in basket σ:
  *
- *   target_apy(kind) = TARGET_APY_BASE[kind] + TARGET_APY_SIGMA_SLOPE[kind] · σ
+ *   target_apy(kind) = YIELD_PICKUP_BASE[kind] + YIELD_PICKUP_SIGMA_SLOPE[kind] · σ
  *
- * clamped to [TARGET_APY_BASE[kind], TARGET_APY_MAX[kind]]. The ask
- * price is then derived via inverse pricing:
+ * clamped to [YIELD_PICKUP_BASE[kind], YIELD_PICKUP_MAX[kind]]. The
+ * ask price is then anchored to FAIR VALUE with this yield pickup as
+ * the user's expected annualised return, using present-value
+ * discounting:
  *
- *   ask = max(fair, 1 / (1 + target_apy · τ_eff))
+ *   ask = fair / (1 + target_apy · τ)
  *
- * so the displayed APY equals the target on risky tranches (fair <
- * target_price) and drops to the structural yield on safe tranches
- * (fair ≥ target_price). Tuned so a live basket grid produces DeFi-
- * intuitive APYs:
- *   senior  3-13%   (bond-like)
- *   mezz    15-45%  (moderate-yield)
- *   junior  40-120% (aggressive / lottery upside)
+ * so the user's risk-neutral expected annualised return
+ *   (fair / ask − 1) / τ
+ * equals `target_apy` EXACTLY for any horizon τ. This replaces the
+ * previous target-APY-inverse pricing,
+ * which ignored fair value entirely and produced asks 20–200× above
+ * fair on OTM tranches — a user paying $0.94 for a junior with $0.004
+ * fair value was guaranteed ~99.6% expected loss despite a quoted
+ * +75% APY.
  *
- * This replaces the old fair-plus-MM-markup pricing, which could
- * produce quadruple-digit APYs on short-horizon junior tranches when
- * pure yield-to-face was annualised against a 12-day τ.
+ * Tuned so a live basket grid produces honest DeFi-intuitive APYs:
+ *   senior  3–12%    (bond-like, near-fair)
+ *   mezz    12–45%   (moderate yield, moderate discount to fair)
+ *   junior  35–120%  (aggressive / lottery upside, deep discount to fair)
+ *
+ * Protocol-side P&L note: Because every ask sits below fair, the
+ * stack-level tranche revenue is
+ *     Σ width_k · ask_k  =  Σ width_k · fair_k · mult_k
+ *                       ≤  Σ width_k · fair_k
+ *                       =  μ
+ * i.e. it is ALWAYS ≤ the expected basket payout. The protocol's
+ * real-world structural profit is therefore expected to come from
+ *   (a) Polymarket bid-ask capture on basket construction (legs
+ *       bought at bid < the `probability` mids used here as fair), and
+ *   (b) per-order `PROTOCOL_FEE_BPS` collected on deposits/redemptions.
+ * Neither is modelled inside this pricing engine — the engine only
+ * produces user-facing quotes that are honest about risk-adjusted
+ * expected return. A future revision can toggle a senior markup here
+ * if the business model ever needs tranche-side margin.
  */
-const TARGET_APY_BASE: Record<TrancheKind, number> = {
+const YIELD_PICKUP_BASE: Record<TrancheKind, number> = {
   senior: 0.04,
   mezzanine: 0.15,
   junior: 0.40,
 };
-const TARGET_APY_SIGMA_SLOPE: Record<TrancheKind, number> = {
-  // Senior slope kept modest so HIGH-LONG (where most notional is
-  // senior) still satisfies weighted_ask > μ. Mezz/junior slopes
-  // untouched — their notional shares are smaller so they can sit
-  // further below fair without tipping the stack unprofitable.
+const YIELD_PICKUP_SIGMA_SLOPE: Record<TrancheKind, number> = {
   senior: 0.5,
   mezzanine: 3.0,
   junior: 8.0,
 };
-const TARGET_APY_MAX: Record<TrancheKind, number> = {
+const YIELD_PICKUP_MAX: Record<TrancheKind, number> = {
   senior: 0.12,
   mezzanine: 0.50,
   junior: 1.20,
 };
 
-function targetApyFor(kind: TrancheKind, sigma: number): number {
+/**
+ * Lower bound on the ask/fair ratio. Under present-value discounting
+ * `ask = fair / (1 + pickup · τ)` is always strictly positive, but
+ * for very long-dated junior baskets (pickup ≈ 1.2, τ ≈ 0.9) the ask
+ * can land as low as ~47% of fair. We cap the implied discount at
+ * `1 − DISCOUNT_FLOOR` to keep the price from collapsing to zero and
+ * to bound the on-screen APY at a sensible multiple of the base
+ * pickup.
+ */
+const DISCOUNT_FLOOR = 0.15; // ask ≥ 0.15 × fair
+
+function yieldPickupFor(kind: TrancheKind, sigma: number): number {
   const raw =
-    TARGET_APY_BASE[kind] + TARGET_APY_SIGMA_SLOPE[kind] * Math.max(0, sigma);
+    YIELD_PICKUP_BASE[kind] + YIELD_PICKUP_SIGMA_SLOPE[kind] * Math.max(0, sigma);
   return Math.max(
-    TARGET_APY_BASE[kind],
-    Math.min(TARGET_APY_MAX[kind], raw),
+    YIELD_PICKUP_BASE[kind],
+    Math.min(YIELD_PICKUP_MAX[kind], raw),
   );
 }
 
-/** Flat protocol fee on the USDC notional, by kind. */
+/**
+ * Flat protocol fee on the USDC notional, by kind. These are the
+ * "full-duration" ceilings; the actual charge is scaled down by
+ * `durationScale(days)` so short-dated baskets don't pay the same
+ * absolute fee as a year-long position. Without scaling, 25 bps on a
+ * 12-day basket annualises to ~760% APY drag, which is silly for a
+ * two-week product.
+ */
 const PROTOCOL_FEE_BPS: Record<TrancheKind, number> = {
   senior: 25,
   mezzanine: 35,
   junior: 50,
 };
+
+/**
+ * Duration-scaling factor applied to fixed-bps fees (protocol take,
+ * MM base/delta-hedge/adverse-selection/liquidity). Scales with
+ * sqrt(days / DURATION_REF_DAYS) so short baskets pay proportionally
+ * less fixed overhead:
+ *
+ *   12 days  → sqrt(12/90)  ≈ 0.37  (37% of full fee)
+ *   30 days  → sqrt(30/90)  ≈ 0.58  (58%)
+ *   65 days  → sqrt(65/90)  ≈ 0.85  (85%)
+ *   90+ days → 1.00                (full fee; this is the "reference")
+ *
+ * The floor keeps the fee from collapsing on 1-day legs; the ceiling
+ * prevents multi-year baskets from over-paying vs the calibrated
+ * reference. Sqrt scaling (rather than linear) matches how dealer
+ * hedging cost and inventory carry empirically scale with holding
+ * period — a 4× longer hold doesn't cost 4× more to manage, it costs
+ * about 2× more.
+ */
+const DURATION_REF_DAYS = 90;
+const DURATION_SCALE_FLOOR = 0.30;
+function durationScale(daysLeft: number): number {
+  const d = Math.max(1, daysLeft);
+  return Math.max(
+    DURATION_SCALE_FLOOR,
+    Math.min(1, Math.sqrt(d / DURATION_REF_DAYS)),
+  );
+}
 
 /**
  * Hard per-order ceiling in USDC, keyed by (tier, kind). Beyond these
@@ -432,17 +525,32 @@ function clamp01(x: number, floor = 0.01, ceil = 0.99): number {
 /**
  * Produce the three tranche slices [0..K1], [K1..K2], [K2..1] from a
  * basket's (mu, sigma). Tier-agnostic percentile placement.
+ *
+ * The minimum-gap enforcement needs to handle both extremes of NAV:
+ *   • NAV near 1: clamp01 would pin both k1 and k2 at the 0.99 ceil,
+ *     producing a zero-width mezz. We push k1 DOWN to 0.99 - MIN_GAP
+ *     so mezz still has a MIN_GAP slice and junior has a [0.99, 1] slice.
+ *   • NAV near 0: clamp01 pins k1 at the 0.01 floor. Pushing k2 up by
+ *     MIN_GAP to 0.02 stays within the ceiling, so the simple case works.
  */
+const MIN_TRANCHE_GAP = 0.01;
 function attachmentPoints(stats: BasketStats): {
   k1: number;
   k2: number;
 } {
-  let k1 = stats.nav + ATTACH_K1_SIGMA * stats.sigma;
-  let k2 = stats.nav + ATTACH_K2_SIGMA * stats.sigma;
-  k1 = clamp01(k1);
-  k2 = clamp01(k2);
-  // Enforce a minimum 1pp gap so every tranche has non-zero width.
-  if (k2 <= k1 + 0.01) k2 = clamp01(k1 + 0.01);
+  let k1 = clamp01(stats.nav + ATTACH_K1_SIGMA * stats.sigma);
+  let k2 = clamp01(stats.nav + ATTACH_K2_SIGMA * stats.sigma);
+  if (k2 - k1 < MIN_TRANCHE_GAP) {
+    if (k1 + MIN_TRANCHE_GAP <= 0.99) {
+      // Room to push k2 up (the common case for mid/low NAV).
+      k2 = k1 + MIN_TRANCHE_GAP;
+    } else {
+      // NAV at/above the ceiling: pull k1 down instead so the junior
+      // slice still sits on top of the basket outcome axis.
+      k2 = 0.99;
+      k1 = Math.max(0.01, k2 - MIN_TRANCHE_GAP);
+    }
+  }
   return { k1, k2 };
 }
 
@@ -549,8 +657,13 @@ function mmSpreadBps(
   delta: number,
   gamma: number,
 ): TrancheFeeDecomp["mmComponents"] & { totalBps: number } {
+  // Duration scale applied to the FIXED-horizon components so short
+  // baskets pay proportionally less static overhead (see durationScale
+  // docstring above).
+  const durScale = durationScale(stats.daysLeft);
+
   // Base MM spread: every book charges something just to quote.
-  const baseBps = 10;
+  const baseBps = 10 * durScale;
 
   // Delta-hedge cost: proportional to |delta|. A tranche call-spread's
   // per-$1-face delta can mathematically exceed 1 for very narrow
@@ -558,27 +671,35 @@ function mmSpreadBps(
   // MM can never need to hedge more than 1 unit of exposure per $1
   // notional — a 100% hedge is the hard ceiling. Clamp |Δ| to [0, 1]
   // to prevent narrow mezz slices from blowing the spread out.
+  // Duration-scaled because the dealer only has to carry the hedge
+  // for the basket's lifetime.
   const deltaClamped = Math.min(1, Math.abs(delta));
-  const deltaHedgeBps = 60 * deltaClamped;
+  const deltaHedgeBps = 60 * deltaClamped * durScale;
 
   // Gamma-hedge cost: proportional to gamma × σ² × sqrt(τ). Gamma for
   // a tranche call-spread under N(μ,σ²) scales as ~1/σ in narrow
   // slices, so the σ² factor collapses the σ dependence back to σ ×
   // slice-narrowness. The √τ scaling reflects the number of times the
-  // book must rebalance over the basket's lifetime.
+  // book must rebalance over the basket's lifetime — so gammaHedge is
+  // NOT additionally multiplied by durationScale (the √τ is already a
+  // duration scaling).
   const tauYears = Math.max(1 / 365, stats.daysLeft / 365);
   const gammaHedgeBps = 200 * gamma * stats.sigma * stats.sigma * Math.sqrt(tauYears);
 
   // Adverse-selection: a concentrated roster of informed legs is
   // easier for a directional trader to front-run. Scale inversely
-  // with sqrt(effective leg count).
-  const adverseSelectionBps = 80 / Math.sqrt(Math.max(1, stats.effLegCount));
+  // with sqrt(effective leg count). Duration-scaled because longer-
+  // dated baskets give informed flow more time to accumulate.
+  const adverseSelectionBps =
+    (80 / Math.sqrt(Math.max(1, stats.effLegCount))) * durScale;
 
   // Liquidity penalty: kicks in when the weakest leg's lifetime volume
   // is thin. Calibrated so $10k weakest ≈ +200 bps, $100k ≈ +63 bps,
-  // $1M ≈ +20 bps.
+  // $1M ≈ +20 bps. Duration-scaled because the dealer only needs to
+  // warehouse the thin-book risk for τ, not indefinitely.
   const liquidityPenaltyBps =
-    200 / Math.sqrt(Math.max(10_000, stats.weakestLegVolumeUsd) / 10_000);
+    (200 / Math.sqrt(Math.max(10_000, stats.weakestLegVolumeUsd) / 10_000)) *
+    durScale;
 
   const kindMultiplier = MM_KIND_MULT[kind];
 
@@ -678,75 +799,114 @@ function priceOneTranche(
   const capitalAtRisk = Math.max(0, 1 - fairPrice);
 
   const horizonYears = Math.max(1 / 365, stats.daysLeft / 365);
-  // 30-day floor on annualisation so short-horizon products don't blow
-  // up the displayed APY (a 25% return over 12 days becomes 760% APY
-  // under raw 1/τ — mathematically correct, practically useless).
+  // 30-day floor when annualising APY headline numbers so short-horizon
+  // products don't produce ~10,000% APYs from tiny per-period returns.
+  // The discount used for pricing itself uses the true horizon — only
+  // the displayed APY is floored.
   const annualizationYears = Math.max(30 / 365, horizonYears);
 
   // -----------------------------------------------------------------
-  // Target-APY inverse pricing.
+  // Fair-anchored pricing with yield pickup.
   //
-  // Given a target APY for this (kind, σ), derive the ask price that
-  // realises that APY at face redemption:
-  //   target_price = 1 / (1 + target_apy · τ_eff)
+  //   ask = fair / (1 + target_apy · τ)     (floored at DISCOUNT_FLOOR × fair)
   //
-  // The ask is quoted directly at `target_price`, regardless of fair.
-  // For safe senior tranches, target_price may sit BELOW fair (the
-  // MM technically loses EV on senior alone) — that is tolerated here
-  // because the mezz + junior spreads in the 3-tranche stack more
-  // than compensate: total weighted ask > E[basket payoff] across
-  // every (tier, σ) cell we price, so the protocol stack is
-  // profitable as a whole. This lets us advertise clean DeFi APYs on
-  // senior (3-15%) instead of the 0.1% structural yield that would
-  // otherwise bind.
+  // Present-value discounting: the user pays `ask` today for an
+  // expected payoff of `fair` at maturity, earning exactly
+  // `target_apy` annualised regardless of horizon. The floor caps the
+  // maximum effective APY on very long-dated lottery tranches.
+  //
+  // This replaces the old target-APY inverse pricing
+  //   ask = 1 / (1 + target_apy · τ)
+  // which ignored fair value entirely and produced asks 20–200× above
+  // fair on OTM tranches — e.g. a LOW-tier junior with fair $0.004
+  // was quoted at $0.94 with a fictional +75% APY, actually
+  // guaranteeing the user a ~99.6% expected loss.
   // -----------------------------------------------------------------
-  const targetApy = targetApyFor(kind, stats.sigma);
-  const targetPrice = 1 / (1 + targetApy * annualizationYears);
-  const marketPrice = Math.max(0.0005, Math.min(0.9999, targetPrice));
+  const targetApy = yieldPickupFor(kind, stats.sigma);
+  const pvDiscount = 1 / (1 + targetApy * horizonYears);
+  const discountMult = Math.max(DISCOUNT_FLOOR, pvDiscount);
+  const rawAsk = fairPrice * discountMult;
+  // Ask floor is PROPORTIONAL to fair so the `ask ≤ fair` invariant
+  // holds even for microscopic-fair tranches (e.g. a junior sitting
+  // ≥5σ above NAV where fair rounds to ~0). For well-behaved tranches
+  // (fair ≥ 0.0005) the floor is the normal 0.0005 token-price floor.
+  const askFloor = Math.min(0.0005, Math.max(0, fairPrice));
+  const marketPrice = Math.max(
+    askFloor,
+    Math.min(0.9999, Math.max(0, rawAsk)),
+  );
 
   const attachProbability = stdNormalSurv((attach - stats.nav) / stats.sigma);
   const fullPayProbability = stdNormalSurv((detach - stats.nav) / stats.sigma);
 
-  // APY = yield-to-maturity at face (annualised with the 30-day floor
-  // above). By construction this equals `targetApy` on risky tranches
-  // and drops to the structural yield on safe tranches.
-  const periodReturn = 1 / marketPrice - 1;
-  const expectedApyPct = (periodReturn / annualizationYears) * 100;
-  // Honest risk-neutral expected annualised return = (fair - ask) / ask
-  // annualised on the TRUE horizon. Always ≤ `expectedApyPct`; equals
-  // it only when there's no spread (ask == fair on safe tranches).
-  const expectedReturnApyPct =
-    ((fairPrice / marketPrice - 1) / horizonYears) * 100;
+  // Headline APY is YIELD-TO-MATURITY at full face redemption, lightly
+  // risk-adjusted by clamping against the mean-based expected return:
+  //   ytm_apy  = (1 / ask − 1) / max(30 days, τ) · 100
+  //   mean_apy = (fair / ask − 1) / max(30 days, τ) · 100
+  //   apy      = min(ytm_apy, LOTTERY_UPSIDE_CAP · mean_apy)
+  //
+  // Without the cap, deep-OTM junior tranches (where P[full pay] ≈ 0)
+  // quote YTMs in the tens of thousands of percent — mathematically
+  // correct (that IS the return if face redemption happens) but
+  // visually feral in a yield table. The multiplicative cap at 5×
+  // mean keeps the display on a sensible ladder while still showing
+  // meaningful lottery upside above the pure expected return.
+  //
+  // Because asks are fair-anchored, this is not the old engine bug:
+  // the clamped APY always sits between the honest mean return and
+  // the raw YTM, both of which are correct numbers. The cap is purely
+  // a display compression.
+  //
+  // Guards: ask and fair must be above a small epsilon; if fair is
+  // effectively zero we report 0% APY.
+  const FAIR_EPSILON = 1e-9;
+  const canQuote =
+    fairPrice > FAIR_EPSILON && marketPrice > FAIR_EPSILON;
+  const ytmRaw = canQuote ? 1 / marketPrice - 1 : 0;
+  const expectedReturnRaw = canQuote ? fairPrice / marketPrice - 1 : 0;
+  // YTM uses the 30-day floor (display smoothing on short baskets).
+  const ytmApyPct = (ytmRaw / annualizationYears) * 100;
+  // Mean-return used as the cap benchmark uses the TRUE horizon, so
+  // short-horizon senior tranches (12-14d) can still show their
+  // honest 10–15% YTM without being clamped down to a tiny mean
+  // number. This is the same number exposed via `expectedReturnApyPct`.
+  const meanApyTrueTau = (expectedReturnRaw / horizonYears) * 100;
+  const LOTTERY_UPSIDE_CAP = 5;
+  const expectedApyPct = Math.min(
+    ytmApyPct,
+    Math.max(meanApyTrueTau, LOTTERY_UPSIDE_CAP * meanApyTrueTau),
+  );
+  // `expectedReturnApyPct` is the MEAN-based risk-neutral expected
+  // annualised return on the TRUE horizon (no 30-day floor). Shown
+  // on the detail page sub-line.
+  const expectedReturnApyPct = meanApyTrueTau;
 
   // -----------------------------------------------------------------
-  // Fee decomposition.
+  // Fee decomposition (per-order fees actually deducted from USDC).
   //
-  // The decomposed MM spread and underwriting premium (computed from
-  // greeks, adverse selection, liquidity, CVaR – all the real hedging
-  // cost components) are informational: they describe WHY the MM
-  // charges what they do. We split the REALISED ask-over-fair spread
-  // proportionally between MM and UW so the user-facing rows always
-  // sum to the actual cost.
+  // `mmComponents` and `underwritingComponents` produce the dealer's
+  // hedging cost and capital-at-risk premium from the tranche greeks,
+  // liquidity, and horizon. These are the real frictions of offering
+  // the tranche and we charge them on top of the fair-anchored ask so
+  // the fee line items are populated honestly:
   //
-  // IMPORTANT: bps are expressed as a fraction of the ASK price, not
-  // fair. That is: if ask = $0.80 and fair = $0.60, the MM premium is
-  // 2500 bps = 25% of the ask (i.e. a quarter of every dollar the user
-  // pays goes to MM/UW margin). This bounds the display at 10_000 bps
-  // on even the most lottery-like tranches (where ask ≫ fair) and is
-  // directly interpretable as "fraction of USD notional absorbed by
-  // the premium".
+  //   mmSpreadBps      = MM.totalBps   capped at MM_SPREAD_CAP_BPS
+  //   underwritingBps  = UW.totalBps   capped at UW_CAP_BPS
+  //
+  // The caps exist because UW.totalBps in particular scales linearly
+  // with `capitalAtRisk × horizon` and can balloon to 60% of notional
+  // on a 1-year junior — a truthful representation of annualised
+  // capital cost, but nonsensical as a single-order fee. Capping it
+  // at 200 bps keeps the deduction on a realistic per-trade scale
+  // while still producing tier-appropriate numbers (senior ~20 bps,
+  // junior ~200 bps).
   // -----------------------------------------------------------------
   const mm = mmSpreadBps(stats, kind, delta, gamma);
   const uw = underwritingBps(stats, kind, capitalAtRisk, cvar);
-  const realisedSpreadBps =
-    marketPrice > 0
-      ? Math.max(0, (1 - fairPrice / marketPrice) * 10_000)
-      : 0;
-  const mmWeight = mm.totalBps;
-  const uwWeight = uw.totalBps;
-  const weightTotal = Math.max(1, mmWeight + uwWeight);
-  const mmSpreadRealisedBps = realisedSpreadBps * (mmWeight / weightTotal);
-  const uwRealisedBps = realisedSpreadBps * (uwWeight / weightTotal);
+  const MM_SPREAD_CAP_BPS = 300; // 3% per-order dealer spread ceiling
+  const UW_CAP_BPS = 200;        // 2% per-order capital-at-risk ceiling
+  const mmSpreadRealisedBps = Math.min(MM_SPREAD_CAP_BPS, Math.max(0, mm.totalBps));
+  const uwRealisedBps = Math.min(UW_CAP_BPS, Math.max(0, uw.totalBps));
 
   const caps = capacityFor(stats, kind, width);
 
@@ -823,10 +983,23 @@ export function quoteTrancheOrder(
   quote: TrancheQuote,
   usdcAmount: number,
   basketSlippageBps: number,
+  ctx?: {
+    stats?: BasketStats;
+    hedgeability?: BasketHedgeability;
+  },
 ): OrderQuote {
-  const protocolFeeBps = PROTOCOL_FEE_BPS[quote.kind];
-  const mmSpreadBps = quote.fees.mmSpreadBps;
-  const underwritingBps = quote.fees.underwritingBps;
+  // Protocol fee inherits the same duration scaling as the static
+  // MM components so a 12-day basket doesn't pay the same absolute
+  // bps as a 330-day one. The `durationScale` floor (30%) keeps a
+  // nominal take on ultra-short legs.
+  const durScale = ctx?.stats
+    ? durationScale(ctx.stats.daysLeft)
+    : 1;
+  const protocolFeeBps = PROTOCOL_FEE_BPS[quote.kind] * durScale;
+  // Base MM spread from the static (tranche-level greeks) quote, and
+  // static underwriting cap from the quote's fees object.
+  const baseMmSpreadBps = quote.fees.mmSpreadBps;
+  const baseUnderwritingBps = quote.fees.underwritingBps;
 
   const hedgeDifficulty: Record<TrancheKind, number> = {
     senior: 1.0,
@@ -838,16 +1011,111 @@ export function quoteTrancheOrder(
     basketSlippageBps * hedgeDifficulty[quote.kind],
   );
 
-  // Protocol fee + slippage apply directly to the USDC notional.
-  const netUsdcForFill =
-    usdcAmount *
-    (1 - protocolFeeBps / 10_000 - scaledSlippageBps / 10_000);
-  const tokensOut = Math.max(0, netUsdcForFill / Math.max(0.0001, quote.marketPrice));
+  // -----------------------------------------------------------------
+  // Size-dependent risk (trading-desk style).
+  //
+  // When the caller provides live hedgeability data, we add on top of
+  // the static MM spread:
+  //   • marketImpact  — CLOB-walk cost, sqrt(size/depth)
+  //   • warehouse     — cost of the unhedgeable tail the desk carries
+  //   • inventory     — residual vega/theta on a fully-hedged position
+  //   • concentration — penalty for sparse baskets
+  //
+  // The market-impact and slippage pieces are semantically overlapping
+  // (both reflect CLOB-walk cost), but they're computed from different
+  // inputs: `basketSlippageBps` comes from an actual CLOB walk on the
+  // tranche's hedge notional, whereas `marketImpactBps` is a
+  // Kyle-lambda model on the BASKET's hedge capacity. We use the MAX
+  // of the two so whichever is more conservative binds; this avoids
+  // double-charging and also avoids free size on baskets with no live
+  // books.
+  // -----------------------------------------------------------------
+  const hedgeNotional =
+    usdcAmount * Math.max(1e-6, quote.notionalShare);
+  let risk: OrderRisk | undefined;
+  let mmSizeComponentBps = 0;
+  let warehouseBps = 0;
+  let inventoryBps = 0;
+  let concentrationBps = 0;
+  let warehouseFraction = 0;
+  if (ctx?.stats && ctx.hedgeability) {
+    risk = computeOrderRisk(
+      ctx.stats,
+      quote.kind,
+      ctx.hedgeability,
+      hedgeNotional,
+      quote.capitalAtRisk,
+    );
+    // MarketImpact vs explicit slippage: take the max, not sum.
+    mmSizeComponentBps = Math.max(
+      0,
+      risk.marketImpactBps - scaledSlippageBps,
+    );
+    warehouseBps = risk.warehouseBps;
+    inventoryBps = risk.inventoryBps;
+    concentrationBps = risk.concentrationBps;
+    warehouseFraction = risk.warehouseFraction;
+  }
+
+  // Combined MM spread: base static component + size-dependent impact
+  // + inventory + concentration. Capped so ridiculous orders still
+  // produce a finite number (the position cap below is what actually
+  // blocks oversize orders — the cap here is just a display ceiling).
+  const MM_BPS_HARD_CAP = 2_500; // 25% ceiling on size-dependent MM
+  const mmSpreadBps = Math.min(
+    MM_BPS_HARD_CAP,
+    baseMmSpreadBps +
+      mmSizeComponentBps +
+      inventoryBps +
+      concentrationBps,
+  );
+
+  // Warehouse premium stacks on top of the static underwriting bps.
+  // Capped at 10% so a fully-warehoused junior doesn't eat the order.
+  const UW_BPS_HARD_CAP = 1_000;
+  const underwritingBps = Math.min(
+    UW_BPS_HARD_CAP,
+    baseUnderwritingBps + warehouseBps,
+  );
+
+  // All four fee components are deducted from the USDC notional before
+  // computing tokens-out, so the displayed breakdown (protocol + MM +
+  // UW + slippage) sums to the actual cost the user bears. Total fees
+  // are clamped to 90% so we never produce a negative fill.
+  const rawFeeFraction =
+    (protocolFeeBps +
+      mmSpreadBps +
+      underwritingBps +
+      scaledSlippageBps) /
+    10_000;
+  const clampedFeeFraction = Math.min(0.9, Math.max(0, rawFeeFraction));
+  const netUsdcForFill = usdcAmount * (1 - clampedFeeFraction);
+  const tokensOut = Math.max(
+    0,
+    netUsdcForFill / Math.max(0.0001, quote.marketPrice),
+  );
 
   const totalFeeBps =
     protocolFeeBps + mmSpreadBps + underwritingBps + scaledSlippageBps;
 
-  const capacityUsdc = Math.min(quote.maxOrderUsdc, quote.depthCapUsdc);
+  // Position cap: use the live hedge-depth-derived cap when available,
+  // otherwise fall back to the static (tier, kind) table + depth cap.
+  let capacityUsdc: number;
+  if (ctx?.stats && ctx.hedgeability) {
+    const cap = computeMaxPositionUsdc(
+      ctx.stats,
+      quote.kind,
+      ctx.hedgeability,
+    );
+    // Divide by notionalShare so `capacityUsdc` refers to the user's
+    // USDC INPUT, not the MM's hedge notional. A junior tranche with
+    // 3% notional share and a $10k MM hedge cap implies a $333k max
+    // USDC clip, because each user dollar only puts $0.03 of hedge
+    // pressure on the book.
+    capacityUsdc = cap.maxOrderUsdc / Math.max(0.01, quote.notionalShare);
+  } else {
+    capacityUsdc = Math.min(quote.maxOrderUsdc, quote.depthCapUsdc);
+  }
   const overCapacity = usdcAmount > capacityUsdc;
 
   return {
@@ -859,6 +1127,8 @@ export function quoteTrancheOrder(
     totalFeeBps,
     capacityUsdc,
     overCapacity,
+    risk,
+    warehouseFraction,
   };
 }
 
