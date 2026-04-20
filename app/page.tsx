@@ -1772,16 +1772,21 @@ function cameraPath(progress: number) {
 }
 
 /**
- * Solid planet rendered on a canvas.
+ * Constellation hero. 81 stars split 27/27/27 across three tiers — teal
+ * (high-conviction 90%+), amber (balanced 40–50%), coral (long-tail <10%).
  *
- * Layers, painted each frame at the planet centre + scroll-driven radius:
- *   1. Atmospheric halo — large soft teal glow behind the sphere.
- *   2. Sphere body — radial gradient shaded as a 3D ball (light from top-left).
- *   3. Terminator wash — cool dark blue on the night side for depth.
- *   4. Surface texture — rotating procedural blotches clipped to the sphere.
- *   5. Limb-darkening ring — thin darker edge giving the planet a real rim.
- *   6. Specular highlight — crisp bloom toward the light source.
- *   7. Faint rim halo — outer teal line that whispers "atmosphere".
+ * Scroll choreography:
+ *   • p=0.00–0.12  plain ball of stars, no lines, hero copy readable
+ *   • p=0.12–0.30  a few constellation edges fade in (random starchart)
+ *   • p=0.22–0.62  stars lerp from Fibonacci sphere → 2D logo arcs
+ *   • p=0.55–0.78  ring arcs fade in, the Senthos rings logo resolves
+ *   • p=0.72–0.88  rings disperse and fade out
+ *   • p=0.88–1.00  Layer B tagline blooms in to an empty stage
+ *
+ * The end pose traces the real Senthos logo — three concentric arcs
+ * opening on the left, each tapering to a terminator dot at the upper-left
+ * end. Global rotation gracefully aligns face-on as the morph completes
+ * and a slow in-plane spin keeps the logo alive.
  */
 function ParticlePlanet({ scrollProgressRef }: { scrollProgressRef: React.MutableRefObject<number> }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1792,42 +1797,96 @@ function ParticlePlanet({ scrollProgressRef }: { scrollProgressRef: React.Mutabl
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Pre-bake surface features as unit-vector positions on a sphere so we
-    // can rotate them around a tilted axis every frame — proper 3D
-    // parallax instead of flat lat/lon stripes.
-    type Feature = {
-      x0: number; y0: number; z0: number; // static unit-sphere coords
-      r: number;                           // size in sphere-radius units
-      tint: string;
-      alpha: number;
-      driftSpeed: number;                  // scales with spin
+    type Star = {
+      x0: number; y0: number; z0: number;  // Fibonacci sphere pose
+      xR: number; yR: number;              // 2D arc pose (z=0 in logo plane)
+      tier: 0 | 1 | 2;
+      color: string;
+      size: number;
+      isTerminator: boolean;               // upper-left arc end — rendered larger
+      twSpeed: number;
+      twPhase: number;
+      sphereLink: number;                  // one forward neighbour; -1 = none
     };
-    const makeFeature = (size: [number, number], alpha: [number, number], drift: [number, number], tint: string): Feature => {
-      const lon = Math.random() * Math.PI * 2;
-      const lat = (Math.random() - 0.5) * Math.PI * 0.92;
-      return {
-        x0: Math.cos(lat) * Math.sin(lon),
-        y0: Math.sin(lat),
-        z0: Math.cos(lat) * Math.cos(lon),
-        r: size[0] + Math.random() * (size[1] - size[0]),
-        tint,
-        alpha: alpha[0] + Math.random() * (alpha[1] - alpha[0]),
-        driftSpeed: drift[0] + Math.random() * (drift[1] - drift[0]),
-      };
-    };
-    // More + larger continents in two tones gives the body real "land vs.
-    // ocean" contrast so it reads as a planet rather than a flat sphere.
-    const CONTINENTS: Feature[] = [
-      ...Array.from({ length: 14 }, () =>
-        makeFeature([0.28, 0.55], [0.7, 0.92], [1, 1], "#021412")
-      ),
-      ...Array.from({ length: 12 }, () =>
-        makeFeature([0.18, 0.34], [0.55, 0.78], [1, 1], "#0e7a70")
-      ),
+
+    const STAR_COUNT = 81;
+    const PER_TIER = STAR_COUNT / 3;
+
+    // Arc geometry matching /senthos_full.png: three concentric arcs with a
+    // gap on the left, outer tier = teal, inner tier = coral. Start and end
+    // angles are in canvas convention (0 = right, +π/2 = down).
+    const TIER_COLORS = ["#2dd4bf", "#fbbf24", "#fb923c"];
+    const TIER_CONFIG = [
+      { radius: 1.38, start: -Math.PI * 5 / 6, end:  Math.PI * 5 / 6 }, // outer teal
+      { radius: 0.98, start: -Math.PI * 3 / 4, end:  Math.PI * 3 / 4 }, // middle amber
+      { radius: 0.58, start: -Math.PI * 2 / 3, end:  Math.PI * 2 / 3 }, // inner coral
     ];
-    const CLOUDS: Feature[] = Array.from({ length: 14 }, () =>
-      makeFeature([0.08, 0.16], [0.18, 0.32], [1.2, 1.6], "#dffaf5")
-    );
+
+    let seed = 2_198_317;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+
+    const stars: Star[] = [];
+    const phi = Math.PI * (Math.sqrt(5) - 1);
+
+    for (let i = 0; i < STAR_COUNT; i++) {
+      // Sphere pose
+      const sy = 1 - (i / (STAR_COUNT - 1)) * 2;
+      const sr = Math.sqrt(Math.max(0, 1 - sy * sy));
+      const stheta = phi * i;
+      const sx = Math.cos(stheta) * sr;
+      const sz = Math.sin(stheta) * sr;
+
+      const tier = (i % 3) as 0 | 1 | 2;
+      const k = Math.floor(i / 3);
+      const cfg = TIER_CONFIG[tier];
+      const arcT = k / (PER_TIER - 1);
+      const angle = cfg.start + arcT * (cfg.end - cfg.start);
+      const xR = Math.cos(angle) * cfg.radius;
+      const yR = Math.sin(angle) * cfg.radius;
+
+      stars.push({
+        x0: sx, y0: sy, z0: sz,
+        xR, yR,
+        tier,
+        color: TIER_COLORS[tier],
+        size: 0.9 + rand() * 1.6,
+        isTerminator: k === 0, // upper-left arc end gets the big dot
+        twSpeed: 0.45 + rand() * 1.55,
+        twPhase: rand() * Math.PI * 2,
+        sphereLink: -1,
+      });
+    }
+
+    // Sparse constellation edges — every other star gets a single short
+    // forward edge to its nearest next neighbour. Keeps it "a few lines"
+    // instead of a mesh.
+    const MAX_EDGE2 = 0.30 * 0.30;
+    for (let i = 0; i < STAR_COUNT; i += 2) {
+      let bestJ = -1;
+      let bestD2 = MAX_EDGE2;
+      for (let j = i + 1; j < STAR_COUNT; j++) {
+        const dx = stars[i].x0 - stars[j].x0;
+        const dy = stars[i].y0 - stars[j].y0;
+        const dz = stars[i].z0 - stars[j].z0;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < bestD2) { bestD2 = d2; bestJ = j; }
+      }
+      stars[i].sphereLink = bestJ;
+    }
+
+    // Ring-phase "next along arc" per star. Because k = floor(i/3), naturally
+    // ordered within each tier. Terminator k=0 links to k=1 so the arc draws
+    // continuously from the upper-left terminator around to the lower-left tail.
+    const ringNext: number[] = new Array(STAR_COUNT).fill(-1);
+    const tierGroups: number[][] = [[], [], []];
+    for (let i = 0; i < STAR_COUNT; i++) tierGroups[stars[i].tier].push(i);
+    for (const g of tierGroups) {
+      for (let k = 0; k < g.length - 1; k++) ringNext[g[k]] = g[k + 1];
+      // no wraparound — arcs are open on the left
+    }
 
     let dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     let W = 0, H = 0;
@@ -1842,149 +1901,200 @@ function ParticlePlanet({ scrollProgressRef }: { scrollProgressRef: React.Mutabl
     resize();
     window.addEventListener("resize", resize);
 
+    const smooth = (e0: number, e1: number, x: number) => {
+      const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+      return t * t * (3 - 2 * t);
+    };
+
     let raf = 0;
     const t0 = performance.now();
 
+    type Proj = { x: number; y: number; z: number; size: number; color: string; alpha: number; alphaRaw: number; isTerm: boolean };
+    const projected: Proj[] = new Array(STAR_COUNT);
+
     const render = () => {
       const now = performance.now();
-      const dt = (now - t0) / 1000;
+      const t = (now - t0) / 1000;
       const progress = Math.max(0, Math.min(1, scrollProgressRef.current));
 
       ctx.clearRect(0, 0, W, H);
 
       const minDim = Math.min(W, H);
-      // Sphere sits centered in the lower portion of the viewport with
-      // breathing room above and below — doesn't graze the footer.
-      const R = minDim * (0.26 + progress * 0.2);
+      const baseR = minDim * 0.22;
       const cx = W / 2;
-      const cy = H * 0.66;
+      // cy glides from below the hero text up to the viewport centre as the
+      // morph takes over, so the logo becomes the centrepiece instead of a
+      // decoration glued to the bottom of the frame.
+      const centring = smooth(0.10, 0.48, progress);
+      const cy = H * (0.72 - centring * 0.22);
 
-      // Spin around the tilted axis. Axial tilt stays fixed per frame — it's
-      // the rotation that sells the 3D effect, not the tilt itself.
-      const tilt = 0.38; // ~22° axial tilt, Earth-ish
-      const cosT = Math.cos(tilt), sinT = Math.sin(tilt);
-      const spin = dt * 0.22 + progress * 0.6;
+      // ---- Scroll envelopes (tighter so the logo resolves faster) ----
+      const morph      = smooth(0.25, 0.50, progress);
+      const edgeFadeIn = smooth(0.10, 0.20, progress);
+      const edgeFadeOut = smooth(0.28, 0.44, progress);
+      const edgeVis    = edgeFadeIn * (1 - edgeFadeOut);
+      const arcVis     = smooth(0.42, 0.55, progress);
+      // The moment the morph completes and the arcs resolve, the regular
+      // constellation dots dissolve so the frame snaps to the pure logo
+      // (three arcs + their terminator dots + centre ring).
+      const dotFade    = smooth(0.50, 0.60, progress);
+      const disperse   = smooth(0.78, 0.90, progress);
+      const bloom      = 1 + smooth(0.0, 0.22, progress) * 0.06;
+      const canvasAlpha = 1 - disperse;
+      const reach      = 1 + disperse * 2.6;
 
-      // ---- 1. Atmospheric halo ----
-      const haloR = R * 2.4;
-      const halo = ctx.createRadialGradient(cx, cy, R * 0.95, cx, cy, haloR);
-      halo.addColorStop(0, "rgba(45, 212, 191, 0.22)");
-      halo.addColorStop(0.35, "rgba(45, 212, 191, 0.08)");
+      // Rotation: 3D yaw+pitch during sphere pose, decaying as morph → 1.
+      // Once the logo forms the composition is locked stationary (no spin).
+      const rotAmp = 1 - morph * 0.95;
+      const yaw   = (t * 0.08 + progress * 0.38) * rotAmp;
+      const pitch = (0.18 + Math.sin(t * 0.05) * 0.04) * rotAmp;
+      const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
+      const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+
+      // ---- Back halo (teal) ----
+      const haloR = baseR * 2.5 * bloom * reach;
+      const haloA = 0.16 * canvasAlpha;
+      const halo = ctx.createRadialGradient(cx, cy, baseR * 0.3, cx, cy, haloR);
+      halo.addColorStop(0, `rgba(45, 212, 191, ${haloA.toFixed(3)})`);
+      halo.addColorStop(0.55, `rgba(45, 212, 191, ${(haloA * 0.3).toFixed(3)})`);
       halo.addColorStop(1, "rgba(45, 212, 191, 0)");
       ctx.fillStyle = halo;
       ctx.fillRect(cx - haloR, cy - haloR, haloR * 2, haloR * 2);
 
-      // ---- 2. Sphere body (lit side: top-left) ----
-      const lightX = cx - R * 0.35;
-      const lightY = cy - R * 0.4;
-      const body = ctx.createRadialGradient(lightX, lightY, R * 0.05, cx, cy, R);
-      body.addColorStop(0, "#a5f3fc");
-      body.addColorStop(0.15, "#2dd4bf");
-      body.addColorStop(0.45, "#0d9488");
-      body.addColorStop(0.75, "#0a3a3a");
-      body.addColorStop(1, "#05080c");
-      ctx.fillStyle = body;
-      ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx.fill();
+      // Warm centre accent — fades out by the time the logo resolves.
+      const warmR = baseR * 1.0 * bloom;
+      const warmA = 0.12 * canvasAlpha * (1 - morph * 0.7);
+      const warm = ctx.createRadialGradient(cx, cy, 0, cx, cy, warmR);
+      warm.addColorStop(0, `rgba(255, 237, 170, ${warmA.toFixed(3)})`);
+      warm.addColorStop(0.6, `rgba(251, 146, 60, ${(warmA * 0.25).toFixed(3)})`);
+      warm.addColorStop(1, "rgba(251, 146, 60, 0)");
+      ctx.fillStyle = warm;
+      ctx.fillRect(cx - warmR, cy - warmR, warmR * 2, warmR * 2);
 
-      // Clip subsequent drawing to the sphere so textures stay inside it.
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx.clip();
+      // ---- Project stars using morph-blended position ----
+      const oneMinusMorph = 1 - morph;
+      for (let i = 0; i < STAR_COUNT; i++) {
+        const s = stars[i];
+        // Lerp sphere (x0, y0, z0) → ring (xR, yR, 0)
+        const mx = s.x0 * oneMinusMorph + s.xR * morph;
+        const my = s.y0 * oneMinusMorph + s.yR * morph;
+        const mz = s.z0 * oneMinusMorph;
 
-      // ---- 3. Terminator (dark side wash) ----
-      const termGrad = ctx.createLinearGradient(
-        cx - R * 0.5, cy - R * 0.5,
-        cx + R * 0.9, cy + R * 0.9,
+        // Yaw around Y, then pitch around X
+        const x1 = mx * cosY + mz * sinY;
+        const z1 = -mx * sinY + mz * cosY;
+        const y1 = my;
+        const y2 = y1 * cosP - z1 * sinP;
+        const z2 = y1 * sinP + z1 * cosP;
+
+        const sx = cx + x1 * baseR * bloom * reach;
+        const sy = cy + y2 * baseR * bloom * reach;
+
+        // Depth alpha, widened domain so ring pose doesn't clip flat.
+        const zn = Math.max(0, Math.min(1, (z2 + 1.4) / 2.8));
+        const twink = 0.72 + (Math.sin(t * s.twSpeed + s.twPhase) + 1) * 0.14;
+        // Terminators are always bright regardless of depth.
+        const depthA = s.isTerminator ? 0.9 : 0.38 + zn * 0.62;
+        // alphaRaw ignores the dot fade-out (used by arcs so they don't
+        // dim when the constellation dots disappear into the final logo).
+        const alphaRaw = depthA * twink * canvasAlpha;
+        const dotMul = s.isTerminator ? 1 : (1 - dotFade);
+        const alpha = alphaRaw * dotMul;
+        // Terminator stars grow bigger as the logo forms.
+        const termBoost = s.isTerminator ? 1 + morph * 1.6 : 1;
+        const size = s.size * (0.55 + zn * 0.5) * termBoost;
+        projected[i] = { x: sx, y: sy, z: z2, size, color: s.color, alpha, alphaRaw, isTerm: s.isTerminator };
+      }
+
+      // ---- Sphere-phase edges (off at p=0, peak mid-transition, off again) ----
+      if (edgeVis > 0.02) {
+        ctx.lineCap = "round";
+        ctx.lineWidth = 0.6;
+        for (let i = 0; i < STAR_COUNT; i++) {
+          const j = stars[i].sphereLink;
+          if (j < 0) continue;
+          const a = projected[i];
+          const b = projected[j];
+          const edgeA = Math.min(a.alpha, b.alpha) * 0.5 * edgeVis;
+          if (edgeA < 0.015) continue;
+          const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+          const hex = Math.round(edgeA * 200).toString(16).padStart(2, "0");
+          grad.addColorStop(0, a.color + hex);
+          grad.addColorStop(1, b.color + hex);
+          ctx.strokeStyle = grad;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        }
+      }
+
+      // ---- Ring arcs (fade in to draw the logo). Uses alphaRaw so the
+      // arcs don't dim when the regular constellation dots fade out. ----
+      if (arcVis > 0.02) {
+        ctx.lineCap = "round";
+        for (let i = 0; i < STAR_COUNT; i++) {
+          const j = ringNext[i];
+          if (j < 0) continue; // no wrap — open arc
+          const a = projected[i];
+          const b = projected[j];
+          const arcA = 0.6 * arcVis * Math.min(a.alphaRaw, b.alphaRaw);
+          if (arcA < 0.02) continue;
+          ctx.strokeStyle = stars[i].color;
+          ctx.lineWidth = 1.4;
+          ctx.globalAlpha = arcA;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      // ---- Stars (back to front) ----
+      const order = Array.from({ length: STAR_COUNT }, (_, i) => i).sort(
+        (i, j) => projected[i].z - projected[j].z
       );
-      termGrad.addColorStop(0, "rgba(0, 0, 0, 0)");
-      termGrad.addColorStop(0.55, "rgba(0, 0, 0, 0.15)");
-      termGrad.addColorStop(1, "rgba(0, 0, 0, 0.75)");
-      ctx.fillStyle = termGrad;
-      ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
-
-      // Draws a feature using a proper tilted-axis 3D rotation so its path
-      // traces an ellipse across the sphere (foreshortened at the limbs).
-      const drawFeature = (f: Feature, extra = 0) => {
-        const s = spin * f.driftSpeed + extra;
-        const cS = Math.cos(s), sS = Math.sin(s);
-        // 1. Spin around Y axis (the planet's own rotation)
-        const x1 = f.x0 * cS + f.z0 * sS;
-        const y1 = f.y0;
-        const z1 = -f.x0 * sS + f.z0 * cS;
-        // 2. Axial tilt around Z axis (north pole leans)
-        const x2 = x1 * cosT - y1 * sinT;
-        const y2 = x1 * sinT + y1 * cosT;
-        const z2 = z1;
-        // Cull back hemisphere
-        if (z2 <= 0) return;
-        const sx = cx + x2 * R;
-        const sy = cy + y2 * R;
-        // Foreshortening + soft edge fade as it reaches the limb.
-        const edge = Math.min(1, z2 * 2.2);
-        const screenR = f.r * R * (0.35 + 0.65 * z2);
-        const a = f.alpha * edge;
-        const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, screenR);
-        const hex = (v: number) => Math.max(0, Math.min(255, Math.floor(v * 255))).toString(16).padStart(2, "0");
-        grad.addColorStop(0, f.tint + hex(a));
-        grad.addColorStop(0.7, f.tint + hex(a * 0.45));
-        grad.addColorStop(1, f.tint + "00");
-        ctx.fillStyle = grad;
+      for (const idx of order) {
+        const p = projected[idx];
+        if (p.alpha < 0.02) continue;
+        // Halo — terminators get a bigger, brighter glow so they read as dots.
+        const glowMul = p.isTerm ? 6.0 : 4.5;
+        const glowR = p.size * glowMul;
+        const glowA = p.alpha * (p.isTerm ? 0.75 : 0.55);
+        const gg = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowR);
+        gg.addColorStop(0, `${p.color}${Math.round(glowA * 220).toString(16).padStart(2, "0")}`);
+        gg.addColorStop(1, `${p.color}00`);
+        ctx.fillStyle = gg;
         ctx.beginPath();
-        ctx.arc(sx, sy, screenR, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, glowR, 0, Math.PI * 2);
         ctx.fill();
-      };
+        // Crisp core
+        ctx.globalAlpha = Math.min(1, p.alpha);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+        // White kernel on the brighter stars / terminators
+        if (p.isTerm || (p.size > 1.6 && p.alpha > 0.55)) {
+          ctx.globalAlpha = Math.min(1, p.alpha * 0.9);
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 0.35, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.globalAlpha = 1;
 
-      // ---- 4a. Continents (dark landmasses) ----
-      for (const c of CONTINENTS) drawFeature(c);
-
-      // ---- 4b. Clouds (drift a touch faster than the surface) ----
-      for (const c of CLOUDS) drawFeature(c, dt * 0.05);
-
-      // ---- 4c. Polar ice caps ----
-      // North pole (top of sphere)
-      const northCap = ctx.createRadialGradient(cx, cy - R * 0.85, 0, cx, cy - R * 0.55, R * 0.55);
-      northCap.addColorStop(0, "rgba(233, 252, 255, 0.78)");
-      northCap.addColorStop(0.6, "rgba(180, 235, 245, 0.25)");
-      northCap.addColorStop(1, "rgba(233, 252, 255, 0)");
-      ctx.fillStyle = northCap;
-      ctx.fillRect(cx - R, cy - R, R * 2, R * 0.9);
-      // South pole (bottom)
-      const southCap = ctx.createRadialGradient(cx, cy + R * 0.85, 0, cx, cy + R * 0.55, R * 0.55);
-      southCap.addColorStop(0, "rgba(233, 252, 255, 0.55)");
-      southCap.addColorStop(0.6, "rgba(180, 235, 245, 0.18)");
-      southCap.addColorStop(1, "rgba(233, 252, 255, 0)");
-      ctx.fillStyle = southCap;
-      ctx.fillRect(cx - R, cy + R * 0.1, R * 2, R * 0.9);
-
-      // ---- 5. Limb darkening: subtle dark ring just inside the edge ----
-      const limb = ctx.createRadialGradient(cx, cy, R * 0.82, cx, cy, R);
-      limb.addColorStop(0, "rgba(0, 0, 0, 0)");
-      limb.addColorStop(1, "rgba(0, 0, 0, 0.5)");
-      ctx.fillStyle = limb;
-      ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
-
-      // ---- 6. Specular highlight ----
-      const specR = R * 0.45;
-      const specX = cx - R * 0.3;
-      const specY = cy - R * 0.35;
-      const spec = ctx.createRadialGradient(specX, specY, 0, specX, specY, specR);
-      spec.addColorStop(0, "rgba(255, 255, 255, 0.35)");
-      spec.addColorStop(0.4, "rgba(165, 243, 252, 0.12)");
-      spec.addColorStop(1, "rgba(255, 255, 255, 0)");
-      ctx.fillStyle = spec;
-      ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
-
-      ctx.restore();
-
-      // ---- 7. Outer rim halo (atmosphere) ----
-      ctx.strokeStyle = "rgba(165, 243, 252, 0.35)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(cx, cy, R + 1, 0, Math.PI * 2);
-      ctx.stroke();
+      // ---- Logo centre glyph — tiny teal ring at origin, fades in with arcs ----
+      if (arcVis > 0.05) {
+        const centreA = arcVis * canvasAlpha;
+        ctx.strokeStyle = `rgba(45, 212, 191, ${(centreA * 0.8).toFixed(3)})`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, baseR * 0.06, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       raf = requestAnimationFrame(render);
     };
@@ -2169,31 +2279,93 @@ function DriftingStars() {
   );
 }
 
+/**
+ * Decorative tilted orbital rings used as a backdrop in the post-star
+ * section. Rings rotate slowly with a mix of brand colours so scrolling
+ * past feels like drifting through an orbital plane rather than a void.
+ */
+function OrbitalRings({ size = 1200 }: { size?: number }) {
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: "absolute",
+        top: "50%", left: "50%",
+        width: size, height: size,
+        transform: "translate(-50%, -50%) perspective(1000px) rotateX(68deg)",
+        pointerEvents: "none",
+        opacity: 0.85,
+      }}
+    >
+      <style>{`
+        @keyframes sthsRingSpin { to { transform: rotate(360deg); } }
+        @keyframes sthsRingSpinRev { to { transform: rotate(-360deg); } }
+      `}</style>
+      {/* Outer teal ring */}
+      <div style={{
+        position: "absolute", inset: 0,
+        borderRadius: "50%",
+        border: "1px solid rgba(45, 212, 191, 0.25)",
+        boxShadow: "0 0 40px rgba(45, 212, 191, 0.08) inset",
+        animation: "sthsRingSpin 240s linear infinite",
+      }}>
+        <div style={{
+          position: "absolute", top: "-4px", left: "50%",
+          width: 8, height: 8, borderRadius: "50%",
+          background: "#2dd4bf",
+          boxShadow: "0 0 14px rgba(45, 212, 191, 0.7)",
+          transform: "translateX(-50%)",
+        }} />
+      </div>
+      {/* Mid amber ring */}
+      <div style={{
+        position: "absolute", inset: "14%",
+        borderRadius: "50%",
+        border: "1px solid rgba(251, 191, 36, 0.22)",
+        animation: "sthsRingSpinRev 180s linear infinite",
+      }}>
+        <div style={{
+          position: "absolute", top: "-3px", left: "20%",
+          width: 6, height: 6, borderRadius: "50%",
+          background: "#fbbf24",
+          boxShadow: "0 0 10px rgba(251, 191, 36, 0.65)",
+        }} />
+      </div>
+      {/* Inner coral ring */}
+      <div style={{
+        position: "absolute", inset: "28%",
+        borderRadius: "50%",
+        border: "1px solid rgba(251, 146, 60, 0.2)",
+        animation: "sthsRingSpin 130s linear infinite",
+      }} />
+      {/* Faint innermost hint */}
+      <div style={{
+        position: "absolute", inset: "40%",
+        borderRadius: "50%",
+        border: "0.5px dashed rgba(255, 255, 255, 0.08)",
+      }} />
+    </div>
+  );
+}
+
 /** Tiny line-glyph icons used in the footer's social row. Each icon is a
  * minimal abstract suggestion of the platform (crossed strokes for X, an
  * angled-bracket motif for GitHub, etc.) so they read as social links
  * without bundling vendor brand assets. */
 function SocialIcon({ id }: { id: string }) {
-  const p = {
-    width: 14, height: 14, viewBox: "0 0 24 24", fill: "none",
-    stroke: "currentColor", strokeWidth: 1.6,
-    strokeLinecap: "round" as const, strokeLinejoin: "round" as const,
-  };
+  // Filled marks for X and GitHub; line glyph for Docs.
   if (id === "twitter") return (
-    <svg {...p}><path d="M5 5l14 14M19 5L5 19" /></svg>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231 5.451-6.231zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z" />
+    </svg>
   );
   if (id === "github") return (
-    <svg {...p}><path d="M9 17l-3-2 3-3M15 17l3-2-3-3M14 7l-4 12" /></svg>
-  );
-  if (id === "discord") return (
-    <svg {...p}>
-      <path d="M5 6a2 2 0 012-2h10a2 2 0 012 2v9a2 2 0 01-2 2h-5l-4 3v-3H7a2 2 0 01-2-2V6z" />
-      <circle cx="9.5" cy="11" r="0.9" fill="currentColor" stroke="none" />
-      <circle cx="14.5" cy="11" r="0.9" fill="currentColor" stroke="none" />
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path fillRule="evenodd" clipRule="evenodd" d="M12 0C5.37 0 0 5.373 0 12c0 5.303 3.438 9.8 8.205 11.387.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.605-2.665-.305-5.467-1.334-5.467-5.931 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23a11.5 11.5 0 016 0c2.295-1.552 3.3-1.23 3.3-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.627-5.373-12-12-12z" />
     </svg>
   );
   if (id === "docs") return (
-    <svg {...p}>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M7 4h7l4 4v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z" />
       <path d="M14 4v4h4M9 13h6M9 17h4" />
     </svg>
@@ -2202,10 +2374,9 @@ function SocialIcon({ id }: { id: string }) {
 }
 
 const SOCIALS: { id: string; label: string; href: string }[] = [
-  { id: "twitter", label: "X",       href: "https://x.com" },
-  { id: "github",  label: "GitHub",  href: "https://github.com/LuKresXD/SCBC-Hackathon-2026" },
-  { id: "discord", label: "Discord", href: "https://discord.com" },
-  { id: "docs",    label: "Docs",    href: "https://github.com/LuKresXD/SCBC-Hackathon-2026#readme" },
+  { id: "twitter", label: "X",      href: "https://x.com" },
+  { id: "github",  label: "GitHub", href: "https://github.com/LuKresXD/SCBC-Hackathon-2026" },
+  { id: "docs",    label: "Docs",   href: "https://github.com/LuKresXD/SCBC-Hackathon-2026#readme" },
 ];
 
 // Landing-page footer links. Kept in sync with the authenticated
@@ -2226,33 +2397,61 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const layerARef = useRef<HTMLDivElement|null>(null);
   const layerBRef = useRef<HTMLDivElement|null>(null);
+  const heroTextRef = useRef<HTMLDivElement|null>(null);
   // Post-runway section refs (Constellations → Risk Tiers → Mechanics → CTA).
   const sectionRefs = useRef<(HTMLElement|null)[]>([]);
   // Fed to ParticlePlanet so its scale/rotation tracks runway scroll.
   const scrollProgressRef = useRef(0);
 
   // Scroll orchestration:
-  //   1. A 220vh scroll runway contains a 100vh sticky frame with two absolute
-  //      layers. Layer A (sphere + hero copy) fades 1→0 over the first half of
-  //      the runway; Layer B (tagline) fades 0→1 over the second half. At
-  //      p=0.5 both are black, which is the moment the sphere disappears.
-  //   2. After the runway, post-runway sections fade in/out based on distance
-  //      of their center from the viewport center, with a small upward parallax.
+  //   1. A 260vh scroll runway contains a 100vh sticky frame with two absolute
+  //      layers. scrollProgressRef tracks a lerp-damped version of the raw
+  //      scroll ratio so scroll-wheel jumps become buttery without losing the
+  //      link to the actual page position. The constellation canvas handles
+  //      its own fly-through on progress, so Layer A only needs opacity and a
+  //      small lift — stacking more transforms would fight the canvas.
+  //   2. Post-runway sections fade based on distance from viewport centre with
+  //      a generous readable window plus a gentle parallax so copy stays legible.
   useEffect(() => {
     let raf = 0;
     const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+    const easeInOut = (t: number) => {
+      const x = clamp(t, 0, 1);
+      return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+    };
+    const easeOut = (t: number) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
 
     const tick = () => {
       const wrap = wrapRef.current;
       const a = layerARef.current;
       const b = layerBRef.current;
+      const text = heroTextRef.current;
       if (wrap && a && b) {
         const rect = wrap.getBoundingClientRect();
         const range = wrap.offsetHeight - window.innerHeight;
-        const p = range > 0 ? clamp(-rect.top / range, 0, 1) : 0;
+        const targetP = range > 0 ? clamp(-rect.top / range, 0, 1) : 0;
+        // Lerp damping — stronger for tiny deltas (tracking) and looser for
+        // big scroll-wheel jumps (feels like momentum, not lag).
+        const cur = scrollProgressRef.current;
+        const delta = targetP - cur;
+        const k = Math.abs(delta) > 0.04 ? 0.22 : 0.35;
+        const p = cur + delta * k;
         scrollProgressRef.current = p;
-        a.style.opacity = String(Math.max(0, 1 - p * 2));
-        b.style.opacity = String(clamp((p - 0.5) * 2, 0, 1));
+
+        // Hero text clears early, before the sphere edges fade in, so the
+        // random-constellation reveal has the stage to itself.
+        if (text) {
+          const tFade = 1 - easeInOut(clamp((p - 0.05) / 0.22, 0, 1));
+          text.style.opacity = String(tFade);
+          const imp = 1 - tFade;
+          text.style.transform = `translate(-50%, ${-imp * 32}px)`;
+        }
+        // Layer A wrapper stays fully lit — the canvas and text children
+        // handle their own fades. No stacked opacity to fight with the morph.
+        a.style.opacity = "1";
+        // Layer B blooms in only after the rings have dispersed (canvas
+        // disperse finishes at p≈0.90) so stars and tagline never overlap.
+        b.style.opacity = String(easeOut(clamp((p - 0.90) / 0.10, 0, 1)));
       }
 
       const vh = window.innerHeight;
@@ -2261,9 +2460,12 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         const rect = sec.getBoundingClientRect();
         const center = rect.top + rect.height / 2;
         const distFromCenter = Math.abs(center - vh / 2);
-        const falloff = clamp(1 - distFromCenter / (vh * 0.55), 0, 1);
-        sec.style.opacity = String(Math.pow(falloff, 1.15));
-        const parallax = (center - vh / 2) * 0.12;
+        // Wider readable window (0.9 vh either side) and a gentler power curve
+        // so sections stay at full opacity longer and don't blip past.
+        const falloff = clamp(1 - distFromCenter / (vh * 0.9), 0, 1);
+        sec.style.opacity = String(Math.pow(falloff, 0.75));
+        // Halved parallax so text doesn't skate past the eye while reading.
+        const parallax = (center - vh / 2) * 0.05;
         sec.style.transform = `translateY(${parallax}px)`;
       });
 
@@ -2278,7 +2480,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
       {/* ══ Scroll runway with sticky-frame crossfade ══
            Layer A (sphere + hero copy + shooting stars) fades out;
            Layer B (tagline) fades in. */}
-      <div ref={wrapRef} style={{position:"relative",height:"180vh"}}>
+      <div ref={wrapRef} style={{position:"relative",height:"260vh"}}>
         <div style={{position:"sticky",top:0,height:"100vh",overflow:"hidden"}}>
 
           {/* Layer A — hero with drifting stars + sphere + meteors behind.
@@ -2300,8 +2502,8 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
             />
             {/* Heading block — anchored to top of the viewport, widened so
                  the h1 breaks into at most two lines and never overlaps the
-                 sphere sitting in the lower portion of the frame. */}
-            <div style={{
+                 constellation sitting in the lower portion of the frame. */}
+            <div ref={heroTextRef} style={{
               position:"absolute",
               top: isMobile ? 88 : 120,
               left:"50%",
@@ -2311,15 +2513,16 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
               padding: isMobile ? "0 24px" : "0 48px",
               textAlign:"center",
               zIndex:3,
+              willChange:"opacity, transform",
             }}>
               <div style={{fontFamily:FM,fontSize: isMobile ? 9 : 10,letterSpacing:"0.26em",color:C.textMuted,marginBottom:isMobile?14:18,fontWeight:500}}>
                 STRUCTURED PREDICTION MARKETS · SOLANA
               </div>
               <h1 style={{fontFamily:FD,fontSize: isMobile ? "clamp(28px, 7vw, 36px)" : "clamp(36px, 3.6vw, 54px)", fontWeight:300, lineHeight:1.06, letterSpacing:"-0.025em", margin:0, color:C.textPrimary, whiteSpace:isMobile?"normal":"nowrap"}}>
-                Ten predictions, one token
+                Hundreds of markets, one constellation
               </h1>
-              <p style={{fontSize: isMobile ? 13 : 15, lineHeight:1.55, color:C.textSecondary, fontWeight:300, maxWidth:isMobile?440:560, margin:isMobile?"14px auto 0":"18px auto 0", fontFamily:FS}}>
-                Senthos bundles ten Polymarket positions into a single token on Solana · Pick a risk tier, deposit USDC, and hold until the basket resolves
+              <p style={{fontSize: isMobile ? 13 : 15, lineHeight:1.55, color:C.textSecondary, fontWeight:300, maxWidth:isMobile?440:580, margin:isMobile?"14px auto 0":"18px auto 0", fontFamily:FS}}>
+                Senthos wraps hundreds of Polymarket positions into a single token on Solana. Pick your tier, drop in USDC, sit on it until the legs resolve
               </p>
             </div>
           </div>
@@ -2341,40 +2544,42 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
             <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 68px)", fontWeight:300, lineHeight:1.05, letterSpacing:"-0.03em", margin:0, color:C.textPrimary, maxWidth:780}}>
               One token for the whole <span style={{color:C.tealLight,fontWeight:500}}>thesis</span>
             </h2>
-            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, maxWidth:520, margin:isMobile?"18px auto 0":"22px auto 0", fontFamily:FS}}>
-              Traders, funds, and curators use Senthos to take a structured view across correlated prediction markets with a single settlement and a capped downside
+            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, maxWidth:540, margin:isMobile?"18px auto 0":"22px auto 0", fontFamily:FS}}>
+              Stop picking one market at a time. A constellation covers a full view across rates, macro, crypto, and politics, settled in a single on-chain transaction when the legs land
             </p>
           </div>
 
         </div>
       </div>
 
-      {/* Post-runway sections (Constellations → Risk Tiers → Mechanics → CTA).
-           Negative top margin pulls section 01 up so its centred-in-viewport
-           moment lands ~72vh after Layer B's centred moment, matching the
-           gap between subsequent sections. The per-section opacity falloff
-           handles the brief overlap (Layer B exits the viewport top while
-           section 01 enters from the bottom). */}
-      <main style={{position:"relative",zIndex:10,pointerEvents:"none",marginTop:"-14vh"}}>
+      {/* Post-runway sections (Constellations → Risk Tiers → Mechanics →
+           Products → CTA). A soft vertical gradient sits behind everything so
+           the scroll doesn't fall off a cliff into pure black. The per-section
+           opacity falloff handles the brief overlap with Layer B. */}
+      <main style={{position:"relative",zIndex:10,pointerEvents:"none",marginTop:"-8vh"}}>
+        <div aria-hidden style={{
+          position:"absolute", inset:0, pointerEvents:"none", zIndex:-1,
+          background:"linear-gradient(180deg, rgba(5, 8, 12, 0) 0%, rgba(8, 14, 22, 0.55) 20%, rgba(10, 18, 28, 0.7) 60%, rgba(5, 8, 12, 0.9) 100%)",
+        }} />
         <section
           ref={el=>{sectionRefs.current[0]=el;}}
-          style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+          style={{minHeight:"88vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
         >
           <div style={{margin:"0 auto",maxWidth:700,textAlign:"center"}}>
             <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
               01 · CONSTELLATIONS
             </div>
             <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 72px)", fontWeight:200, lineHeight:1.08, letterSpacing:"-0.03em", marginBottom:24, color:C.textPrimary}}>
-              A basket, not a bet
+              A constellation, not a bet
             </h2>
-            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:520, margin:"0 auto"}}>
-              Each basket holds ten high-liquidity prediction markets in one token · You choose the risk tier and curators choose the legs
+            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:540, margin:"0 auto"}}>
+              Every constellation is a curated bundle of liquid prediction markets. Curators pick the legs, you pick the tier, and the position is diversified before you even deposit
             </p>
           </div>
         </section>
         <section
           ref={el=>{sectionRefs.current[1]=el;}}
-          style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+          style={{minHeight:"88vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
         >
           <div style={{margin:"0 auto",maxWidth:720,textAlign:"center"}}>
             <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
@@ -2383,17 +2588,17 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
             <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 72px)", fontWeight:200, lineHeight:1.08, letterSpacing:"-0.03em", marginBottom:24, color:C.textPrimary}}>
               Three tiers, three prices
             </h2>
-            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:520, margin:"0 auto 32px"}}>
-              Conservative, balanced, or high conviction · Each tier prices the same basket differently so you can trade capital preservation for upside
+            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:540, margin:"0 auto 32px"}}>
+              Same constellation, three prices. High conviction sits near par so your downside is small, balanced pays roughly double, long-tail pays ten times or more when the legs hit
             </p>
             <div style={{display:"inline-flex",alignItems:"baseline",gap: isMobile ? 20 : 36, fontFamily:FD}}>
               {[
-                {tier:"90", label:"Conservative", color:C.tealLight},
-                {tier:"70", label:"Balanced",     color:"#fbbf24"},
-                {tier:"50", label:"High conv.",   color:"#fb923c"},
+                {tier:"90%+",   label:"High conviction", color:C.tealLight},
+                {tier:"40–50%", label:"Balanced",        color:"#fbbf24"},
+                {tier:"<10%",   label:"Long-tail",       color:"#fb923c"},
               ].map(t=>(
                 <div key={t.tier} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
-                  <span style={{fontSize: isMobile ? 28 : 40, fontWeight:300, color:t.color, letterSpacing:"-0.035em", lineHeight:1}}>{t.tier}%</span>
+                  <span style={{fontSize: isMobile ? 26 : 38, fontWeight:300, color:t.color, letterSpacing:"-0.035em", lineHeight:1}}>{t.tier}</span>
                   <span style={{fontFamily:FM, fontSize:10, letterSpacing:"0.14em", color:C.textMuted, textTransform:"uppercase"}}>{t.label}</span>
                 </div>
               ))}
@@ -2402,7 +2607,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         </section>
         <section
           ref={el=>{sectionRefs.current[2]=el;}}
-          style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+          style={{minHeight:"88vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
         >
           <div style={{margin:"0 auto",maxWidth:700,textAlign:"center"}}>
             <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
@@ -2411,24 +2616,84 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
             <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 72px)", fontWeight:200, lineHeight:1.08, letterSpacing:"-0.03em", marginBottom:24, color:C.textPrimary}}>
               Deposit, hold, auto-settle
             </h2>
-            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:520, margin:"0 auto"}}>
-              USDC goes in, STHS tokens come out · Once the last leg resolves on-chain, payouts stream to every holder and the tokens burn · No claims, no manual unwind
+            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:540, margin:"0 auto"}}>
+              Deposit USDC, get a constellation token back, and hold. When the last leg resolves on-chain the payout lands in every holder's wallet and the token burns itself, with no claim window to miss
             </p>
           </div>
         </section>
         <section
           ref={el=>{sectionRefs.current[3]=el;}}
-          style={{minHeight:"72vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
+          style={{minHeight:"92vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform",overflow:"hidden"}}
+        >
+          {/* Orbital rings bloom behind the product grid so the black void
+              gets a visible scroll-past detail in brand colours. */}
+          <div style={{position:"absolute",inset:0,pointerEvents:"none",zIndex:0}}>
+            <OrbitalRings size={isMobile ? 780 : 1200} />
+            {/* soft vignette so text contrast wins over the rings */}
+            <div style={{
+              position:"absolute",inset:0,
+              background:"radial-gradient(ellipse 55% 45% at 50% 50%, rgba(5, 8, 12, 0.65) 0%, rgba(5, 8, 12, 0) 75%)",
+            }} />
+          </div>
+          <div style={{margin:"0 auto",maxWidth:1180,textAlign:"center",position:"relative",zIndex:1,width:"100%"}}>
+            <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
+              04 · PRODUCTS
+            </div>
+            <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(32px, 8vw, 44px)" : "clamp(44px, 5vw, 72px)", fontWeight:200, lineHeight:1.08, letterSpacing:"-0.03em", marginBottom:20, color:C.textPrimary}}>
+              One position, four products
+            </h2>
+            <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.65, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:isMobile?560:760, margin:"0 auto 48px", whiteSpace:isMobile?"normal":"nowrap"}}>
+              A constellation is the position. Every other product is something you can do with it
+            </p>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(4, minmax(0, 1fr))",gap:isMobile?10:11,textAlign:"left",maxWidth:1040,margin:"0 auto"}}>
+              {[
+                {n:"01", t:"Portfolio construction", d:"Pick the markets, weight them how you want, mint a constellation for others to buy into",     color:"#a5f3fc"},
+                {n:"02", t:"Constellations",         d:"Hold a curated bundle as one token, settled in one transaction when the legs resolve",         color:C.tealLight},
+                {n:"03", t:"Tranches",               d:"Buy the same constellation at three prices, trading how much downside you'll hold for upside", color:"#fbbf24"},
+                {n:"04", t:"PPNs",                   d:"Principal-protected notes where yield pays the premium and the constellation keeps the upside", color:"#fb923c"},
+              ].map(p=>(
+                <div key={p.n} style={{
+                  padding: isMobile ? "22px 22px 20px" : "26px 24px 22px",
+                  background:"rgba(12, 18, 26, 0.55)",
+                  border:"1px solid rgba(255,255,255,0.12)",
+                  borderRadius:16,
+                  backdropFilter:"blur(12px)",
+                  WebkitBackdropFilter:"blur(12px)",
+                  minHeight: isMobile ? "auto" : 176,
+                  transition:`border-color 0.2s ${EASE}, background 0.2s ${EASE}`,
+                }}
+                  onMouseEnter={e=>{
+                    const el = e.currentTarget as HTMLElement;
+                    el.style.borderColor = `${p.color}55`;
+                    el.style.background = "rgba(14, 21, 30, 0.75)";
+                  }}
+                  onMouseLeave={e=>{
+                    const el = e.currentTarget as HTMLElement;
+                    el.style.borderColor = "rgba(255,255,255,0.12)";
+                    el.style.background = "rgba(12, 18, 26, 0.55)";
+                  }}
+                >
+                  <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.18em",color:p.color,marginBottom:20,opacity:0.9}}>{p.n}</div>
+                  <div style={{fontFamily:FD,fontSize:17,fontWeight:500,color:C.textPrimary,marginBottom:10,letterSpacing:"-0.015em",lineHeight:1.25}}>{p.t}</div>
+                  <div style={{fontFamily:FS,fontSize:13,lineHeight:1.55,color:C.textSecondary}}>{p.d}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+        <section
+          ref={el=>{sectionRefs.current[4]=el;}}
+          style={{minHeight:"80vh",padding: isMobile ? "0 24px" : "0 40px",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",pointerEvents:"auto",willChange:"opacity, transform"}}
         >
           <div style={{margin:"0 auto",maxWidth:720,textAlign:"center"}}>
             <div style={{fontFamily:FM,fontSize:10,letterSpacing:"0.24em",color:C.tealLight,marginBottom:20,fontWeight:500}}>
-              04 · ENTER
+              05 · ENTER
             </div>
             <h2 style={{fontFamily:FD,fontSize: isMobile ? "clamp(36px, 9vw, 56px)" : "clamp(56px, 5.6vw, 88px)", fontWeight:200, lineHeight:1.02, letterSpacing:"-0.04em", marginBottom:isMobile?20:24, color:C.textPrimary}}>
-              Open <span style={{fontWeight:500, color:C.tealLight}}>Senthos</span>
+              Explore <span style={{fontWeight:500, color:C.tealLight}}>markets</span>
             </h2>
             <p style={{fontSize: isMobile ? 14 : 16, lineHeight:1.6, color:C.textSecondary, fontWeight:300, fontFamily:FS, maxWidth:520, margin:isMobile?"0 auto 28px":"0 auto 36px"}}>
-              Pick a basket, deposit USDC, and watch it settle on-chain
+              Pick a constellation, deposit USDC, and watch it settle on-chain
             </p>
             <a href="/app" style={{
               display:"inline-flex", alignItems:"center", gap:8,
@@ -2452,7 +2717,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
                 (e.currentTarget as HTMLElement).style.boxShadow = `0 0 0 1px ${C.tealLight}, 0 14px 40px rgba(45, 212, 191, 0.18)`;
               }}
             >
-              Launch app →
+              Explore markets →
             </a>
           </div>
         </section>
@@ -2471,9 +2736,12 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
         }}>
           {/* Left: brand + social icon row */}
           <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-            <span style={{fontFamily:FD,fontSize:13,fontWeight:600,color:C.textPrimary,letterSpacing:"0.04em"}}>
-              SENTHOS
-            </span>
+            <div style={{display:"flex",alignItems:"center",gap:9}}>
+              <img src="/senthos_full.png" alt="Senthos" style={{width:22,height:22,display:"block",flexShrink:0}} />
+              <span style={{fontFamily:FD,fontSize:13,fontWeight:600,color:C.textPrimary,letterSpacing:"0.14em"}}>
+                SENTHOS
+              </span>
+            </div>
             <span style={{fontFamily:FM,fontSize:10,color:C.textMuted,letterSpacing:"0.14em"}}>
               SOLANA DEVNET
             </span>
@@ -2880,7 +3148,7 @@ export default function App() {
           )}
         </div>
 
-        {/* RIGHT: single Launch app CTA + mobile hamburger */}
+        {/* RIGHT: single Explore markets CTA + mobile hamburger */}
         <div style={{display:"flex",alignItems:"center",gap:isMobile?8:12}}>
           <a
             href="/app"
@@ -2899,7 +3167,7 @@ export default function App() {
             onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.background=C.teal;}}
             onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.background=C.tealLight;}}
           >
-            Launch app
+            Explore markets
           </a>
           {isMobile && (
             <button onClick={()=>setSidebarOpen(!sidebarOpen)} aria-label="menu" style={{

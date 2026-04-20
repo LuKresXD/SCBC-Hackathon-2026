@@ -1,12 +1,12 @@
 "use client";
 /**
- * Sandbox state container for the Senthos authenticated app shell.
+ * Portfolio state container for the Senthos authenticated app shell.
  *
  * Every product primitive (Native Basket, Tranched Pool Tokens, PPN, Lending)
  * deposits and withdraws through the actions here, so the Portfolio page can
- * always produce a single consolidated view. State is in-memory per browser
- * session and resets to the seeded starting balance on `reset()` or on a hard
- * reload.
+ * always produce a single consolidated view. State lives in-memory per browser
+ * session; real balances will be sourced from the connected wallet once that
+ * integration lands.
  *
  * Design:
  * - One reducer, one typed action union. No useEffect chains.
@@ -23,7 +23,7 @@ import React, {
   useMemo,
   useReducer,
 } from "react";
-import { SANDBOX_STARTING_USDC } from "./tokens";
+import { INITIAL_USDC } from "./tokens";
 import { BUNDLES, bundleById } from "./bundles";
 
 // ---------- Position types ----------
@@ -109,7 +109,7 @@ type Action =
 // ---------- Reducer ----------
 
 export const initialSandboxState: SandboxState = {
-  usdc: SANDBOX_STARTING_USDC,
+  usdc: INITIAL_USDC,
   basketPositions: [],
   tranchePositions: [],
   ppnVaults: [],

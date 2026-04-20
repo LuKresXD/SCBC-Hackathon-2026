@@ -159,7 +159,7 @@ export default function PpnPage() {
 
   return (
     <>
-      <Header onResetClick={() => dispatch({ type: "reset" })} />
+      <Header />
       <PageFrame>
         {/* Page header */}
         <div style={{ marginBottom: 24, position: "relative", paddingBottom: 22, borderBottom: "0.5px solid rgba(45, 212, 191, 0.1)" }}>
@@ -428,7 +428,7 @@ export default function PpnPage() {
 
             <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary, fontFamily: FD, marginBottom: 6, position: "relative" }}>New PPN</div>
             <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, marginBottom: 16, letterSpacing: "0.04em" }}>
-              DEMO BALANCE · <span style={{ color: C.teal }}>${state.usdc.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span> USDC
+              WALLET BALANCE · <span style={{ color: C.teal }}>${state.usdc.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span> USDC
             </div>
 
             <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 6 }}>DEPOSIT USDC</div>

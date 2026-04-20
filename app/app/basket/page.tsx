@@ -253,7 +253,7 @@ export default function BasketsPage() {
               letterSpacing: "0.06em",
             }}
           >
-            Live feed unavailable · showing sandbox data · {data.error}
+            Live feed unavailable · showing cached data · {data.error}
           </div>
         )}
         {data.status === "loading" ? (
