@@ -2616,7 +2616,7 @@ function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:stri
             <div style={{display:"inline-flex",alignItems:"baseline",gap: isMobile ? 20 : 36, fontFamily:FD}}>
               {[
                 {tier:"90%+",   label:"High conviction", color:C.tealLight},
-                {tier:"40–50%", label:"Balanced",        color:"#fbbf24"},
+                {tier:"40–60%", label:"Balanced",        color:"#fbbf24"},
                 {tier:"<10%",   label:"Long-tail",       color:"#fb923c"},
               ].map(t=>(
                 <div key={t.tier} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
