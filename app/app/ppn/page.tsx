@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { Header, PageFrame } from "../_components/Header";
 import { MetricTile } from "../_components/charts";
 import { C, FS, FD, FM, EASE, tc, fmtUsd } from "../_lib/tokens";
@@ -12,6 +14,12 @@ import {
   type PickerWindow,
 } from "../_lib/use-live-baskets";
 import type { LiveBasket } from "../_lib/live-baskets";
+import {
+  useWalletSigner,
+  useUsdcBalance,
+  explorerTxUrl,
+} from "../_lib/wallet-bridge";
+import { ppnDeposit, PpnError } from "../_lib/ppn-client";
 
 // Hardcoded DefiLlama pool IDs for top Solana USDC single-sided vaults
 // These are stable, well-audited, high-TVL pools
@@ -39,10 +47,21 @@ function calcDynamicSplit(apyDecimal: number, days: number): { vaultPct: number;
 export default function PpnPage() {
   const { state, dispatch } = useSandbox();
   const basketState = useLiveBaskets();
+  const { connected } = useWallet();
+  const { setVisible: setWalletModalVisible } = useWalletModal();
+  const wallet = useWalletSigner();
+  const usdc = useUsdcBalance();
   const [selectedBundle, setSelectedBundle] = useState<string | null>(null);
   const [amt, setAmt] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
   const [renderNow, setRenderNow] = useState<number>(() => Date.now());
+  // On-chain submission lifecycle mirrors the basket page: stage drives the
+  // button label/disabled state while txError + txSignature drive the UI
+  // strip directly beneath the submit button.
+  const [txStage, setTxStage] = useState<
+    "idle" | "preparing" | "signing" | "confirming" | "persisting" | "done"
+  >("idle");
+  const [txError, setTxError] = useState<string | null>(null);
+  const [txSignature, setTxSignature] = useState<string | null>(null);
 
   // Live vault sources state
   const [vaultSources, setVaultSources] = useState<VaultSource[]>([]);
@@ -136,7 +155,18 @@ export default function PpnPage() {
   const maturityDays = selectedBundleObj?.daysLeft ?? 0;
 
   const dep = parseFloat(amt) || 0;
-  const insufficient = dep > state.usdc;  const { vaultPct, basketPct } = calcDynamicSplit(APY, maturityDays);
+  // Live wallet balance replaces the old sandbox counter. Only gate the
+  // "insufficient" flag while a wallet is actually connected — an amount
+  // with no wallet is handled by the wallet-picker branch inside the
+  // button handler below.
+  const liveUsdc = usdc.uiAmount;
+  const insufficient = connected && dep > liveUsdc;
+  const txBusy =
+    txStage === "preparing" ||
+    txStage === "signing" ||
+    txStage === "confirming" ||
+    txStage === "persisting";
+  const { vaultPct, basketPct } = calcDynamicSplit(APY, maturityDays);
   const vaultAmt = dep * vaultPct;
   const basketAmt = dep * basketPct;
   const fee = basketAmt * STRUCTURING_FEE; // 0.5% on basket only, not vault
@@ -144,17 +174,65 @@ export default function PpnPage() {
   const vaultAtMaturity = vaultAmt * Math.pow(1 + APY / 365, maturityDays);
   const estimatedYield = vaultAtMaturity - vaultAmt;
 
-  function handleDeposit() {
-    if (dep <= 0 || insufficient || !selectedBundle || !selectedBundleObj) return;
-    dispatch({
-      type: "ppn/open",
-      bundleId: selectedBundle,
-      usdcAmount: dep,
-      apy: APY * 100,
-      maturityDays,
-    });
-    setConfirmed(true);
-    setTimeout(() => { setAmt(""); setConfirmed(false); }, 1200);
+  async function handleDeposit() {
+    // Mirror the basket-page flow: kick the wallet modal if not connected,
+    // else run prepare → sign → confirm → persist via `ppnDeposit`.
+    if (!connected) {
+      setWalletModalVisible(true);
+      return;
+    }
+    if (
+      dep <= 0 ||
+      insufficient ||
+      !selectedBundle ||
+      !selectedBundleObj ||
+      txBusy
+    ) {
+      return;
+    }
+    setTxError(null);
+    setTxSignature(null);
+    setTxStage("preparing");
+    try {
+      const result = await ppnDeposit({
+        wallet,
+        bundleId: selectedBundle,
+        amountUsdc: dep,
+        maturityDays,
+      });
+      setTxStage("done");
+      setTxSignature(result.signature);
+      // Keep the sandbox reducer in sync so the "YOUR VAULTS" section
+      // picks the new note up until that panel is re-sourced from
+      // `fetchPpnPortfolio`.
+      dispatch({
+        type: "ppn/open",
+        bundleId: selectedBundle,
+        usdcAmount: dep,
+        apy: APY * 100,
+        maturityDays,
+      });
+      void usdc.refresh();
+      // Clear the input + reset stage after a beat so the user can submit
+      // another note without reloading.
+      setTimeout(() => {
+        setAmt("");
+        setTxStage("idle");
+      }, 1800);
+    } catch (err) {
+      setTxStage("idle");
+      if (err instanceof PpnError) {
+        setTxError(err.message);
+      } else if (err instanceof Error) {
+        setTxError(
+          /user rejected/i.test(err.message)
+            ? "Transaction was rejected in your wallet."
+            : err.message,
+        );
+      } else {
+        setTxError(String(err));
+      }
+    }
   }
 
   return (
@@ -428,7 +506,15 @@ export default function PpnPage() {
 
             <div style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary, fontFamily: FD, marginBottom: 6, position: "relative" }}>New PPN</div>
             <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, marginBottom: 16, letterSpacing: "0.04em" }}>
-              WALLET BALANCE · <span style={{ color: C.teal }}>${state.usdc.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span> USDC
+              WALLET BALANCE ·{" "}
+              <span style={{ color: connected ? C.teal : C.textMuted }}>
+                {connected
+                  ? usdc.loading && liveUsdc === 0
+                    ? "…"
+                    : `$${liveUsdc.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                  : "connect wallet"}
+              </span>
+              {connected && " USDC"}
             </div>
 
             <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 6 }}>DEPOSIT USDC</div>
@@ -436,7 +522,16 @@ export default function PpnPage() {
               type="number"
               placeholder="0"
               value={amt}
-              onChange={(e) => { setAmt(e.target.value); setConfirmed(false); }}
+              onChange={(e) => {
+                setAmt(e.target.value);
+                // Editing after a successful tx resets the lifecycle so the
+                // button reactivates for a new deposit.
+                if (txStage === "done") {
+                  setTxStage("idle");
+                  setTxSignature(null);
+                }
+                if (txError) setTxError(null);
+              }}
               style={{
                 width: "100%",
                 padding: "12px 14px",
@@ -478,30 +573,105 @@ export default function PpnPage() {
               ))}
             </div>
 
-            <button
-              onClick={handleDeposit}
-              disabled={insufficient || dep <= 0 || !selectedBundle}
-              style={{
-                width: "100%", padding: "12px 0", borderRadius: 10, border: "none",
-                background: confirmed
-                  ? C.green
-                  : insufficient || dep <= 0 || !selectedBundle
-                    ? "rgba(255,255,255,0.06)"
-                    : C.violet,
-                color: insufficient || dep <= 0 || !selectedBundle ? C.textMuted : "#fff",
-                fontSize: 14, fontWeight: 700, fontFamily: FD,
-                cursor: insufficient || dep <= 0 || !selectedBundle ? "not-allowed" : "pointer",
-                transition: `all 0.2s ${EASE}`,
-              }}
-            >
-              {confirmed
-                ? "✓ PPN opened"
+            {(() => {
+              // Button state is gated on wallet presence + amount + an active
+              // on-chain submission. When no wallet is connected the CTA
+              // proxies for the wallet modal rather than surfacing a
+              // "connect wallet" label up front.
+              const disabled =
+                (connected && (insufficient || dep <= 0 || !selectedBundle)) ||
+                txBusy ||
+                txStage === "done";
+              const label = !connected
+                ? "Connect wallet"
                 : !selectedBundle
                   ? "Pick a basket first"
-                  : insufficient
-                    ? "Insufficient USDC"
-                    : "Open PPN"}
-            </button>
+                  : dep <= 0
+                    ? "Enter an amount"
+                    : insufficient
+                      ? "Insufficient USDC"
+                      : txStage === "preparing"
+                        ? "Preparing transaction…"
+                        : txStage === "signing"
+                          ? "Awaiting wallet signature…"
+                          : txStage === "confirming"
+                            ? "Confirming on Solana…"
+                            : txStage === "persisting"
+                              ? "Finalising…"
+                              : txStage === "done"
+                                ? "✓ PPN opened"
+                                : "Open PPN";
+              const bg =
+                txStage === "done"
+                  ? C.green
+                  : disabled
+                    ? "rgba(255,255,255,0.06)"
+                    : C.violet;
+              const color = disabled && txStage !== "done" ? C.textMuted : "#fff";
+              return (
+                <button
+                  onClick={handleDeposit}
+                  disabled={disabled}
+                  style={{
+                    width: "100%",
+                    padding: "12px 0",
+                    borderRadius: 10,
+                    border: "none",
+                    background: bg,
+                    color,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    fontFamily: FD,
+                    cursor: disabled ? "not-allowed" : "pointer",
+                    transition: `all 0.2s ${EASE}`,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })()}
+            {txError && (
+              <div
+                style={{
+                  fontFamily: FM,
+                  fontSize: 11,
+                  lineHeight: 1.45,
+                  color: "#ff8570",
+                  background: "rgba(255, 90, 70, 0.08)",
+                  border: "0.5px solid rgba(255, 90, 70, 0.35)",
+                  borderRadius: 8,
+                  padding: "8px 12px",
+                  marginTop: 10,
+                  letterSpacing: "0.02em",
+                }}
+              >
+                {txError}
+              </div>
+            )}
+            {txSignature && (
+              <a
+                href={explorerTxUrl(txSignature)}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "block",
+                  fontFamily: FM,
+                  fontSize: 11,
+                  color: C.violet,
+                  background: "rgba(139, 92, 246, 0.12)",
+                  border: "0.5px solid rgba(139, 92, 246, 0.35)",
+                  borderRadius: 8,
+                  padding: "8px 12px",
+                  marginTop: 10,
+                  letterSpacing: "0.02em",
+                  fontWeight: 500,
+                  textAlign: "center",
+                  textDecoration: "none",
+                }}
+              >
+                View on Solana Explorer ↗
+              </a>
+            )}
             <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FS, textAlign: "center", marginTop: 10 }}>
               Split auto-calculated · principal guaranteed at maturity
             </div>

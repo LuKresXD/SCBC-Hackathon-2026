@@ -28,6 +28,12 @@ import {
   type TrancheKind,
 } from "../_quote";
 import { computeHedgeability } from "../_risk";
+import {
+  useWalletSigner,
+  useUsdcBalance,
+  explorerTxUrl,
+} from "../../_lib/wallet-bridge";
+import { ppnDeposit, PpnError } from "../../_lib/ppn-client";
 
 const WINDOW_LABEL: Record<"week" | "month" | "long", string> = {
   week: "Short term",
@@ -959,7 +965,12 @@ function TrancheBuyPanel({
 }) {
   const { connected } = useWallet();
   const { setVisible: setWalletModalVisible } = useWalletModal();
-  const { state, dispatch } = useSandbox();
+  const { dispatch } = useSandbox();
+  // Wallet signer + live USDC balance. We read USDC straight from the
+  // user's ATA so the "Insufficient USDC" gate reflects the real wallet
+  // instead of the sandbox reducer counter.
+  const wallet = useWalletSigner();
+  const usdc = useUsdcBalance();
   // Seed the amount input from the AI-recommended deposit when a user
   // lands on this page via a `?amount=` deep link. Falls back to $100.
   const initialAmount =
@@ -968,6 +979,12 @@ function TrancheBuyPanel({
       : "100";
   const [amount, setAmount] = useState<string>(initialAmount);
   const [books, setBooks] = useState<Map<string, Orderbook>>(new Map());
+  // Tx lifecycle mirrors the basket + PPN pages.
+  const [txStage, setTxStage] = useState<
+    "idle" | "preparing" | "signing" | "confirming" | "persisting" | "done"
+  >("idle");
+  const [txError, setTxError] = useState<string | null>(null);
+  const [txSignature, setTxSignature] = useState<string | null>(null);
 
   const selected = quotes.find((q) => q.kind === selectedKind) ?? quotes[0];
   const accent = trancheColor(selected.kind);
@@ -1099,7 +1116,11 @@ function TrancheBuyPanel({
   // tail-risk product can't support big retail clips.
   const capacityUsdc = order.capacityUsdc;
   const overCap = hasAmount && order.overCapacity;
-  const insufficient = connected && hasAmount && usdcAmount > state.usdc;
+  // Gate on the live on-chain USDC balance. When disconnected we don't
+  // flag "Insufficient" — the button's wallet-modal branch handles that
+  // path without ever advancing past the connect step.
+  const liveUsdc = usdc.uiAmount;
+  const insufficient = connected && hasAmount && usdcAmount > liveUsdc;
 
   // -----------------------------------------------------------------
   // Liquidity-based block thresholds. We refuse the ticket whenever
@@ -1131,22 +1152,73 @@ function TrancheBuyPanel({
   const liquidityBlocked =
     overCap || slippageBlocked || warehouseBlocked || feeBlocked;
 
+  const txBusy =
+    txStage === "preparing" ||
+    txStage === "signing" ||
+    txStage === "confirming" ||
+    txStage === "persisting";
   const canSubmit =
-    connected && hasAmount && !insufficient && !liquidityBlocked;
+    connected &&
+    hasAmount &&
+    !insufficient &&
+    !liquidityBlocked &&
+    !txBusy;
 
-  function handlePrimary() {
+  async function handlePrimary() {
     if (!connected) {
       setWalletModalVisible(true);
       return;
     }
     if (!canSubmit) return;
-    dispatch({
-      type: "tranche/deposit",
-      bundleId: bundle.id,
-      kind: selected.kind,
-      usdcAmount,
-      pricePerToken: selected.marketPrice,
-    });
+    setTxError(null);
+    setTxSignature(null);
+    setTxStage("preparing");
+    try {
+      // Tranche buys ride on the PPN rail — the backend persists the
+      // (attach, detach, kind, price_per_token) metadata next to the
+      // note so the position shows up as a tranche in portfolio views.
+      const result = await ppnDeposit({
+        wallet,
+        bundleId: bundle.id,
+        amountUsdc: usdcAmount,
+        // Tranche maturity matches the basket resolution window. Clamp
+        // to the on-chain program's 1..365 day range so we don't emit a
+        // negative `maturity_days` if the basket is already past due.
+        maturityDays: Math.max(
+          1,
+          Math.min(365, Math.round(stats.daysLeft || 30)),
+        ),
+        tranche: {
+          kind: selected.kind,
+          attach: selected.attach,
+          detach: selected.detach,
+          pricePerToken: selected.marketPrice,
+        },
+      });
+      setTxStage("done");
+      setTxSignature(result.signature);
+      dispatch({
+        type: "tranche/deposit",
+        bundleId: bundle.id,
+        kind: selected.kind,
+        usdcAmount,
+        pricePerToken: selected.marketPrice,
+      });
+      void usdc.refresh();
+    } catch (err) {
+      setTxStage("idle");
+      if (err instanceof PpnError) {
+        setTxError(err.message);
+      } else if (err instanceof Error) {
+        setTxError(
+          /user rejected/i.test(err.message)
+            ? "Transaction was rejected in your wallet."
+            : err.message,
+        );
+      } else {
+        setTxError(String(err));
+      }
+    }
   }
 
   const buttonLabel = !hasAmount
@@ -1155,8 +1227,23 @@ function TrancheBuyPanel({
       ? `Insufficient liquidity — max $${Math.round(capacityUsdc).toLocaleString()}`
       : insufficient
         ? "Insufficient USDC"
-        : `Buy ${selected.kind} tranche`;
-  const buttonActive = hasAmount && !insufficient && !liquidityBlocked;
+        : txStage === "preparing"
+          ? "Preparing transaction…"
+          : txStage === "signing"
+            ? "Awaiting wallet signature…"
+            : txStage === "confirming"
+              ? "Confirming on Solana…"
+              : txStage === "persisting"
+                ? "Finalising…"
+                : txStage === "done"
+                  ? "✓ Tranche opened"
+                  : `Buy ${selected.kind} tranche`;
+  const buttonActive =
+    hasAmount &&
+    !insufficient &&
+    !liquidityBlocked &&
+    !txBusy &&
+    txStage !== "done";
 
   return (
     <div
@@ -1455,6 +1542,42 @@ function TrancheBuyPanel({
         >
           {buttonLabel}
         </button>
+
+        {/* Tx feedback: error toast or confirmed explorer link. Renders
+            below the button so it doesn't reflow the fee breakdown. */}
+        {txError && (
+          <div
+            style={{
+              fontFamily: FS,
+              fontSize: 11,
+              color: "#ff6b6b",
+              padding: "6px 10px",
+              borderRadius: 8,
+              background: "#ff6b6b14",
+              border: "0.5px solid #ff6b6b44",
+              lineHeight: 1.45,
+            }}
+          >
+            {txError}
+          </div>
+        )}
+        {txSignature && (
+          <a
+            href={explorerTxUrl(txSignature)}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              fontFamily: FM,
+              fontSize: 11,
+              letterSpacing: "0.06em",
+              color: accent,
+              textAlign: "center",
+              textDecoration: "none",
+            }}
+          >
+            View on Solana Explorer →
+          </a>
+        )}
       </div>
 
       {/* How it works */}

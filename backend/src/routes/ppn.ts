@@ -250,6 +250,12 @@ router.post('/onchain/prepare', async (req: Request, res: Response) => {
       wallet_address,
       amount_usdc,
       maturity_days = 30,
+      // Tranche overlay — optional. Present only when a tranche BUY is issued
+      // from /app/tranche/[id]; plain PPN deposits leave these undefined.
+      tranche_kind,
+      tranche_attach,
+      tranche_detach,
+      price_per_token,
     } = req.body as PPNDepositRequest;
 
     if (!bundle_id || !wallet_address || !amount_usdc) {
@@ -262,6 +268,27 @@ router.post('/onchain/prepare', async (req: Request, res: Response) => {
     }
     if (maturity_days < 1 || maturity_days > 365) {
       return res.status(400).json({ error: 'maturity_days must be between 1 and 365' });
+    }
+    // Tranche metadata is optional as a group but must be self-consistent
+    // when supplied. We don't enforce attach < detach here — the tranche
+    // engine on the FE already guards that, and exotic presets may need
+    // zero-width markers at the boundary of a range.
+    if (tranche_kind !== undefined) {
+      if (!['senior', 'mezzanine', 'junior'].includes(tranche_kind)) {
+        return res.status(400).json({
+          error: `tranche_kind must be one of: senior | mezzanine | junior (got "${tranche_kind}")`,
+        });
+      }
+      if (
+        typeof tranche_attach !== 'number' ||
+        typeof tranche_detach !== 'number' ||
+        typeof price_per_token !== 'number'
+      ) {
+        return res.status(400).json({
+          error:
+            'tranche_kind requires tranche_attach, tranche_detach, and price_per_token (all numbers)',
+        });
+      }
     }
 
     const bundle = await getBundleById(bundle_id);
@@ -325,6 +352,12 @@ router.post('/onchain/prepare', async (req: Request, res: Response) => {
       maturity_date: maturityDate,
       note_seed_hex: built.noteSeedHex,
       maturity_ts: maturityTs,
+      // Tranche overlay: NULL for vanilla PPN, populated when the FE is
+      // buying a slice of the basket's (attach, detach) loss range.
+      tranche_kind: tranche_kind ?? null,
+      tranche_attach: tranche_attach ?? null,
+      tranche_detach: tranche_detach ?? null,
+      price_per_token: price_per_token ?? null,
     });
     if (!vault) {
       return res.status(500).json({ error: 'Failed to persist PPN vault record' });
