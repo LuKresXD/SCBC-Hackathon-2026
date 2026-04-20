@@ -182,7 +182,7 @@ export default function BasketsPage() {
                 margin: 0,
               }}
             >
-              Baskets
+              Constellations
             </h1>
             <p
               style={{
@@ -190,11 +190,14 @@ export default function BasketsPage() {
                 fontSize: 13,
                 lineHeight: 1.5,
                 color: C.textSecondary,
-                maxWidth: 540,
+                maxWidth: 640,
                 margin: "6px 0 0",
               }}
             >
-              Buy a basket of prediction markets as one token
+              Nine constellations across three risk tiers × three resolution
+              windows, each bundling live Polymarket legs into one STHS token.
+              Inception NAVs target ~95% / ~50% / ~5% (high / mid / low) within
+              a ±2% band.
             </p>
           </div>
           {data.status === "ok" && <LiveStatusPill at={data.at} />}
@@ -372,11 +375,19 @@ function BasketCard({
   const posChange = bundle.change >= 0;
   const tierCls = `basket-card-tier-${bundle.tier}`;
 
-  // Last 30 days for the card preview. We derive min / mid / max from
-  // this slice and render them as a compact y-axis scale next to the
-  // sparkline so the curve's amplitude is readable at a glance instead
-  // of being decorative only.
-  const cardSeries = useMemo(() => bundle.history.slice(-30), [bundle.history]);
+  // Card preview = last 24 hours of 5-min ticks (288 points). The
+  // card's "+X% today" label below the sparkline is a 1D move, so the
+  // sparkline has to share that timeframe — showing a 30-day slice
+  // next to a "today" percentage was inconsistent (the curve could
+  // tell a different story than the number).
+  //
+  // We fall back to the daily year-series if `dayHistory` isn't
+  // populated (seed-fallback mode pre-refactor), so the card never
+  // renders empty.
+  const cardSeries = useMemo(() => {
+    if (bundle.dayHistory && bundle.dayHistory.length > 0) return bundle.dayHistory;
+    return bundle.history.slice(-30);
+  }, [bundle.dayHistory, bundle.history]);
   const { min: seriesMin, max: seriesMax } = useMemo(() => {
     if (cardSeries.length === 0) return { min: 0, max: 0 };
     let mn = cardSeries[0];

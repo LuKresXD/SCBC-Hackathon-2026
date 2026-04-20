@@ -316,13 +316,23 @@ export default function PpnPage() {
                     const topLeg = [...b.markets].sort(
                       (x, y) => y.volumeUsd - x.volumeUsd,
                     )[0];
+                    // Border styles are specified as long-hand on every
+                    // side — mixing `border` (shorthand) with `borderLeft`
+                    // triggers a React re-render warning because the two
+                    // properties compete for the same DOM slot when
+                    // `active` flips. Using only long-hand keeps the
+                    // `borderLeft` tier accent stable while the other
+                    // three sides toggle on selection.
+                    const sideBorder = `0.5px solid ${active ? tc(b.tier) + "60" : "rgba(255, 255, 255, 0.06)"}`;
                     return (
                       <div
                         key={b.id}
                         onClick={() => setSelectedBundle(b.id)}
                         style={{
                           background: active ? `${tc(b.tier)}10` : "rgba(10, 15, 24, 0.6)",
-                          border: `0.5px solid ${active ? tc(b.tier) + "60" : "rgba(255, 255, 255, 0.06)"}`,
+                          borderTop: sideBorder,
+                          borderRight: sideBorder,
+                          borderBottom: sideBorder,
                           borderLeft: `3px solid ${tc(b.tier)}`,
                           borderRadius: 10,
                           padding: "10px 14px",

@@ -264,40 +264,6 @@ export default function PortfolioPage() {
             });
           });
 
-          if (state.loans.length > 0 || state.lend) {
-            const value = (state.lend?.amount ?? 0) - state.loans.reduce((s, l) => s + l.borrowedUsdc, 0);
-            rows.push({
-              key: "lending",
-              value,
-              el: (
-                <div key="lending" style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
-                    <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, letterSpacing: "0.08em" }}>LENDING</div>
-                    <Link href="/app/lending" style={{ fontSize: 11, color: C.blue, fontFamily: FS, textDecoration: "none" }}>Manage →</Link>
-                  </div>
-                  {state.lend && (
-                    <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `0.5px solid ${C.border}` }}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>Supply position</div>
-                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>{state.lend.startApy.toFixed(2)}% APY</div>
-                      </div>
-                      <div style={{ fontSize: 13, color: C.teal, fontFamily: FD }}>{fmtUsd(state.lend.amount, 2)}</div>
-                    </div>
-                  )}
-                  {state.loans.map((l) => (
-                    <div key={l.id} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `0.5px solid ${C.border}` }}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>Loan · {l.bundleId}</div>
-                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>{l.rateApy.toFixed(2)}% APY</div>
-                      </div>
-                      <div style={{ fontSize: 13, color: C.coral, fontFamily: FD }}>-{fmtUsd(l.borrowedUsdc, 2)}</div>
-                    </div>
-                  ))}
-                </div>
-              ),
-            });
-          }
-
           // USDC cash position
           if (state.usdc > 0) {
             rows.push({

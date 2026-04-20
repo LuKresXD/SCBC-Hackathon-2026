@@ -2208,12 +2208,15 @@ const SOCIALS: { id: string; label: string; href: string }[] = [
   { id: "docs",    label: "Docs",    href: "https://github.com/LuKresXD/SCBC-Hackathon-2026#readme" },
 ];
 
+// Landing-page footer links. Kept in sync with the authenticated
+// /app nav — Hedge and Lending were retired, Markets was renamed to
+// Portfolio and moved to /app/portfolio, and Constellations (the
+// basket grid) is added so the footer covers every live route.
 const FOOTER_LINKS: { label: string; href: string }[] = [
-  { label: "Markets",   href: "/app" },
-  { label: "Tranches",  href: "/app/tranche" },
-  { label: "Hedge",     href: "/app/hedge" },
-  { label: "Lending",   href: "/app/lending" },
-  { label: "PPN",       href: "/app/ppn" },
+  { label: "Portfolio",      href: "/app/portfolio" },
+  { label: "Constellations", href: "/app/basket" },
+  { label: "Tranches",       href: "/app/tranche" },
+  { label: "PPN",            href: "/app/ppn" },
 ];
 
 function LandingPage({ onEnterApp, onNav }: { onEnterApp:()=>void, onNav:(t:string)=>void }) {
@@ -2843,10 +2846,11 @@ export default function App() {
           {!isMobile && (
             <ul style={{display:"flex",gap:28,listStyle:"none",margin:0,padding:0,alignItems:"center"}}>
               {[
-                {id:"home",    label:"Home",    href:"/"},
-                {id:"markets", label:"Markets", href:"/app"},
-                {id:"tranches",label:"Tranches",href:"/app/tranche"},
-                {id:"hedge",   label:"Hedge",   href:"/app/hedge"},
+                {id:"home",      label:"Home",           href:"/"},
+                {id:"portfolio", label:"Portfolio",      href:"/app/portfolio"},
+                {id:"basket",    label:"Constellations", href:"/app/basket"},
+                {id:"tranches",  label:"Tranches",       href:"/app/tranche"},
+                {id:"ppn",       label:"PPN",            href:"/app/ppn"},
               ].map(n=>{
                 const isActive = n.id === "home" && tab === "home";
                 return (
@@ -2924,10 +2928,11 @@ export default function App() {
             boxShadow:"0 20px 60px rgba(0,0,0,0.5)",
           }}>
             {[
-              {id:"home",    label:"Home",    href:"/"},
-              {id:"markets", label:"Markets", href:"/app"},
-              {id:"tranches",label:"Tranches",href:"/app/tranche"},
-              {id:"hedge",   label:"Hedge",   href:"/app/hedge"},
+              {id:"home",      label:"Home",           href:"/"},
+              {id:"portfolio", label:"Portfolio",      href:"/app/portfolio"},
+              {id:"basket",    label:"Constellations", href:"/app/basket"},
+              {id:"tranches",  label:"Tranches",       href:"/app/tranche"},
+              {id:"ppn",       label:"PPN",            href:"/app/ppn"},
             ].map(n=>(
               <a key={n.id} href={n.href} onClick={()=>setSidebarOpen(false)} style={{
                 display:"block",width:"100%",textAlign:"left",

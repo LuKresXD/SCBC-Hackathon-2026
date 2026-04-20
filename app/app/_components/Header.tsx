@@ -13,12 +13,10 @@ const ConnectButton = dynamic(
 );
 
 const NAV_LEFT = [
-  { id: "markets",  label: "Markets",        href: "/app" },
-  { id: "basket",   label: "Constellations", href: "/app/basket" },
-  { id: "tranche",  label: "Tranches",       href: "/app/tranche" },
-  { id: "ppn",      label: "PPN",            href: "/app/ppn" },
-  { id: "lending",  label: "Lending",        href: "/app/lending" },
-  { id: "hedge",    label: "Hedge",          href: "/app/hedge" },
+  { id: "portfolio", label: "Portfolio",      href: "/app/portfolio" },
+  { id: "basket",    label: "Constellations", href: "/app/basket" },
+  { id: "tranche",   label: "Tranches",       href: "/app/tranche" },
+  { id: "ppn",       label: "PPN",            href: "/app/ppn" },
 ];
 
 export function Header({ onResetClick }: { onResetClick?: () => void } = {}) {

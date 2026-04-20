@@ -55,6 +55,9 @@ export type RawMarket = {
   event_id?: string;
   event_slug?: string;
   event_title?: string;
+  // Forwarded from Polymarket Gamma — each outcome (YES / NO) has its
+  // own CLOB token id, which is what the orderbook endpoint needs.
+  tokens?: Array<{ token_id: string; outcome: string; price: number }>;
   last_trade_price?: number;
   one_day_price_change?: number;
   one_week_price_change?: number;
@@ -102,6 +105,13 @@ export type LiveMarket = {
   topicKey: string;            // coarse token-set hash used as a correlation fallback
   category: Category;          // coarse category from keyword classifier
   weight: number;              // fraction of basket NAV (0..1); set in buildLiveBaskets
+  /**
+   * CLOB token id for THIS side (YES or NO). Empty string when Gamma
+   * didn’t return token metadata for the market. The buy panel feeds
+   * these ids into /api/markets/orderbooks to get live bid/ask depth
+   * for the per-leg slippage calculation.
+   */
+  tokenId: string;
 };
 
 // ---------------- Bucketing rules ----------------
@@ -125,6 +135,38 @@ export const TIER_RANGE_EXT: Record<90 | 70 | 50, [number, number]> = {
   70: [0.15, 0.85],
   50: [0.01, 0.22],
 };
+
+/**
+ * Tier-level NAV targets. When set, the roster's sqrt(volume) weights are
+ * tilted post-hoc so the weighted probability (= NAV) lands near the
+ * target, without violating the per-leg min/max caps. Each basket then
+ * gets a seeded ±TIER_TARGET_JITTER offset so the three tranches of a
+ * tier don't all land on the same NAV.
+ *
+ * All three tiers are pinned: HIGH targets 0.95, MID 0.50, LOW 0.05.
+ * Pinning keeps each tier's NAV visibly centered on an intuitive
+ * archetype ("near-cert" / "coinflip" / "long-shot") regardless of how
+ * Polymarket's long tail happens to skew on any given day. Without
+ * pinning the natural NAVs would drift — e.g. MID in the low 40s and
+ * HIGH in the low 90s — which makes the three cards read as "random"
+ * instead of as a clean risk ladder.
+ */
+export const TIER_TARGET_NAV: Record<90 | 70 | 50, number | null> = {
+  90: 0.95,
+  70: 0.5,
+  50: 0.05,
+};
+
+/**
+ * Per-basket jitter applied on top of `TIER_TARGET_NAV` so the three
+ * tranches in a tilted tier don't all read as the exact same NAV — which
+ * would look synthetic. Seeded by basket id so the offset is stable
+ * across renders. Amplitude is ±2 percentage points, which keeps the
+ * basket visibly centered on the tier target while giving each card its
+ * own individual read (e.g. 48.6% / 50.8% / 49.2% for MID; 93.4% / 95.6%
+ * / 96.1% for HIGH; 4.2% / 5.8% / 4.9% for LOW).
+ */
+const TIER_TARGET_JITTER = 0.02;
 
 export type WindowKey = "week" | "month" | "long";
 
@@ -267,17 +309,34 @@ function parseDaysToResolution(endDateIso?: string): number {
 }
 
 /**
- * Absolute 24h YES-price delta. Only Gamma's `oneDayPriceChange` field is
- * trusted here — we used to pro-rate `oneWeekPriceChange / 7` as a fallback
- * but that produces nonsensically large relative-change percentages on the
- * NO side of low-YES-prob markets (e.g. a market that moved 0.02 over a
- * week looks like a +28% daily change on its NO side when the NO side is
- * trading at 0.05). Returning 0 when Gamma doesn't give us a daily number
- * is the honest thing to do.
+ * Absolute 24h YES-price delta.
+ *
+ * Gamma populates `one_day_price_change` unreliably — especially for
+ * HIGH-tier markets that only tick a handful of times a day — which
+ * produced the "+0.0% today" readings on baskets whose legs simply
+ * didn't have a daily number. We now fall back to
+ * `one_week_price_change / 7` when the daily field is absent.
+ *
+ * The historical concern with the weekly-pro-rated fallback was that
+ * pro-rating a 2-point weekly move on the NO side of a 5%-YES market
+ * looked like a huge relative daily change. That concern is already
+ * contained downstream:
+ *   • `relativeChange` guards against priors < 1¢ (return 0),
+ *   • clamps the relative change to ±LEG_DAILY_CHANGE_CLAMP (50%),
+ *   • and the basket-level clamp is BASKET_DAILY_CHANGE_CLAMP_PCT (30%).
+ * So the safest behaviour is to use whatever signal Gamma gives us
+ * and let the clamps truncate outliers — better than a silent 0 that
+ * rounds the whole basket's move to 0.0%.
  */
 function extractOneDayAbsDelta(m: RawMarket): number {
   if (typeof m.one_day_price_change === "number" && Number.isFinite(m.one_day_price_change)) {
     return m.one_day_price_change;
+  }
+  if (
+    typeof m.one_week_price_change === "number" &&
+    Number.isFinite(m.one_week_price_change)
+  ) {
+    return m.one_week_price_change / 7;
   }
   return 0;
 }
@@ -364,6 +423,16 @@ function normalizeMarketCandidates(m: RawMarket): LiveMarket[] {
   };
 
   const category = classifyCategory(m.question);
+
+  // Pull CLOB token ids for each outcome. Polymarket Gamma returns them
+  // in the `tokens` array; we match by `outcome` text because order is
+  // not guaranteed across markets. Fall back to index-based lookup if
+  // the outcome strings are non-standard.
+  const yesToken =
+    m.tokens?.find((t) => t.outcome.toLowerCase() === "yes") ?? m.tokens?.[0];
+  const noToken =
+    m.tokens?.find((t) => t.outcome.toLowerCase() === "no") ?? m.tokens?.[1];
+
   const shared = {
     underlyingId: m.id,
     conditionId: m.condition_id,
@@ -387,6 +456,7 @@ function normalizeMarketCandidates(m: RawMarket): LiveMarket[] {
     probability: yesProb,
     yesProbability: yesProb,
     dailyChange: relativeChange(yesProb, deltaAbs),
+    tokenId: yesToken?.token_id ?? "",
   };
 
   const noProb = 1 - yesProb;
@@ -399,6 +469,7 @@ function normalizeMarketCandidates(m: RawMarket): LiveMarket[] {
     yesProbability: yesProb,
     // NO side moves in the opposite direction of YES, so negate the delta.
     dailyChange: relativeChange(noProb, -deltaAbs),
+    tokenId: noToken?.token_id ?? "",
   };
 
   return [yesLeg, noLeg];
@@ -420,8 +491,24 @@ function computeLegWeights(legs: LiveMarket[]): number[] {
 
   const raw = legs.map((l) => Math.sqrt(Math.max(1, l.volumeUsd)));
   const sum = raw.reduce((a, b) => a + b, 0);
-  let w = sum > 0 ? raw.map((r) => r / sum) : Array(n).fill(1 / n);
+  const start = sum > 0 ? raw.map((r) => r / sum) : Array(n).fill(1 / n);
+  return clampAndNormalize(start, minWeight, maxWeight);
+}
 
+/**
+ * Shared min/max-clamp + renormalize pass used by both `computeLegWeights`
+ * and `recenterWeightsToTarget`. Walks an arbitrary starting weight
+ * vector into one that satisfies `[minWeight, maxWeight]` per leg and
+ * sums to 1, redistributing clamped excess across the still-free legs
+ * pro-rata.
+ */
+function clampAndNormalize(
+  weights: number[],
+  minWeight: number,
+  maxWeight: number,
+): number[] {
+  const n = weights.length;
+  let w = weights.slice();
   for (let iter = 0; iter < 20; iter++) {
     let excess = 0;
     const free: number[] = [];
@@ -444,10 +531,74 @@ function computeLegWeights(legs: LiveMarket[]): number[] {
       w[i] = w[i] + (w[i] / freeSum) * excess;
     }
   }
-
-  // Final renormalize in case the cap/floor loop left a tiny residual.
   const total = w.reduce((a, b) => a + b, 0);
   return total > 0 ? w.map((x) => x / total) : Array(n).fill(1 / n);
+}
+
+/**
+ * Tilt a baseline weight vector toward a target weighted-probability
+ * (= target NAV) using exponential reweighting:
+ *
+ *     w_i' ∝ baseWeights_i · exp(λ · (p_i − target))
+ *
+ * λ is found by bisection so the post-clamp weighted NAV lands within
+ * 1 bp of `targetNav`. Positive λ concentrates weight on legs above the
+ * target; negative λ on legs below. The same per-leg min/max clamps
+ * from `computeLegWeights` are applied after the tilt so a single leg
+ * can't dominate the basket regardless of how aggressive λ gets.
+ *
+ * If the target sits outside the [min p, max p] span of the legs we
+ * can't reach it with any weighting, so the baseline is returned
+ * unchanged — the caller's NAV will just drift slightly off target.
+ */
+function recenterWeightsToTarget(
+  legs: LiveMarket[],
+  baseWeights: number[],
+  targetNav: number,
+): number[] {
+  const n = legs.length;
+  if (n === 0) return baseWeights;
+  if (n !== baseWeights.length) return baseWeights;
+  const minWeight = minLegWeightFor(n);
+  const maxWeight = maxLegWeightFor(n);
+  const probs = legs.map((l) => l.probability);
+  const minP = Math.min(...probs);
+  const maxP = Math.max(...probs);
+  if (targetNav >= maxP || targetNav <= minP) return baseWeights;
+
+  const applyTilt = (lam: number): { nav: number; weights: number[] } => {
+    const raw = baseWeights.map((w, i) =>
+      w * Math.exp(lam * (probs[i] - targetNav)),
+    );
+    const sum = raw.reduce((a, b) => a + b, 0);
+    const start =
+      sum > 0 ? raw.map((r) => r / sum) : Array(n).fill(1 / n);
+    const weights = clampAndNormalize(start, minWeight, maxWeight);
+    const nav = weights.reduce((s, x, i) => s + x * probs[i], 0);
+    return { nav, weights };
+  };
+
+  const baseline = applyTilt(0);
+  if (Math.abs(baseline.nav - targetNav) < 1e-4) return baseline.weights;
+
+  // λ range ±15 is plenty. exp(15 · 0.5) ≈ 1800× effectively puts all
+  // pre-clamp mass on the farthest-in-direction legs; the clamp then
+  // re-spreads it back up to the per-leg ceiling.
+  let lo = -15;
+  let hi = 15;
+  let best = baseline;
+  for (let iter = 0; iter < 60; iter++) {
+    const mid = (lo + hi) / 2;
+    const result = applyTilt(mid);
+    if (Math.abs(result.nav - targetNav) < Math.abs(best.nav - targetNav)) {
+      best = result;
+    }
+    if (Math.abs(result.nav - targetNav) < 1e-4) return result.weights;
+    if (result.nav < targetNav) lo = mid;
+    else hi = mid;
+    if (Math.abs(hi - lo) < 1e-6) break;
+  }
+  return best.weights;
 }
 
 // ---------------- Fetch ----------------
@@ -653,6 +804,11 @@ function formatResolutionDate(daysLeft: number): string {
  *     size (see `computeLegWeights`). NAV and 24h change are weighted sums
  *     over the legs. `issue` tracks the live NAV so the "issue price" tile
  *     on the detail page is never stale.
+ *   • Tiers listed in `TIER_TARGET_NAV` get a second pass: weights are
+ *     tilted exponentially (still under the per-leg caps) so the weighted
+ *     probability lands near the tier's target NAV, plus a seeded
+ *     ±TIER_TARGET_JITTER offset per basket. All three tiers are pinned:
+ *     HIGH→~95%, MID→~50%, LOW→~5%.
  *
  * Combo processing order matters: higher-tier baskets go first because
  * they're typically the sparsest pool of candidates. If we let the 70 tier
@@ -740,7 +896,27 @@ export function buildLiveBaskets(candidates: LiveMarket[]): BasketSlot[] {
     }
 
     // Index-fund-style weights from leg volume, with cap/floor clamping.
-    const weights = computeLegWeights(legs);
+    // For tiers with a target NAV (currently MID only), re-tilt the
+    // weights so the weighted probability lands near that target, with a
+    // seeded ±TIER_TARGET_JITTER offset per basket so all three tranches
+    // of the tier don't land on the identical NAV.
+    const baseWeights = computeLegWeights(legs);
+    const tierTarget = TIER_TARGET_NAV[tier];
+    let jitteredTarget: number | null = null;
+    if (tierTarget !== null) {
+      const jitterRng = seededRng(`${id}:nav-jitter`);
+      // Basket ids share long common prefixes (`STHS-MID-`), which the
+      // FNV/xorshift in `seededRng` turns into near-identical first
+      // draws. Burn three draws before reading so sibling tranches
+      // actually see different jitter offsets.
+      jitterRng(); jitterRng(); jitterRng();
+      const offset = (jitterRng() - 0.5) * 2 * TIER_TARGET_JITTER;
+      jitteredTarget = Math.max(0.01, Math.min(0.99, tierTarget + offset));
+    }
+    const weights =
+      jitteredTarget !== null
+        ? recenterWeightsToTarget(legs, baseWeights, jitteredTarget)
+        : baseWeights;
     const weightedLegs: LiveMarket[] = legs.map((leg, i) => ({
       ...leg,
       weight: Number(weights[i].toFixed(4)),

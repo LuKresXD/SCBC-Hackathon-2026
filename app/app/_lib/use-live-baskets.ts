@@ -118,10 +118,17 @@ export function matchesPickerWindow(daysLeft: number, win: PickerWindow): boolea
   return daysLeft > 180;
 }
 
-/** Clean display for wild tranche APYs — capped so UI stays readable. */
+/**
+ * Clean display for tranche APYs. Tightened to a 200% cap so the
+ * occasional over-target junior still renders as a bounded number
+ * instead of a four-figure distraction. Pricing is target-APY-driven
+ * so real quotes almost always land below this cap; when they don't,
+ * the tranche is a structurally-low-fair lottery and "200%+" is the
+ * honest summary.
+ */
 export function formatYieldPct(pct: number): string {
   if (!Number.isFinite(pct)) return "—";
-  if (pct >= 999) return "999%+";
-  if (pct <= -999) return "-999%";
+  if (pct >= 200) return "200%+";
+  if (pct <= -200) return "-200%";
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
 }

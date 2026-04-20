@@ -35,18 +35,37 @@ export type Bundle = {
   dayHistory: number[];
 };
 
-function genHistory(finalNav: number, days: number): number[] {
+/**
+ * FNV-1a + xorshift seeded RNG. Matches the one used in live-baskets.ts
+ * so the seed fallback histories are deterministic across renders — no
+ * more jitter between reloads when the live feed is unreachable.
+ */
+function seededRng(seed: string): () => number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return () => {
+    h ^= h << 13;
+    h ^= h >>> 17;
+    h ^= h << 5;
+    return ((h >>> 0) % 100000) / 100000;
+  };
+}
+
+function genHistory(finalNav: number, days: number, seedId: string): number[] {
   // Walk around the final NAV with mild mean-reversion so the series always
-  // lands on `finalNav`. Previous version keyed noise off `tier/100`, which
-  // produced pointless noise for the low tier after the band moved off 50%.
+  // lands on `finalNav`. Deterministic per basket id via `seededRng`.
+  const rng = seededRng(seedId);
   const base = finalNav;
   const pts: number[] = [];
   let v = base;
   const band = Math.max(0.02, Math.min(0.08, base * 0.12));
   for (let i = 0; i < days; i++) {
     const drift = (finalNav - base) * (i / days) * 0.6;
-    const noise = (Math.random() - 0.48) * band * 0.3;
-    const spike = Math.random() < 0.08 ? (Math.random() - 0.5) * band * 0.5 : 0;
+    const noise = (rng() - 0.48) * band * 0.3;
+    const spike = rng() < 0.08 ? (rng() - 0.5) * band * 0.5 : 0;
     v = base + drift + noise + spike;
     v = Math.max(Math.max(0.005, base - band), Math.min(base + band, v));
     pts.push(parseFloat(v.toFixed(4)));
@@ -69,12 +88,18 @@ function genHistory(finalNav: number, days: number): number[] {
  *   - 1h (60 1-min ticks)  => ~0.3% peak-to-peak drift
  *   - 24h (288 5-min ticks) => ~1.2% peak-to-peak drift
  */
-function genIntradayHistory(finalNav: number, steps: number, stepVol: number): number[] {
+function genIntradayHistory(
+  finalNav: number,
+  steps: number,
+  stepVol: number,
+  seedId: string,
+): number[] {
+  const rng = seededRng(seedId);
   const band = Math.max(0.0003, finalNav * stepVol);
   const rev: number[] = [parseFloat(finalNav.toFixed(6))];
   let v = finalNav;
   for (let i = 0; i < steps; i++) {
-    const noise = (Math.random() - 0.5) * band;
+    const noise = (rng() - 0.5) * band;
     v = Math.max(0.0005, Math.min(0.9995, v + noise));
     rev.push(parseFloat(v.toFixed(6)));
   }
@@ -84,21 +109,24 @@ function genIntradayHistory(finalNav: number, steps: number, stepVol: number): n
 
 // Bundle histories come as a trio (hour / day / year). Helper keeps seed
 // data from growing into 3× the row length of the BUNDLES array.
-function genBundleHistories(nav: number): {
+function genBundleHistories(nav: number, id: string): {
   history: number[];
   hourHistory: number[];
   dayHistory: number[];
 } {
   return {
-    history: genHistory(nav, 364),
-    hourHistory: genIntradayHistory(nav, 59, 0.0008),
-    dayHistory: genIntradayHistory(nav, 287, 0.0018),
+    history: genHistory(nav, 364, `${id}:year`),
+    hourHistory: genIntradayHistory(nav, 59, 0.0008, `${id}:hour`),
+    dayHistory: genIntradayHistory(nav, 287, 0.0018, `${id}:day`),
   };
 }
 
-function genFlatHistory(days: number): number[] {
+function genFlatHistory(days: number, seedId: string): number[] {
+  const rng = seededRng(seedId);
   const pts: number[] = [];
-  for (let i = 0; i <= days; i++) pts.push(parseFloat((1 + (Math.random() - 0.5) * 0.0004).toFixed(4)));
+  for (let i = 0; i <= days; i++) {
+    pts.push(parseFloat((1 + (rng() - 0.5) * 0.0004).toFixed(4)));
+  }
   return pts;
 }
 
@@ -107,7 +135,7 @@ function dateLabel(daysAhead: number): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export const USDC_HISTORY = genFlatHistory(29);
+export const USDC_HISTORY = genFlatHistory(29, "usdc-flat");
 
 // Nine fallbacks — one per (tier, window) combo, matching the live grid
 // ids emitted by `buildLiveBaskets` in ./live-baskets.ts. Histories cover
@@ -120,20 +148,20 @@ export const USDC_HISTORY = genFlatHistory(29);
 // are built from markets filtered to `active` (so nothing is resolved)
 // and the "hot" badge was dropped.
 export const BUNDLES: Bundle[] = [
-  // HIGH tier (≈ 90% probability)
-  { id: "STHS-HIGH-SHORT", tier: 90, date: dateLabel(5),   daysLeft: 5,   nav: 0.942, issue: 0.92, change: +0.6, hot: false, resolved: 0, totalLegs: 12, ...genBundleHistories(0.942) },
-  { id: "STHS-HIGH-MED",   tier: 90, date: dateLabel(60),  daysLeft: 60,  nav: 0.912, issue: 0.90, change: +0.2, hot: false, resolved: 0, totalLegs: 18, ...genBundleHistories(0.912) },
-  { id: "STHS-HIGH-LONG",  tier: 90, date: dateLabel(220), daysLeft: 220, nav: 0.887, issue: 0.88, change: -0.4, hot: false, resolved: 0, totalLegs: 24, ...genBundleHistories(0.887) },
+  // HIGH tier (≈ 95% probability target)
+  { id: "STHS-HIGH-SHORT", tier: 90, date: dateLabel(5),   daysLeft: 5,   nav: 0.942, issue: 0.92, change: +0.6, hot: false, resolved: 0, totalLegs: 12, ...genBundleHistories(0.942, "STHS-HIGH-SHORT") },
+  { id: "STHS-HIGH-MED",   tier: 90, date: dateLabel(60),  daysLeft: 60,  nav: 0.912, issue: 0.90, change: +0.2, hot: false, resolved: 0, totalLegs: 18, ...genBundleHistories(0.912, "STHS-HIGH-MED") },
+  { id: "STHS-HIGH-LONG",  tier: 90, date: dateLabel(220), daysLeft: 220, nav: 0.887, issue: 0.88, change: -0.4, hot: false, resolved: 0, totalLegs: 24, ...genBundleHistories(0.887, "STHS-HIGH-LONG") },
 
-  // MID tier (≈ 25–75% probability)
-  { id: "STHS-MID-SHORT",  tier: 70, date: dateLabel(6),   daysLeft: 6,   nav: 0.482, issue: 0.50, change: +2.1, hot: false, resolved: 0, totalLegs: 14, ...genBundleHistories(0.482) },
-  { id: "STHS-MID-MED",    tier: 70, date: dateLabel(55),  daysLeft: 55,  nav: 0.461, issue: 0.50, change: +1.3, hot: false, resolved: 0, totalLegs: 20, ...genBundleHistories(0.461) },
-  { id: "STHS-MID-LONG",   tier: 70, date: dateLabel(205), daysLeft: 205, nav: 0.438, issue: 0.50, change: -0.7, hot: false, resolved: 0, totalLegs: 22, ...genBundleHistories(0.438) },
+  // MID tier (≈ 50% probability target)
+  { id: "STHS-MID-SHORT",  tier: 70, date: dateLabel(6),   daysLeft: 6,   nav: 0.482, issue: 0.50, change: +2.1, hot: false, resolved: 0, totalLegs: 14, ...genBundleHistories(0.482, "STHS-MID-SHORT") },
+  { id: "STHS-MID-MED",    tier: 70, date: dateLabel(55),  daysLeft: 55,  nav: 0.461, issue: 0.50, change: +1.3, hot: false, resolved: 0, totalLegs: 20, ...genBundleHistories(0.461, "STHS-MID-MED") },
+  { id: "STHS-MID-LONG",   tier: 70, date: dateLabel(205), daysLeft: 205, nav: 0.438, issue: 0.50, change: -0.7, hot: false, resolved: 0, totalLegs: 22, ...genBundleHistories(0.438, "STHS-MID-LONG") },
 
-  // LOW tier (≈ 1–12% probability — long-shot)
-  { id: "STHS-LOW-SHORT",  tier: 50, date: dateLabel(5),   daysLeft: 5,   nav: 0.082, issue: 0.08, change: +4.4, hot: false, resolved: 0, totalLegs: 10, ...genBundleHistories(0.082) },
-  { id: "STHS-LOW-MED",    tier: 50, date: dateLabel(60),  daysLeft: 60,  nav: 0.071, issue: 0.07, change: -1.8, hot: false, resolved: 0, totalLegs: 12, ...genBundleHistories(0.071) },
-  { id: "STHS-LOW-LONG",   tier: 50, date: dateLabel(220), daysLeft: 220, nav: 0.059, issue: 0.06, change: +2.5, hot: false, resolved: 0, totalLegs: 16, ...genBundleHistories(0.059) },
+  // LOW tier (≈ 5% probability target — long-shot)
+  { id: "STHS-LOW-SHORT",  tier: 50, date: dateLabel(5),   daysLeft: 5,   nav: 0.082, issue: 0.08, change: +4.4, hot: false, resolved: 0, totalLegs: 10, ...genBundleHistories(0.082, "STHS-LOW-SHORT") },
+  { id: "STHS-LOW-MED",    tier: 50, date: dateLabel(60),  daysLeft: 60,  nav: 0.071, issue: 0.07, change: -1.8, hot: false, resolved: 0, totalLegs: 12, ...genBundleHistories(0.071, "STHS-LOW-MED") },
+  { id: "STHS-LOW-LONG",   tier: 50, date: dateLabel(220), daysLeft: 220, nav: 0.059, issue: 0.06, change: +2.5, hot: false, resolved: 0, totalLegs: 16, ...genBundleHistories(0.059, "STHS-LOW-LONG") },
 ];
 
 export function bundleById(id: string): Bundle | undefined {

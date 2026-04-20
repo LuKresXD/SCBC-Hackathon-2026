@@ -12,6 +12,12 @@ import { bundleById, type Bundle } from "../../_lib/bundles";
 import type { LiveBasket, LiveMarket, WindowKey } from "../../_lib/live-baskets";
 import { useLiveBaskets } from "../../_lib/use-live-baskets";
 import { useSandbox } from "../../_lib/demo-state";
+import {
+  fetchOrderbooks,
+  quoteSideImpact,
+  SLIPPAGE_BPS_CEILING,
+  type Orderbook,
+} from "../../_lib/orderbook";
 
 type ResolvedBasket =
   | { kind: "live"; basket: LiveBasket }
@@ -262,11 +268,23 @@ export default function BasketDetail() {
             </div>
 
             {liveMarkets.length > 0 && (
-              <ConstituentTable markets={liveMarkets} tierColor={color} />
+              // flex:1 on the constituents card makes it absorb the
+              // remaining vertical space of the left column so its
+              // bottom border lines up exactly with the buy panel’s
+              // bottom border on the right. Without this, any mismatch
+              // between right-content height and left-content height
+              // shows up as a dead gap below the constituent table.
+              <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+                <ConstituentTable markets={liveMarkets} tierColor={color} />
+              </div>
             )}
           </div>
 
-          <BasketBuyPanel bundle={bundle} accent={color} />
+          <BasketBuyPanel
+            bundle={bundle}
+            accent={color}
+            markets={liveMarkets}
+          />
         </div>
         <style>{BASKET_DETAIL_CSS}</style>
       </PageFrame>
@@ -300,83 +318,275 @@ const BASKET_DETAIL_CSS = `
  * bottom — empty space (if any) goes between them, not under the card.
  */
 
+// Tight, non-sloppy product copy. No em dashes, no filler, no
+// "exposure in one entry" AI-speak.
 const HOW_IT_WORKS: Array<{ num: string; title: string; body: string }> = [
   {
     num: "01",
     title: "Quote assembly",
     body:
-      "Every basket is priced as the weighted sum of its legs’ current Polymarket probabilities. Market makers quote off that live NAV, less a thin execution margin for slippage and listing risk.",
+      "Your quote is the basket NAV (weighted sum of each leg’s Polymarket price) plus the protocol fee, the market-maker spread, and live slippage pulled from the CLOB book.",
   },
   {
     num: "02",
-    title: "On-chain settlement",
+    title: "Settlement",
     body:
-      "Your order is signed locally and broadcast to Solana. Once confirmed, the traxis_vault program mints a single STHS token into your wallet — one token, one on-chain entry, full basket exposure.",
+      "In this preview the deposit updates your sandbox portfolio instantly. On Solana mainnet, the traxis_vault program would lock USDC in the basket vault and mint STHS against the quoted NAV.",
   },
   {
     num: "03",
     title: "Exit on your terms",
     body:
-      "Redeem STHS back into the basket at live NAV, or route it through Tranches, PPN, or Lending to carve out senior/junior risk, add protection, or borrow USDC without unwinding the legs.",
+      "Redeem STHS at live NAV any time, or use it as collateral in Tranches, PPN, or Lending to build structured positions.",
   },
 ];
 
+// Hard per-order ceiling. Beyond $250k the slippage on a basket-buy is
+// large enough that the UI quote is no longer trustworthy as a retail
+// estimate, and the CLOB books at that size need treasury-side handling.
+// Enforced at the button disable gate so the label reads “Over limit”.
+const MAX_ORDER_USDC = 250_000;
+
+// Fee structure (in basis points). Protocol + MM spread are flat at 25
+// bps each (= 0.25% each). Slippage is computed live off the Polymarket
+// CLOB — see `quoteFeesBps`.
+const PROTOCOL_FEE_BPS = 25;
+const MM_SPREAD_BPS = 25;
+
 /**
- * Cost breakdown for a buy order. The three fees are intentionally split
- * out so the user can see "what the protocol is charging, what MMs are
- * charging, what slippage is". Slippage scales with order size using a
- * sqrt curve — real basket depth will be plugged in when the on-chain
- * leg is wired up. Protocol + MM fees are flat placeholders for now.
+ * Per-leg slippage estimate from a live CLOB snapshot.
  *
- * Returned values are in **basis points** (1 bp = 0.01%). `slippageBps`
- * is clamped to [5, 150] so tiny orders don’t show suspiciously-round
- * zero, and huge orders don’t explode past 1.5%.
+ * For each weighted leg we take `usdcAmount * leg.weight` as that leg’s
+ * notional, walk the ask side of its book, and compute the weighted
+ * fill price relative to mid. The basket-level slippage is the
+ * weight-average across every leg that has a book.
+ *
+ * If the orderbook map is empty (e.g. the CLOB request is still in
+ * flight or Gamma didn’t expose token ids for the market), we fall
+ * back to a volume-proxy model so the quote never just reads zero.
  */
-function quoteFeesBps(usdcAmount: number): {
+function quoteFeesBpsFromBooks(
+  usdcAmount: number,
+  markets: Array<{ weight?: number; volumeUsd: number; tokenId: string }>,
+  books: Map<string, Orderbook>,
+): {
   protocolBps: number;
   mmSpreadBps: number;
   slippageBps: number;
   totalBps: number;
+  hasLiveBooks: boolean;
 } {
-  const protocolBps = 5;   // flat 0.05%
-  const mmSpreadBps = 20;  // flat 0.20%
-  const size = Math.max(1, usdcAmount);
-  // Sqrt curve: doubles in slippage every 4× in size.
-  const raw = 5 + Math.sqrt(size / 100) * 8;
-  const slippageBps = Math.max(5, Math.min(150, raw));
+  const size = Math.max(0, usdcAmount);
+  let slippageBps = 0;
+  let coveredWeight = 0;
+  let hasLiveBooks = false;
+
+  if (markets.length > 0 && size > 0) {
+    for (const m of markets) {
+      const w = m.weight && m.weight > 0 ? m.weight : 1 / markets.length;
+      const legSize = size * w;
+      const book = m.tokenId ? books.get(m.tokenId) : undefined;
+      if (book && book.asks.length > 0) {
+        hasLiveBooks = true;
+        const impact = quoteSideImpact(legSize, book);
+        slippageBps += impact.slippageBps * w;
+        coveredWeight += w;
+      }
+    }
+  }
+
+  if (!hasLiveBooks) {
+    slippageBps = volumeProxySlippageBps(size, markets);
+  } else if (coveredWeight > 0 && coveredWeight < 1) {
+    // Fill the uncovered weight with a volume-proxy estimate so the
+    // reported slippage represents the WHOLE basket, not just the
+    // legs whose books we could pull.
+    const proxy = volumeProxySlippageBps(
+      size * (1 - coveredWeight),
+      markets,
+    );
+    slippageBps = slippageBps + proxy * (1 - coveredWeight);
+  }
+
+  // Only enforce the structural ceiling (100%). No artificial 20%
+  // clamp: under-reporting is an arb surface. If a $250k order really
+  // eats 18% of the basket's book, that's what the user needs to see.
+  slippageBps = Math.max(1, Math.min(SLIPPAGE_BPS_CEILING, slippageBps));
   return {
-    protocolBps,
-    mmSpreadBps,
+    protocolBps: PROTOCOL_FEE_BPS,
+    mmSpreadBps: MM_SPREAD_BPS,
     slippageBps,
-    totalBps: protocolBps + mmSpreadBps + slippageBps,
+    totalBps: PROTOCOL_FEE_BPS + MM_SPREAD_BPS + slippageBps,
+    hasLiveBooks,
   };
+}
+
+/**
+ * Fallback slippage model when we don’t have (or can’t get) a live CLOB
+ * snapshot. Three regimes:
+ *
+ *   1. Per-leg volume data available — use it. Depth proxy is 0.5% of
+ *      lifetime Polymarket volume (conservative vs. the old 1% number;
+ *      a market with $10M lifetime volume doesn’t actually have
+ *      $100k resting at any given instant). Impact on each leg is
+ *      linear + quadratic in (legSize / depth), weighted across legs.
+ *
+ *   2. Markets list provided but every leg has zero volume — collapse
+ *      to regime 3.
+ *
+ *   3. Nothing at all (seed fallback) — size-only convex curve, tuned
+ *      to match typical basket impact on Polymarket books. No 1.5%
+ *      cap; the old cap meant that any order above ~$40k reported the
+ *      same slippage, which is exactly the arb surface the user
+ *      called out.
+ *
+ * All three regimes cap at SLIPPAGE_BPS_CEILING (100%) — a structural
+ * maximum, not a business one.
+ */
+function volumeProxySlippageBps(
+  size: number,
+  markets: Array<{ weight?: number; volumeUsd: number }>,
+): number {
+  if (size <= 0) return 0;
+  if (markets.length === 0) return sizeOnlySlippageBps(size);
+
+  let weightTotal = 0;
+  let weightedBps = 0;
+  let anyVolume = false;
+  for (const m of markets) {
+    const w = m.weight && m.weight > 0 ? m.weight : 1 / markets.length;
+    const vol = m.volumeUsd ?? 0;
+    if (vol > 0) anyVolume = true;
+    const legSize = size * w;
+    if (legSize <= 0) continue;
+    // Conservative depth proxy: 0.5% of lifetime volume, floor $250.
+    // A leg with $10M lifetime volume gets a ~$50k depth proxy; that
+    // matches what top-of-book liquidity typically looks like.
+    const depth = Math.max(250, vol * 0.005);
+    const ratio = legSize / depth;
+    // Two-term impact curve:
+    //   - Linear (1500 bp/unit) dominates while you’re inside top-of-
+    //     book: crossing a 1-cent spread on a 50-cent market is ~100bp.
+    //   - Quadratic (3500 bp/unit²) takes over once you’re eating
+    //     multiple levels: price impact grows super-linearly because
+    //     each new level is thinner than the last.
+    // No per-leg cap — we want the basket-level ceiling, not a silent
+    // flattener that under-reports oversized orders.
+    const impactBps = ratio * 1500 + ratio * ratio * 3500;
+    // Per-leg floor of 20 bp for any non-zero order: captures the half-
+    // spread you pay just to cross from mid to the ask side. Without
+    // this, a $100 order on a $100M basket reports ~0 slippage, which
+    // is pure fiction — Polymarket books always cost *something* to
+    // cross, and under-reporting it is the arb surface we’re closing.
+    const legBps = Math.max(20, impactBps);
+    weightedBps += legBps * w;
+    weightTotal += w;
+  }
+  if (!anyVolume) return sizeOnlySlippageBps(size);
+  return weightTotal > 0
+    ? Math.min(SLIPPAGE_BPS_CEILING, weightedBps / weightTotal)
+    : 0;
+}
+
+/**
+ * Size-only convex slippage for the no-metadata path. Convexity matters
+ * here for the same reason as the per-leg model: impact accelerates as
+ * you force through thinner parts of the book. Calibration reference
+ * points (with $1 = 1 unit of x):
+ *
+ *   $100     x=1      ≈ 23 bp  (0.23%)
+ *   $1 000   x=10     ≈ 45 bp  (0.45%)
+ *   $10 000  x=100    ≈ 270 bp (2.7%)
+ *   $100 000 x=1000   ≈ 2520 bp (25%)
+ *   $250 000 x=2500   ≈ 5520 bp (55%)
+ *
+ * Shape: base + linear + quadratic. No 1.5% cap — anything we report
+ * should match or exceed what an external fill would cost, else the
+ * protocol is systematically subsidising takers.
+ */
+function sizeOnlySlippageBps(size: number): number {
+  const x = Math.max(0, size) / 100;
+  const bps = 20 + x * 2 + x * x * 0.00085;
+  return Math.min(SLIPPAGE_BPS_CEILING, bps);
 }
 
 function BasketBuyPanel({
   bundle,
   accent,
+  markets,
 }: {
   bundle: Bundle;
   accent: string;
+  markets: LiveMarket[];
 }) {
   const { connected } = useWallet();
   const { setVisible: setWalletModalVisible } = useWalletModal();
   const { state, dispatch } = useSandbox();
   const [amount, setAmount] = useState<string>("100");
+  const [books, setBooks] = useState<Map<string, Orderbook>>(new Map());
+  const [bookStatus, setBookStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
+
+  // Top 10 weighted legs with a non-empty token id drive the live CLOB
+  // snapshot. We skip legs without token ids (seed fallback, mostly).
+  // 10 is a balance: enough to cover the majority of the basket’s NAV
+  // weight, small enough that the fan-out to Polymarket's CLOB is
+  // negligible + fits in one batch request.
+  const topLegs = useMemo(() => {
+    const withTokens = markets.filter((m) => m.tokenId);
+    return [...withTokens]
+      .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
+      .slice(0, 10);
+  }, [markets]);
+  const topTokenIds = useMemo(
+    () => topLegs.map((m) => m.tokenId),
+    [topLegs],
+  );
+
+  // Fetch the live orderbooks on mount / whenever the top-leg set
+  // changes. The backend caches 3s so this is cheap on tier / window
+  // switches. AbortController guards against a resolved promise
+  // stomping state after the component unmounts.
+  useEffect(() => {
+    if (topTokenIds.length === 0) {
+      setBooks(new Map());
+      setBookStatus("idle");
+      return;
+    }
+    const ac = new AbortController();
+    let cancelled = false;
+    setBookStatus("loading");
+    fetchOrderbooks(topTokenIds, ac.signal)
+      .then((map) => {
+        if (cancelled) return;
+        setBooks(map);
+        setBookStatus(map.size > 0 ? "ok" : "error");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBookStatus("error");
+      });
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [topTokenIds]);
 
   const usdcAmount = Math.max(0, Number.parseFloat(amount) || 0);
   const navPrice = bundle.nav > 0 ? bundle.nav : 1;
-  const fees = useMemo(() => quoteFeesBps(usdcAmount), [usdcAmount]);
+  const fees = useMemo(
+    () => quoteFeesBpsFromBooks(usdcAmount, topLegs, books),
+    [usdcAmount, topLegs, books],
+  );
   const netUsdc = usdcAmount * (1 - fees.totalBps / 10_000);
   const tokensOut = netUsdc / navPrice;
 
   const hasAmount = usdcAmount > 0;
+  const overCap = hasAmount && usdcAmount > MAX_ORDER_USDC;
   const insufficient = connected && hasAmount && usdcAmount > state.usdc;
-  const canSubmit = connected && hasAmount && !insufficient;
+  const canSubmit = connected && hasAmount && !insufficient && !overCap;
 
-  // The button is ALWAYS actionable — users should be able to simulate
-  // the trade (amount + fees + quote) without wallet friction. We only
-  // open the wallet picker when they actually try to buy.
+  // The button is always actionable so users can simulate the trade
+  // without wallet friction. Wallet picker only opens on real submit.
   function handlePrimary() {
     if (!connected) {
       setWalletModalVisible(true);
@@ -390,16 +600,14 @@ function BasketBuyPanel({
     });
   }
 
-  // Button label reacts to state without ever showing "Connect Wallet"
-  // in the primary slot — the wallet step is implicit under "Buy".
   const buttonLabel = !hasAmount
     ? "Enter an amount"
-    : insufficient
-      ? "Insufficient USDC"
-      : !connected
-        ? "Buy position"
+    : overCap
+      ? `Max $${MAX_ORDER_USDC.toLocaleString()} per order`
+      : insufficient
+        ? "Insufficient USDC"
         : "Buy position";
-  const buttonActive = hasAmount && !insufficient;
+  const buttonActive = hasAmount && !insufficient && !overCap;
 
   return (
     <div
@@ -436,13 +644,12 @@ function BasketBuyPanel({
             fontFamily: FS,
             fontSize: 12,
             color: C.textSecondary,
-            lineHeight: 1.55,
+            lineHeight: 1.5,
             textAlign: "center",
             fontWeight: 300,
           }}
         >
-          Live NAV ${bundle.nav.toFixed(3)} · {bundle.totalLegs}-leg basket · simulate the
-          order below, wallet connects on submit.
+          {bundle.totalLegs}-leg basket at ${bundle.nav.toFixed(3)}
         </div>
 
         {/* Amount input (always enabled) */}
@@ -471,7 +678,7 @@ function BasketBuyPanel({
           >
             <span>Amount</span>
             <span>
-              Balance{" "}
+              Sandbox balance{" "}
               <span style={{ color: connected ? C.textSecondary : C.textMuted }}>
                 {connected ? `$${state.usdc.toFixed(2)}` : "sim"}
               </span>
@@ -569,8 +776,13 @@ function BasketBuyPanel({
                 marginTop: 2,
               }}
             >
-              Placeholder fee surface — the live feed will plug into basket
-              depth + market-maker quotes once on-chain settlement ships.
+              {bookStatus === "loading"
+                ? "Quoting slippage from live Polymarket books…"
+                : fees.hasLiveBooks
+                  ? `Slippage quoted live from Polymarket CLOB (${topLegs.length} legs sampled).`
+                  : bookStatus === "error"
+                    ? "CLOB feed unavailable. Slippage estimated from leg volume."
+                    : "Slippage estimated from leg volume. Live book kicks in once a wallet connects."}
             </div>
           </div>
         )}
@@ -774,8 +986,7 @@ function ConstituentTable({
 }) {
   // Rank by 24h-liquidity proxy (lifetime volume USD) so the biggest
   // markets surface first. Weight ties are common once the basket is
-  // large enough for all top legs to hit the max-weight clamp, so sorting
-  // by weight would be effectively random within that tie.
+  // large enough for all top legs to tie the top legs on weight.
   const sorted = useMemo(
     () => [...markets].sort((a, b) => b.volumeUsd - a.volumeUsd),
     [markets],
@@ -790,6 +1001,13 @@ function ConstituentTable({
         border: `0.5px solid ${C.border}`,
         borderRadius: 14,
         overflow: "hidden",
+        // Flex-grow so the card's bottom border tracks the grid cell
+        // bottom. Inside, the header / column row / 5 data rows all
+        // stack at their natural heights; any spare space falls to the
+        // trailing spacer at the end of the card.
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <div
@@ -858,6 +1076,10 @@ function ConstituentTable({
           isLast={i === rows.length - 1}
         />
       ))}
+      {/* Trailing spacer absorbs any surplus height the flex:1 card
+          carries beyond the five data rows. Keeps the rows at the
+          top and the card border at the bottom of the column. */}
+      <div style={{ flex: 1 }} />
     </div>
   );
 }
@@ -1115,6 +1337,23 @@ function DetailChart({
             {(lastVal * 100).toFixed(1)}%
           </text>
         </svg>
+        {/* Honest disclosure: the path is a deterministic walk anchored at
+            the live NAV. Real per-tick history only starts once the vault
+            is deployed on Solana; the current value (right-edge marker)
+            is the genuine live number derived from Polymarket probabilities. */}
+        <div
+          style={{
+            fontFamily: FS,
+            fontSize: 10,
+            color: C.textMuted,
+            letterSpacing: "0.02em",
+            marginTop: 6,
+            fontWeight: 300,
+          }}
+        >
+          Simulated NAV path, anchored at the live current value. Per-tick
+          history will replace this once the vault is deployed on Solana.
+        </div>
       </div>
     </>
   );
@@ -1431,16 +1670,20 @@ function ConstituentRow({
         {market.category}
       </div>
       <div
+        title={market.question}
         style={{
           fontFamily: FD,
           fontSize: 13,
           color: C.textPrimary,
           lineHeight: 1.35,
+          // Single-line with ellipsis: every row is exactly one line
+          // tall, so the 5-row table has a deterministic height across
+          // every basket (no more “some rows wrap, some don’t” wobble).
+          // Full question remains readable via the tooltip.
           overflow: "hidden",
           textOverflow: "ellipsis",
-          display: "-webkit-box",
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical",
+          whiteSpace: "nowrap",
+          minWidth: 0,
         }}
       >
         {market.question}

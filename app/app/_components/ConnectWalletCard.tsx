@@ -12,7 +12,7 @@ const ConnectButton = dynamic(
 );
 
 /**
- * Wallet-aware action card used on basket/tranche/ppn/lending detail pages.
+ * Wallet-aware action card used on basket/tranche/ppn detail pages.
  *
  * Disconnected: prompts the user to connect via ConnectButton.
  * Connected: shows truncated pubkey, live SOL balance, a devnet airdrop

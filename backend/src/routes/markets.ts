@@ -14,6 +14,89 @@ import { metrics } from '../services/metrics';
 
 const router = Router();
 
+// Polymarket CLOB endpoint. We proxy /book requests from here so the
+// browser never hits CLOB directly (avoids CORS + lets us cache / batch).
+const CLOB_API = 'https://clob.polymarket.com';
+
+// Short per-token cache so rapid amount-change quotes don't hammer the
+// upstream. 3-second TTL keeps quotes effectively live while giving us
+// request coalescing on the hot path.
+interface BookLevel { price: number; size: number }
+interface CachedBook { bids: BookLevel[]; asks: BookLevel[]; fetched_at: number }
+const BOOK_CACHE_TTL_MS = 3_000;
+const BOOK_CACHE_MAX = 512;
+const bookCache = new Map<string, CachedBook>();
+
+function setCached(tokenId: string, book: CachedBook): void {
+  if (bookCache.size >= BOOK_CACHE_MAX) {
+    // Drop the oldest entry — Map preserves insertion order.
+    const firstKey = bookCache.keys().next().value;
+    if (firstKey) bookCache.delete(firstKey);
+  }
+  bookCache.set(tokenId, book);
+}
+
+async function fetchBook(tokenId: string): Promise<CachedBook | null> {
+  const cached = bookCache.get(tokenId);
+  if (cached && Date.now() - cached.fetched_at < BOOK_CACHE_TTL_MS) {
+    return cached;
+  }
+  try {
+    const r = await fetch(`${CLOB_API}/book?token_id=${encodeURIComponent(tokenId)}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!r.ok) return null;
+    const raw = (await r.json()) as {
+      bids?: Array<{ price: string; size: string }>;
+      asks?: Array<{ price: string; size: string }>;
+    };
+    // Trim to top 25 levels per side so payloads stay small even if
+    // the CLOB returns a very deep book.
+    const trim = (arr: Array<{ price: string; size: string }> = []): BookLevel[] =>
+      arr.slice(0, 25).map((lvl) => ({
+        price: Number(lvl.price),
+        size: Number(lvl.size),
+      }));
+    const book: CachedBook = {
+      bids: trim(raw.bids),
+      asks: trim(raw.asks),
+      fetched_at: Date.now(),
+    };
+    setCached(tokenId, book);
+    return book;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * GET /api/markets/orderbooks?token_ids=id1,id2,id3
+ *
+ * Live Polymarket CLOB orderbook snapshot for the given token ids,
+ * batched and cached (3s TTL). Returned books are trimmed to the top 25
+ * levels per side, which is plenty for slippage estimation on a
+ * basket-buy of reasonable size.
+ */
+router.get('/orderbooks', async (req: Request, res: Response) => {
+  const param = (req.query.token_ids as string) || '';
+  const ids = param
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 25); // cap fan-out per request
+  if (ids.length === 0) {
+    return res.status(400).json({ error: 'token_ids query parameter is required' });
+  }
+  const books = await Promise.all(
+    ids.map(async (tokenId) => {
+      const b = await fetchBook(tokenId);
+      if (!b) return { token_id: tokenId, bids: [], asks: [], error: true };
+      return { token_id: tokenId, bids: b.bids, asks: b.asks };
+    }),
+  );
+  res.json({ count: books.length, books });
+});
+
 const VALID_CATEGORIES: ReadonlyArray<Category> = [
   'crypto', 'sports', 'politics', 'economics', 'entertainment', 'tech', 'world', 'other',
 ];
