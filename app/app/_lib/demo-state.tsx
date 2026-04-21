@@ -32,6 +32,16 @@ export type BasketPosition = {
   bundleId: string;
   qty: number; // STHS tokens held
   avgCost: number; // avg NAV at entry
+  // Optional self-describing fields populated by the DB hydrate. Let
+  // the reducer + portfolio render a position whose `bundleId` is a
+  // Supabase UUID (i.e. has no match in the frontend basket catalog).
+  tier?: 90 | 70 | 50;
+  navHint?: number;
+  displayName?: string;
+  /** Epoch ms — resolution date parsed from the backend bundle name. */
+  maturityAt?: number;
+  /** Backend bundle status: "active" | "resolved" | "cancelled". */
+  status?: string;
 };
 
 export type TrancheKind = "senior" | "mezzanine" | "junior";
@@ -101,6 +111,9 @@ type Action =
       tokensOut?: number;
     }
   | { type: "basket/redeem"; bundleId: string; qty: number; payoutUsdc: number }
+  | { type: "basket/hydrate"; positions: BasketPosition[] }
+  | { type: "ppn/hydrate"; vaults: PpnVault[] }
+  | { type: "tranche/hydrate"; positions: TranchePosition[] }
   | {
       type: "tranche/deposit";
       bundleId: string;
@@ -202,6 +215,18 @@ function reducer(state: SandboxState, action: Action): SandboxState {
         usdc: state.usdc - action.usdcAmount,
         basketPositions: nextPositions,
       };
+    }
+
+    case "basket/hydrate": {
+      return { ...state, basketPositions: action.positions };
+    }
+
+    case "ppn/hydrate": {
+      return { ...state, ppnVaults: action.vaults };
+    }
+
+    case "tranche/hydrate": {
+      return { ...state, tranchePositions: action.positions };
     }
 
     case "basket/redeem": {
@@ -388,7 +413,8 @@ export function SandboxProvider({ children }: { children: React.ReactNode }) {
   const totals = useMemo(() => {
     const basketValue = state.basketPositions.reduce((s, p) => {
       const b = bundleById(p.bundleId);
-      return s + (b ? p.qty * b.nav : 0);
+      const nav = b?.nav ?? p.navHint ?? 0;
+      return s + p.qty * nav;
     }, 0);
     const trancheValue = state.tranchePositions.reduce((s, p) => s + p.qty * p.avgCost, 0);
     const ppnValue = state.ppnVaults.reduce((s, v) => s + v.principal, 0);
@@ -396,7 +422,9 @@ export function SandboxProvider({ children }: { children: React.ReactNode }) {
     const lendValue = state.lend?.amount ?? 0;
     const unrealizedPnl = state.basketPositions.reduce((s, p) => {
       const b = bundleById(p.bundleId);
-      return s + (b ? p.qty * (b.nav - p.avgCost) : 0);
+      const nav = b?.nav ?? p.navHint;
+      if (nav == null) return s;
+      return s + p.qty * (nav - p.avgCost);
     }, 0);
     const totalValue =
       state.usdc + basketValue + trancheValue + ppnValue + lendValue - loanDebt;

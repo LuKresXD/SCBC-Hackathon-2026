@@ -233,3 +233,77 @@ export async function fetchTransactionHistory(
   const data = (await res.json()) as { transactions?: TransactionRow[] } | TransactionRow[];
   return Array.isArray(data) ? data : (data.transactions ?? []);
 }
+
+// ---------- Basket portfolio (backend hydrate) ----------
+
+/** Shape expected by demo-state's `basket/hydrate` action. */
+export interface BasketPositionHydrate {
+  bundleId: string;
+  qty: number;
+  avgCost: number;
+  tier?: 90 | 70 | 50;
+  navHint?: number;
+  displayName?: string;
+  maturityAt?: number;
+  status?: string;
+}
+
+interface BackendPositionRow {
+  position_id: string;
+  bundle_id: string;
+  bundle_name: string;
+  bundle_status: string;
+  risk_tier: number;
+  resolution_date: string | null;
+  tokens_held: number;
+  entry_price: number;
+  deposited_usdc: number;
+  current_nav: number;
+  current_value: number;
+  unrealized_pnl: number;
+  pnl_percent: number;
+  created_at: string;
+}
+
+function normalizeTier(raw: number): 90 | 70 | 50 | undefined {
+  if (raw === 90 || raw === 70 || raw === 50) return raw;
+  return undefined;
+}
+
+/**
+ * Fetch the wallet's basket positions from the backend
+ * (`/api/deposit/portfolio/:wallet`) and map each row into the `BasketPosition`
+ * shape the demo-state reducer expects. The portfolio page dispatches the
+ * result as `{ type: "basket/hydrate", positions }` so the in-memory state
+ * reflects the latest Supabase truth whenever the wallet reconnects.
+ *
+ * - `qty` is tokens_held (STHS) — not USDC.
+ * - `avgCost` is entry_price (USDC per token) — the deposit-time NAV.
+ * - `navHint` is the backend's current NAV for display; real pricing still
+ *   comes from the live feed when the portfolio row is rendered.
+ */
+export async function fetchBasketPortfolio(
+  walletAddress: string,
+): Promise<BasketPositionHydrate[]> {
+  const res = await fetch(
+    `${BACKEND_URL}/api/deposit/portfolio/${encodeURIComponent(walletAddress)}`,
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch basket portfolio (HTTP ${res.status})`);
+  }
+  const data = (await res.json()) as { positions?: BackendPositionRow[] };
+  const rows = data.positions ?? [];
+  return rows
+    // Ignore fully-redeemed rows — they'd render as phantom 0-token cards.
+    .filter((p) => p.tokens_held > 1e-9)
+    .map<BasketPositionHydrate>((p) => ({
+      bundleId: p.bundle_id,
+      qty: p.tokens_held,
+      avgCost: p.entry_price,
+      tier: normalizeTier(p.risk_tier),
+      navHint: p.current_nav,
+      displayName: p.bundle_name,
+      maturityAt: p.resolution_date ? Date.parse(p.resolution_date) : undefined,
+      status: p.bundle_status,
+    }));
+}

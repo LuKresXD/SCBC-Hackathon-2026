@@ -54,6 +54,7 @@ export const depositSchema = z.object({
 export const redeemSchema = z.object({
   bundle_id: z.string().uuid(),
   wallet_address: z.string().min(32).max(64),
+  amount_tokens: z.number().positive().optional(),
 });
 
 // === Middleware factory ===

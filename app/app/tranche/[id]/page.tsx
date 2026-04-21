@@ -359,7 +359,7 @@ export default function TrancheDetail() {
                 <MetricTile
                   label="FAIR VALUE"
                   value={`$${selected.fairPrice.toFixed(3)}`}
-                  sub="risk-neutral E[payoff]"
+                  sub="risk-neutral payoff"
                 />
                 <MetricTile
                   label="P[ATTACH]"

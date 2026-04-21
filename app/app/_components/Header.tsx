@@ -17,7 +17,7 @@ const NAV_LEFT = [
   { id: "basket",    label: "Constellations", href: "/app/basket" },
   { id: "tranche",   label: "Tranches",       href: "/app/tranche" },
   { id: "ppn",       label: "PPN",            href: "/app/ppn" },
-  { id: "docs",      label: "Docs",           href: "/app/docs" },
+  { id: "docs",      label: "About",          href: "/app/docs" },
 ];
 
 export function Header() {

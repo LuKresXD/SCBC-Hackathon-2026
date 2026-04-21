@@ -291,10 +291,10 @@ export interface PpnPortfolioEntry {
   maturity_date: string;
   created_at: string;
   total_value: number;
-  /** Tranche overlay — null when this note is a plain PPN deposit. */
-  tranche_kind?: "senior" | "mezzanine" | "junior" | null;
-  tranche_attach?: number | null;
-  tranche_detach?: number | null;
+  tranche_kind: "senior" | "mezzanine" | "junior" | null;
+  tranche_attach: number | null;
+  tranche_detach: number | null;
+  price_per_token: number | null;
 }
 
 export interface PpnPortfolio {
