@@ -30,10 +30,16 @@ export default function PortfolioPage() {
   const [redeemBusy, setRedeemBusy] = useState<string | null>(null);
   const [redeemError, setRedeemError] = useState<Record<string, string>>({});
   const basketState = useLiveBaskets();
+  // Single source of truth for "is there a wallet we can attribute balances
+  // to". Every aggregate downstream (donut, PnL, totals, position rows) is
+  // gated on this so a disconnected session can never show a stale balance
+  // leftover from a previous connection. Fixes portfolio reporting non-zero
+  // numbers both on fresh load (before wallet connect) and after disconnect.
+  const walletReady = connected && publicKey != null;
   // Cash line is the real on-chain USDC in the connected wallet. When
   // disconnected we fall back to 0 so the donut + positions list simply
   // omit the cash slice instead of flashing a stale sandbox counter.
-  const liveUsdc = connected ? usdc.uiAmount : 0;
+  const liveUsdc = walletReady ? usdc.uiAmount : 0;
   const [activeId, setActiveId] = useState<string | null>(null);
   const [renderNow, setRenderNow] = useState<number>(() => Date.now());
   const [view, setView] = useState<View>("positions");
@@ -46,23 +52,31 @@ export default function PortfolioPage() {
   // in real time. Matches the per-vault card math (`principal * apy% / 365`
   // capped at maturity). This is what makes PPN positions contribute to
   // unrealized P&L — the demo-state totals only know about basket drift.
-  const ppnAccruedYield = state.ppnVaults.reduce((sum, v) => {
-    const elapsedDays = Math.max(0, (renderNow - v.createdAt) / 86_400_000);
-    const accrued = v.principal * (v.apy / 100 / 365) * Math.min(elapsedDays, v.maturityDays);
-    return sum + accrued;
-  }, 0);
+  // Gated on walletReady so a stale reducer state (if the sweep useEffect
+  // below hasn't flushed yet) can't show accrued yield while disconnected.
+  const ppnAccruedYield = walletReady
+    ? state.ppnVaults.reduce((sum, v) => {
+        const elapsedDays = Math.max(0, (renderNow - v.createdAt) / 86_400_000);
+        const accrued =
+          v.principal * (v.apy / 100 / 365) * Math.min(elapsedDays, v.maturityDays);
+        return sum + accrued;
+      }, 0)
+    : 0;
   // Tranche accrued yield. `totals.trancheValue` is qty*avgCost=principal (frozen
   // at entry) because the backend doesn't mark tranches to market — so without
   // this term the Tranches row and the headline P&L would never move, no matter
   // how long the $16 of tranches had been held. Straight-line accrual against
   // `estimated_apy` is the same approximation used for PPNs, capped at maturity.
-  const trancheAccruedYield = state.tranchePositions.reduce((sum, p) => {
-    if (p.apy == null || p.createdAt == null || p.maturityDays == null) return sum;
-    const principal = p.qty * p.avgCost;
-    const elapsedDays = Math.max(0, (renderNow - p.createdAt) / 86_400_000);
-    const accrued = principal * (p.apy / 100 / 365) * Math.min(elapsedDays, p.maturityDays);
-    return sum + accrued;
-  }, 0);
+  const trancheAccruedYield = walletReady
+    ? state.tranchePositions.reduce((sum, p) => {
+        if (p.apy == null || p.createdAt == null || p.maturityDays == null) return sum;
+        const principal = p.qty * p.avgCost;
+        const elapsedDays = Math.max(0, (renderNow - p.createdAt) / 86_400_000);
+        const accrued =
+          principal * (p.apy / 100 / 365) * Math.min(elapsedDays, p.maturityDays);
+        return sum + accrued;
+      }, 0)
+    : 0;
   // Basket drift using live NAV when available. `totals.unrealizedPnl` calls
   // bundleById which misses backend UUIDs → falls back to navHint captured at
   // hydrate time (stale). This pass prefers live basketState so drift actually
@@ -72,31 +86,43 @@ export default function PortfolioPage() {
   // rows (including duplicate-bundle rows). If we also summed drift across
   // duplicates we'd be inflating vs totals.basketValue. We iterate the raw
   // array (not deduped) so the add stays consistent with totals.basketValue.
-  const basketDriftLive = state.basketPositions.reduce((sum, p) => {
-    let nav: number | undefined;
-    if (basketState.status === "ok") {
-      nav = basketState.baskets.find((b) => b.id === p.bundleId)?.nav;
-    }
-    if (nav == null) nav = bundleById(p.bundleId)?.nav;
-    if (nav == null) nav = p.navHint;
-    if (nav == null) return sum;
-    return sum + p.qty * (nav - p.avgCost);
-  }, 0);
+  const basketDriftLive = walletReady
+    ? state.basketPositions.reduce((sum, p) => {
+        let nav: number | undefined;
+        if (basketState.status === "ok") {
+          nav = basketState.baskets.find((b) => b.id === p.bundleId)?.nav;
+        }
+        if (nav == null) nav = bundleById(p.bundleId)?.nav;
+        if (nav == null) nav = p.navHint;
+        if (nav == null) return sum;
+        return sum + p.qty * (nav - p.avgCost);
+      }, 0)
+    : 0;
   // Top-line value uses the live wallet USDC + live basket drift + PPN/tranche
   // accrued yield so the headline TOTAL VALUE matches the breakdown rows and
   // the donut center down to the penny. Missing `basketDriftLive` here was
   // what made the header show $49.93 while "$25 + $4 + $16 + $5" summed to $50.
-  const displayTotal =
-    liveUsdc +
-    totals.basketValue +
-    basketDriftLive +
-    totals.trancheValue +
-    totals.ppnValue +
-    ppnAccruedYield +
-    trancheAccruedYield +
-    totals.lendValue -
-    totals.loanDebt;
-  const displayPnl = basketDriftLive + ppnAccruedYield + trancheAccruedYield;
+  //
+  // When disconnected every term here is already zero (via walletReady
+  // gating above), so the headline collapses to 0 without a separate guard.
+  // totals.basketValue / trancheValue / ppnValue come from the reducer,
+  // which the disconnect-sweep useEffect below clears; basketPositions etc.
+  // are also hard-gated at render time below, so a one-tick race cannot
+  // surface a ghost number.
+  const displayTotal = walletReady
+    ? liveUsdc +
+      totals.basketValue +
+      basketDriftLive +
+      totals.trancheValue +
+      totals.ppnValue +
+      ppnAccruedYield +
+      trancheAccruedYield +
+      totals.lendValue -
+      totals.loanDebt
+    : 0;
+  const displayPnl = walletReady
+    ? basketDriftLive + ppnAccruedYield + trancheAccruedYield
+    : 0;
 
   // Hydrate basket positions from Supabase whenever the wallet connects
   // or changes. The reducer is in-memory only, so without this the portfolio
@@ -180,6 +206,19 @@ export default function PortfolioPage() {
       cancelled = true;
     };
   }, [hydratePortfolio]);
+
+  // Disconnect sweep — flush the sandbox reducer so a fresh wallet (or an
+  // unconnected session) can never inherit the previous account's positions.
+  // The reducer is in-memory only, so without this the header would keep
+  // showing last-hydrated basket / tranche / PPN rows after the user clicks
+  // "Disconnect" in Phantom. Empty payloads reuse the hydrate actions the
+  // reducer already handles, so no new reducer cases required.
+  useEffect(() => {
+    if (walletReady) return;
+    dispatch({ type: "basket/hydrate", positions: [] });
+    dispatch({ type: "ppn/hydrate", vaults: [] });
+    dispatch({ type: "tranche/hydrate", positions: [] });
+  }, [walletReady, dispatch]);
 
   async function handleRedeem(bundleId: string, uiBundleId: string, tokens: number) {
     if (!connected || !publicKey) return;
@@ -596,6 +635,12 @@ export default function PortfolioPage() {
 
         {/* Positions - sorted by value descending, USDC included */}
         {(() => {
+          // No wallet → no position cards. The disconnect-sweep useEffect
+          // above clears the reducer, but until React re-runs this pass
+          // we could still iterate stale state.basketPositions for one
+          // tick; hard-gating here closes that race so no card ever flashes
+          // on a disconnected portfolio.
+          if (!walletReady) return null;
           // Build all position rows with value for sorting
           const rows: { value: number; el: React.ReactNode; key: string }[] = [];
 
@@ -908,10 +953,13 @@ export default function PortfolioPage() {
               uuid: p.bundleId,
               labelId,
               qty: residual,
-              // Residual positions have no nav-at-deposit capture, so
-              // peg cost basis to current NAV. PnL starts at $0 and
-              // only moves once NAV drifts after this render.
-              avgCost: nav,
+              // Use the DB-hydrated entry price as the cost basis. Pegging
+              // to current NAV forced card PnL = $0 regardless of drift,
+              // which disagreed with the headline (basketDriftLive uses
+              // p.avgCost). Falling back to nav only when the hydrate
+              // produced no avgCost (pre-migration rows) keeps the card
+              // honest without crashing on missing data.
+              avgCost: p.avgCost && p.avgCost > 0 ? p.avgCost : nav,
               nav,
               tier,
               maturityAt: p.maturityAt,
