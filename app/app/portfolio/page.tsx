@@ -8,10 +8,10 @@ import { SvgDonut } from "../_components/charts";
 import { C, FS, FD, FM, EASE, tc, trancheColor, fmtUsd } from "../_lib/tokens";
 import { useLiveBaskets } from "../_lib/use-live-baskets";
 import { bundleById } from "../_lib/bundles";
-import { useSandbox } from "../_lib/demo-state";
+import { useSandbox, type BasketPosition } from "../_lib/demo-state";
 import { useUsdcBalance, useWalletSigner } from "../_lib/wallet-bridge";
 import { fetchBasketPortfolio } from "../_lib/portfolio-client";
-import { fetchPpnPortfolio } from "../_lib/ppn-client";
+import { fetchPpnPortfolio, ppnRedeem, PpnError, type PpnPortfolioEntry } from "../_lib/ppn-client";
 import { redeemFromBundle, DepositError } from "../_lib/deposit-client";
 import {
   groupVirtualByUiBundle,
@@ -34,16 +34,6 @@ export default function PortfolioPage() {
   // disconnected we fall back to 0 so the donut + positions list simply
   // omit the cash slice instead of flashing a stale sandbox counter.
   const liveUsdc = connected ? usdc.uiAmount : 0;
-  // Top-line value uses the live wallet USDC instead of the sandbox counter
-  // so the headline TOTAL VALUE + the breakdown percentages match what
-  // actually sits in the user's wallet.
-  const displayTotal =
-    liveUsdc +
-    totals.basketValue +
-    totals.trancheValue +
-    totals.ppnValue +
-    totals.lendValue -
-    totals.loanDebt;
   const [activeId, setActiveId] = useState<string | null>(null);
   const [renderNow, setRenderNow] = useState<number>(() => Date.now());
   const [view, setView] = useState<View>("positions");
@@ -51,6 +41,62 @@ export default function PortfolioPage() {
     const t = setInterval(() => setRenderNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  // PPN accrued yield, ticking with renderNow so the top-of-page P&L moves
+  // in real time. Matches the per-vault card math (`principal * apy% / 365`
+  // capped at maturity). This is what makes PPN positions contribute to
+  // unrealized P&L — the demo-state totals only know about basket drift.
+  const ppnAccruedYield = state.ppnVaults.reduce((sum, v) => {
+    const elapsedDays = Math.max(0, (renderNow - v.createdAt) / 86_400_000);
+    const accrued = v.principal * (v.apy / 100 / 365) * Math.min(elapsedDays, v.maturityDays);
+    return sum + accrued;
+  }, 0);
+  // Tranche accrued yield. `totals.trancheValue` is qty*avgCost=principal (frozen
+  // at entry) because the backend doesn't mark tranches to market — so without
+  // this term the Tranches row and the headline P&L would never move, no matter
+  // how long the $16 of tranches had been held. Straight-line accrual against
+  // `estimated_apy` is the same approximation used for PPNs, capped at maturity.
+  const trancheAccruedYield = state.tranchePositions.reduce((sum, p) => {
+    if (p.apy == null || p.createdAt == null || p.maturityDays == null) return sum;
+    const principal = p.qty * p.avgCost;
+    const elapsedDays = Math.max(0, (renderNow - p.createdAt) / 86_400_000);
+    const accrued = principal * (p.apy / 100 / 365) * Math.min(elapsedDays, p.maturityDays);
+    return sum + accrued;
+  }, 0);
+  // Basket drift using live NAV when available. `totals.unrealizedPnl` calls
+  // bundleById which misses backend UUIDs → falls back to navHint captured at
+  // hydrate time (stale). This pass prefers live basketState so drift actually
+  // ticks instead of freezing between hydrates.
+  //
+  // NOTE: `totals.basketValue` in demo-state already sums qty*nav across ALL
+  // rows (including duplicate-bundle rows). If we also summed drift across
+  // duplicates we'd be inflating vs totals.basketValue. We iterate the raw
+  // array (not deduped) so the add stays consistent with totals.basketValue.
+  const basketDriftLive = state.basketPositions.reduce((sum, p) => {
+    let nav: number | undefined;
+    if (basketState.status === "ok") {
+      nav = basketState.baskets.find((b) => b.id === p.bundleId)?.nav;
+    }
+    if (nav == null) nav = bundleById(p.bundleId)?.nav;
+    if (nav == null) nav = p.navHint;
+    if (nav == null) return sum;
+    return sum + p.qty * (nav - p.avgCost);
+  }, 0);
+  // Top-line value uses the live wallet USDC + live basket drift + PPN/tranche
+  // accrued yield so the headline TOTAL VALUE matches the breakdown rows and
+  // the donut center down to the penny. Missing `basketDriftLive` here was
+  // what made the header show $49.93 while "$25 + $4 + $16 + $5" summed to $50.
+  const displayTotal =
+    liveUsdc +
+    totals.basketValue +
+    basketDriftLive +
+    totals.trancheValue +
+    totals.ppnValue +
+    ppnAccruedYield +
+    trancheAccruedYield +
+    totals.lendValue -
+    totals.loanDebt;
+  const displayPnl = basketDriftLive + ppnAccruedYield + trancheAccruedYield;
 
   // Hydrate basket positions from Supabase whenever the wallet connects
   // or changes. The reducer is in-memory only, so without this the portfolio
@@ -64,25 +110,60 @@ export default function PortfolioPage() {
         dispatch({ type: "basket/hydrate", positions }),
       ),
       fetchPpnPortfolio(wallet).then((portfolio) => {
+        // A vault is a tranche if ANY of the tranche indicators are set.
+        // The original predicate required both tranche_kind AND price_per_token;
+        // when Supabase's retry-strip drops either column (older schemas) a real
+        // tranche row shows `tranche_kind=null` and ends up misclassified as a
+        // PPN — the friend's "tranches are appearing as PPN vaults" bug. Any
+        // single tranche indicator being present is enough signal.
+        const looksLikeTranche = (v: PpnPortfolioEntry): boolean =>
+          v.tranche_kind != null ||
+          v.price_per_token != null ||
+          v.tranche_attach != null ||
+          v.tranche_detach != null;
+
+        // APY normalization: the backend sends `estimated_apy` as a 0..1
+        // fraction (e.g. 0.08 for 8%). The PPN + portfolio cards expect a
+        // percentage (e.g. 8). Multiplying by 100 when apy <= 1 lines the two
+        // conventions up; values > 1 are already in percentage form.
+        const apyPct = (apy: number): number => (apy <= 1 ? apy * 100 : apy);
+
         const ppnVaults = portfolio.vaults
-          .filter((v) => !v.tranche_kind)
+          .filter((v) => !looksLikeTranche(v))
           .map((v) => ({
             id: v.vault_id,
             bundleId: v.bundle_id,
             principal: v.principal_usdc,
             basketAmount: v.yield_deployed_usdc,
-            apy: v.estimated_apy,
+            apy: apyPct(v.estimated_apy),
             createdAt: new Date(v.created_at).getTime(),
             maturityDays: v.days_elapsed + v.days_remaining,
           }));
+
+        // Tranche hydration: when `price_per_token` is missing we fall back to
+        // $1.00 issue price so the row still shows up as a tranche (rather
+        // than vanishing) while not miscounting qty. The card reads
+        // qty * avgCost, so a fallback of 1.0 preserves notional = principal.
         const tranchePositions = portfolio.vaults
-          .filter((v) => v.tranche_kind && v.price_per_token)
-          .map((v) => ({
-            bundleId: v.bundle_id,
-            kind: v.tranche_kind as "senior" | "mezzanine" | "junior",
-            qty: v.principal_usdc / v.price_per_token!,
-            avgCost: v.price_per_token!,
-          }));
+          .filter(looksLikeTranche)
+          .map((v) => {
+            const pricePerToken =
+              v.price_per_token && v.price_per_token > 0 ? v.price_per_token : 1;
+            const createdMs = new Date(v.created_at).getTime();
+            const maturityDays = v.days_elapsed + v.days_remaining;
+            const maturityMs = createdMs + maturityDays * 86_400_000;
+            return {
+              bundleId: v.bundle_id,
+              kind: (v.tranche_kind ?? "senior") as "senior" | "mezzanine" | "junior",
+              qty: v.principal_usdc / pricePerToken,
+              avgCost: pricePerToken,
+              vaultId: v.vault_id,
+              maturityAt: maturityMs,
+              apy: apyPct(v.estimated_apy),
+              createdAt: createdMs,
+              maturityDays,
+            };
+          });
         dispatch({ type: "ppn/hydrate", vaults: ppnVaults });
         dispatch({ type: "tranche/hydrate", positions: tranchePositions });
       }),
@@ -128,6 +209,43 @@ export default function PortfolioPage() {
     }
   }
 
+  /**
+   * Redeem a PPN or tranche position. Both ride the `initialize_note` rail so
+   * a single `ppnRedeem` call handles both. When `vaultId` is known we pass
+   * it directly (unambiguous); otherwise we fall back to (bundleId, wallet)
+   * which the backend resolves via `getActivePPNVault`.
+   */
+  async function handleRedeemPpn(rowKey: string, opts: { vaultId?: string; bundleId?: string }) {
+    if (!connected || !publicKey) return;
+    setRedeemError((prev) => {
+      const next = { ...prev };
+      delete next[rowKey];
+      return next;
+    });
+    setRedeemBusy(rowKey);
+    try {
+      await ppnRedeem({
+        wallet: walletSigner,
+        vaultId: opts.vaultId,
+        bundleId: opts.bundleId,
+      });
+      await hydratePortfolio();
+      void usdc.refresh();
+    } catch (err) {
+      const msg =
+        err instanceof PpnError
+          ? err.message
+          : err instanceof Error
+            ? /user rejected/i.test(err.message)
+              ? "Transaction was rejected in your wallet."
+              : err.message
+            : String(err);
+      setRedeemError((prev) => ({ ...prev, [rowKey]: msg }));
+    } finally {
+      setRedeemBusy(null);
+    }
+  }
+
   // Live-first basket metadata lookup: if the live pipeline has this
   // id we use the live NAV so open positions track the real feed, and
   // fall back to the seed Bundle only when the live feed doesn't have
@@ -149,11 +267,17 @@ export default function PortfolioPage() {
       : null;
   };
 
+  // Live row values — match the breakdown rows below so the donut slices,
+  // the percentages, and the headline all add up. Using the raw `totals.*`
+  // here was the source of the "rows sum ≠ headline" discrepancy.
+  const donutBasketValue = totals.basketValue + basketDriftLive;
+  const donutTrancheValue = totals.trancheValue + trancheAccruedYield;
+  const donutPpnValue = totals.ppnValue + ppnAccruedYield;
   const donutData: Array<{ id: string; value: number; color: string }> = [
     ...(liveUsdc > 0 ? [{ id: "cash", value: liveUsdc, color: "#4a5a6a" }] : []),
-    ...(totals.basketValue > 0 ? [{ id: "baskets", value: totals.basketValue, color: C.teal }] : []),
-    ...(totals.trancheValue > 0 ? [{ id: "tranches", value: totals.trancheValue, color: C.amber }] : []),
-    ...(totals.ppnValue > 0 ? [{ id: "ppn", value: totals.ppnValue, color: C.violet }] : []),
+    ...(donutBasketValue > 0 ? [{ id: "baskets", value: donutBasketValue, color: C.teal }] : []),
+    ...(donutTrancheValue > 0 ? [{ id: "tranches", value: donutTrancheValue, color: C.amber }] : []),
+    ...(donutPpnValue > 0 ? [{ id: "ppn", value: donutPpnValue, color: C.violet }] : []),
     ...(totals.lendValue > 0 ? [{ id: "lending", value: totals.lendValue, color: C.blue }] : []),
   ];
   const empty = donutData.length === 0;
@@ -294,16 +418,24 @@ export default function PortfolioPage() {
                 <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.18em", marginBottom: 6 }}>
                   UNREALIZED P&L
                 </div>
-                <div style={{ fontSize: 24, color: totals.unrealizedPnl >= 0 ? C.green : C.red, fontFamily: FD, fontWeight: 500, letterSpacing: "-0.015em", lineHeight: 1 }}>
-                  {totals.unrealizedPnl >= 0 ? "+" : ""}{fmtUsd(totals.unrealizedPnl, 2)}
+                <div style={{ fontSize: 24, color: displayPnl >= 0 ? C.green : C.red, fontFamily: FD, fontWeight: 500, letterSpacing: "-0.015em", lineHeight: 1 }}>
+                  {displayPnl >= 0 ? "+" : ""}{fmtUsd(displayPnl, 2)}
                 </div>
               </div>
               {(() => {
+                // Breakdown rows must include accrued yield + live drift — without
+                // this the sum of rows ≠ displayTotal, which is why the user saw
+                // "$25 + $3.93 + $16 + $5 = $49.93" next to a headline of "$50".
+                // Adding drift/accrual here keeps the breakdown in sync with the
+                // headline down to the penny.
+                const basketRowValue = totals.basketValue + basketDriftLive;
+                const trancheRowValue = totals.trancheValue + trancheAccruedYield;
+                const ppnRowValue = totals.ppnValue + ppnAccruedYield;
                 const rows = [
                   { id: "cash",     label: "USDC",           color: "#4a5a6a", value: liveUsdc },
-                  { id: "baskets",  label: "Constellations", color: C.teal,    value: totals.basketValue },
-                  { id: "tranches", label: "Tranches",       color: C.amber,   value: totals.trancheValue },
-                  { id: "ppn",      label: "PPNs",           color: C.violet,  value: totals.ppnValue },
+                  { id: "baskets",  label: "Constellations", color: C.teal,    value: basketRowValue },
+                  { id: "tranches", label: "Tranches",       color: C.amber,   value: trancheRowValue },
+                  { id: "ppn",      label: "PPNs",           color: C.violet,  value: ppnRowValue },
                 ];
                 const breakdownTotal = rows.reduce((s, r) => s + r.value, 0);
                 return rows.map((r) => {
@@ -447,7 +579,7 @@ export default function PortfolioPage() {
                       <>
                         <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 10 }}>TOTAL VALUE</div>
                         <div style={{ fontSize: 34, fontWeight: 600, color: C.textPrimary, fontFamily: FS, lineHeight: 1, marginBottom: 10, letterSpacing: "-0.03em" }}>
-                          {fmtUsd(displayTotal, 0)}
+                          {fmtUsd(displayTotal, 2)}
                         </div>
                         <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FM, letterSpacing: "0.08em" }}>
                           {donutData.length} POSITION{donutData.length !== 1 ? "S" : ""}
@@ -615,7 +747,25 @@ export default function PortfolioPage() {
           // For each on-chain position, render a residual card covering
           // any tokens the virtual ledger hasn't explained (pre-ledger
           // deposits, localStorage wipes, etc.).
+          // Dedupe by bundleId before rendering residuals: the backend has
+          // historically returned multiple rows for the same bundle (e.g. one
+          // per on-chain deposit event), which would give us two cards with
+          // identical `${bundleId}::residual` keys and the "Encountered two
+          // children with the same key" React warning. Sum their qty so the
+          // user sees one merged residual instead of duplicates.
+          const residualByBundle = new Map<string, BasketPosition>();
           state.basketPositions.forEach((p) => {
+            const existing = residualByBundle.get(p.bundleId);
+            if (existing) {
+              residualByBundle.set(p.bundleId, {
+                ...existing,
+                qty: existing.qty + p.qty,
+              });
+            } else {
+              residualByBundle.set(p.bundleId, p);
+            }
+          });
+          residualByBundle.forEach((p) => {
             const virtualQty = virtualTokensByUuid[p.bundleId] ?? 0;
             const residual = p.qty - virtualQty;
             if (residual <= 0.001) return;
@@ -642,12 +792,35 @@ export default function PortfolioPage() {
 
 
           state.tranchePositions.forEach((p, i) => {
-            const value = p.qty * p.avgCost;
+            const principal = p.qty * p.avgCost;
+            // Per-card accrued yield — same formula as trancheAccruedYield, so
+            // summing cards matches the headline P&L contribution.
+            const trancheAccrued =
+              p.apy != null && p.createdAt != null && p.maturityDays != null
+                ? principal *
+                  (p.apy / 100 / 365) *
+                  Math.min(
+                    Math.max(0, (renderNow - p.createdAt) / 86_400_000),
+                    p.maturityDays,
+                  )
+                : 0;
+            const value = principal + trancheAccrued;
+            const rowKey = `tranche-${p.vaultId ?? `${p.bundleId}-${p.kind}-${i}`}`;
+            const matured = p.maturityAt != null ? p.maturityAt <= renderNow : false;
+            const isBusy = redeemBusy === rowKey;
+            const errMsg = redeemError[rowKey];
+            const maturityLabel = p.maturityAt
+              ? new Date(p.maturityAt).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })
+              : null;
             rows.push({
-              key: `tranche-${i}`,
+              key: rowKey,
               value,
               el: (
-                <div key={`tranche-${i}`} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
+                <div key={rowKey} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
                     <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, letterSpacing: "0.08em" }}>TRANCHE</div>
                     <Link href="/app/tranche" style={{ fontSize: 11, color: C.teal, fontFamily: FS, textDecoration: "none" }}>View all →</Link>
@@ -660,8 +833,49 @@ export default function PortfolioPage() {
                         <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>{p.qty.toFixed(2)} tokens · issued ${p.avgCost.toFixed(2)}</div>
                       </div>
                     </div>
-                    <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(value, 2)}</div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 13, color: C.textPrimary, fontFamily: FD }}>{fmtUsd(value, 2)}</div>
+                      {trancheAccrued > 0 && (
+                        <div style={{ fontSize: 11, color: C.green, fontFamily: FS, marginTop: 2 }}>+{fmtUsd(trancheAccrued, 2)}</div>
+                      )}
+                    </div>
                   </Link>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${C.border}` }}>
+                    <div style={{ fontSize: 11, color: matured ? C.green : C.textMuted, fontFamily: FM, letterSpacing: "0.06em" }}>
+                      {matured ? "MATURED" : maturityLabel ? `MATURES ${maturityLabel.toUpperCase()}` : "MATURITY UNKNOWN"}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleRedeemPpn(rowKey, {
+                          vaultId: p.vaultId,
+                          bundleId: p.vaultId ? undefined : p.bundleId,
+                        })
+                      }
+                      disabled={!matured || isBusy || !connected}
+                      style={{
+                        padding: "7px 16px",
+                        fontSize: 12,
+                        fontFamily: FD,
+                        fontWeight: 500,
+                        letterSpacing: "0.02em",
+                        borderRadius: 8,
+                        cursor: matured && !isBusy ? "pointer" : "not-allowed",
+                        border: `0.5px solid ${matured ? C.amber : "rgba(255,255,255,0.08)"}`,
+                        background: matured ? "rgba(217, 119, 6, 0.14)" : "transparent",
+                        color: matured ? C.amber : C.textMuted,
+                        opacity: isBusy ? 0.6 : 1,
+                        transition: `all 0.15s ${EASE}`,
+                      }}
+                    >
+                      {isBusy ? "Redeeming…" : "Redeem"}
+                    </button>
+                  </div>
+                  {errMsg && (
+                    <div style={{ marginTop: 10, fontSize: 11, fontFamily: FS, color: C.red }}>
+                      {errMsg}
+                    </div>
+                  )}
                 </div>
               ),
             });
@@ -671,11 +885,21 @@ export default function PortfolioPage() {
             const elapsed = Math.max(0, (renderNow - v.createdAt) / 86_400_000);
             const accrued = v.principal * (v.apy / 100 / 365) * Math.min(elapsed, v.maturityDays);
             const value = v.principal + accrued;
+            const rowKey = `ppn-${v.id}`;
+            const maturityMs = v.createdAt + v.maturityDays * 86_400_000;
+            const matured = maturityMs <= renderNow;
+            const isBusy = redeemBusy === rowKey;
+            const errMsg = redeemError[rowKey];
+            const maturityLabel = new Date(maturityMs).toLocaleDateString(undefined, {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            });
             rows.push({
-              key: v.id,
+              key: rowKey,
               value,
               el: (
-                <div key={v.id} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
+                <div key={rowKey} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
                     <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, letterSpacing: "0.08em" }}>PPN VAULT</div>
                     <Link href="/app/ppn" style={{ fontSize: 11, color: C.violet, fontFamily: FS, textDecoration: "none" }}>View all →</Link>
@@ -693,6 +917,37 @@ export default function PortfolioPage() {
                       <div style={{ fontSize: 11, color: C.green, fontFamily: FS, marginTop: 2 }}>+{fmtUsd(accrued, 2)}</div>
                     </div>
                   </div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${C.border}` }}>
+                    <div style={{ fontSize: 11, color: matured ? C.green : C.textMuted, fontFamily: FM, letterSpacing: "0.06em" }}>
+                      {matured ? "MATURED" : `MATURES ${maturityLabel.toUpperCase()}`}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRedeemPpn(rowKey, { vaultId: v.id })}
+                      disabled={!matured || isBusy || !connected}
+                      style={{
+                        padding: "7px 16px",
+                        fontSize: 12,
+                        fontFamily: FD,
+                        fontWeight: 500,
+                        letterSpacing: "0.02em",
+                        borderRadius: 8,
+                        cursor: matured && !isBusy ? "pointer" : "not-allowed",
+                        border: `0.5px solid ${matured ? C.violet : "rgba(255,255,255,0.08)"}`,
+                        background: matured ? "rgba(139, 92, 246, 0.14)" : "transparent",
+                        color: matured ? C.violet : C.textMuted,
+                        opacity: isBusy ? 0.6 : 1,
+                        transition: `all 0.15s ${EASE}`,
+                      }}
+                    >
+                      {isBusy ? "Redeeming…" : "Redeem"}
+                    </button>
+                  </div>
+                  {errMsg && (
+                    <div style={{ marginTop: 10, fontSize: 11, fontFamily: FS, color: C.red }}>
+                      {errMsg}
+                    </div>
+                  )}
                 </div>
               ),
             });

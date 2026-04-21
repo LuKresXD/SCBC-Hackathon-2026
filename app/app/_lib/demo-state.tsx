@@ -50,6 +50,25 @@ export type TranchePosition = {
   kind: TrancheKind;
   qty: number;
   avgCost: number;
+  /**
+   * Optional Supabase vault_id (ppn_vaults.id). Tranches ride the PPN rail
+   * so the redeem flow takes either a vault_id or a (wallet, bundle) pair.
+   * Present after a hydrate from /api/ppn/portfolio; absent on freshly-
+   * dispatched `tranche/deposit` actions until the next portfolio refresh.
+   */
+  vaultId?: string;
+  /** Epoch ms — maturity date parsed from the backend vault row. */
+  maturityAt?: number;
+  /**
+   * APY in percent (e.g. 8 for 8%). Present after a hydrate from
+   * /api/ppn/portfolio so the portfolio page can accrue straight-line yield
+   * on top of notional. Absent on freshly-dispatched `tranche/deposit`.
+   */
+  apy?: number;
+  /** Epoch ms — vault creation time, anchor for yield accrual. */
+  createdAt?: number;
+  /** Lifetime in days (days_elapsed + days_remaining at hydrate). */
+  maturityDays?: number;
 };
 
 export type PpnVault = {

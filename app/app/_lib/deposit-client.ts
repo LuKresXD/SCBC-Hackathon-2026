@@ -223,17 +223,12 @@ export async function prepareDeposit(args: {
   amountUsdc: number;
 }): Promise<DepositPrepareResponse> {
   const uuid = await resolveBundleUuid(args.bundleId);
-  // Persist the synthetic-id -> UUID mapping so the portfolio page can
-  // render positions under the friendly name the user actually clicked
-  // rather than the backend's internal bundle name.
-  if (uuid !== args.bundleId) {
-    try {
-      const { cacheBundleDisplayName } = await import("./portfolio-client");
-      cacheBundleDisplayName(args.walletAddress, uuid, args.bundleId);
-    } catch {
-      // Non-fatal: cache failures shouldn't block deposits.
-    }
-  }
+  // NOTE: Previously tried to dynamically import `cacheBundleDisplayName`
+  // from portfolio-client to persist the synthetic-id → UUID mapping. That
+  // export never existed (TS2339) and the try/catch swallowed the failure
+  // at runtime, so the feature was dead code. Removed to unblock typecheck;
+  // the portfolio page already resolves names via `resolveBasket` and the
+  // on-chain bundle catalog, so no user-visible regression.
   return postJson<DepositPrepareResponse>("/api/deposit/prepare", {
     bundle_id: uuid,
     wallet_address: args.walletAddress,
