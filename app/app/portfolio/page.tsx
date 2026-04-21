@@ -613,6 +613,92 @@ export default function PortfolioPage() {
             },
             {},
           );
+          // Map uuid → a representative uiBundleId from any virtual group.
+          // When a residual position exists for a UUID the user has ALSO
+          // deposited into via a synthetic id, borrowing that id gives us
+          // the user's intent (they picked STHS-MID-SHORT, so the residual
+          // card should label + route the same way). Picking the largest
+          // group by token count stays stable under duplicate ids.
+          const uiBundleIdByUuid = virtualGroups.reduce<Record<string, { id: string; tokens: number }>>(
+            (acc, g) => {
+              const prev = acc[g.uuid];
+              if (!prev || g.tokens > prev.tokens) {
+                acc[g.uuid] = { id: g.uiBundleId, tokens: g.tokens };
+              }
+              return acc;
+            },
+            {},
+          );
+
+          // Derive a frontend STHS- label for a residual on-chain position
+          // whose bundleId is a backend UUID (so resolveBasket misses).
+          // Preference order:
+          //   1. Use p.displayName if the backend already stored a
+          //      STHS-TIER-WINDOW name (new seed) — that's the authoritative
+          //      basket identity and it routes directly to /app/basket/[id].
+          //   2. Borrow the user's own uiBundleId if they have any virtual
+          //      group for this UUID — that's their actual intent.
+          //   3. Match the live grid by tier + closest daysLeft to the
+          //      backend's maturityAt. Keeps (tier, window) semantics even
+          //      for pre-ledger deposits.
+          //   4. Match any seed bundle with the same tier (window unknown,
+          //      but at least the tier + STHS- format is correct).
+          // Returns null when even the tier is unknown — caller falls back
+          // to whatever p.displayName was.
+          const deriveResidualLabel = (p: BasketPosition): {
+            labelId: string;
+            tier: 90 | 70 | 50;
+            nav: number;
+          } | null => {
+            if (p.displayName && /^STHS-(HIGH|MID|LOW)-(SHORT|MED|LONG)$/.test(p.displayName)) {
+              const live = basketState.status === "ok"
+                ? basketState.baskets.find((b) => b.id === p.displayName)
+                : null;
+              const tier = live?.tier ?? p.tier;
+              const nav = live?.nav ?? p.navHint;
+              if (tier != null && nav != null) {
+                return { labelId: p.displayName, tier, nav };
+              }
+            }
+            const borrowed = uiBundleIdByUuid[p.bundleId];
+            if (borrowed) {
+              const live = basketState.status === "ok"
+                ? basketState.baskets.find((b) => b.id === borrowed.id)
+                : null;
+              const tier = live?.tier ?? p.tier;
+              const nav = live?.nav ?? p.navHint;
+              if (tier != null && nav != null) {
+                return { labelId: borrowed.id, tier, nav };
+              }
+            }
+            const tierGuess = p.tier;
+            if (tierGuess == null) return null;
+            if (basketState.status === "ok") {
+              const candidates = basketState.baskets.filter((b) => b.tier === tierGuess);
+              if (candidates.length) {
+                const target = p.maturityAt;
+                const pick = target == null
+                  ? candidates[0]
+                  : candidates
+                      .map((b) => {
+                        const bMaturity = b.daysLeft != null
+                          ? Date.now() + b.daysLeft * 86_400_000
+                          : null;
+                        const diff = bMaturity == null
+                          ? Number.POSITIVE_INFINITY
+                          : Math.abs(bMaturity - target);
+                        return { b, diff };
+                      })
+                      .sort((a, z) => a.diff - z.diff)[0].b;
+                return { labelId: pick.id, tier: pick.tier, nav: pick.nav };
+              }
+            }
+            const seed = bundleById(`STHS-${tierGuess === 90 ? "HIGH" : tierGuess === 70 ? "MID" : "LOW"}-SHORT`);
+            if (seed) {
+              return { labelId: seed.id, tier: seed.tier, nav: p.navHint ?? seed.nav };
+            }
+            return null;
+          };
 
           const renderBasketCard = (opts: {
             cardKey: string;
@@ -660,6 +746,32 @@ export default function PortfolioPage() {
                   : null;
             const isBusy = redeemBusy === uuid;
             const errMsg = redeemError[uuid];
+            // Human-readable conviction tag. Matches the wording on /basket
+            // where each card shows "high/mid/low probability" under the id.
+            const tierLabel = tier === 90 ? "High" : tier === 70 ? "Mid" : "Low";
+            // Days-to-close: prefer the live feed, fall back to maturityAt
+            // from the DB hydrate. Mirrors `formatDaysLeft` on /basket so the
+            // wording is consistent between the index card and portfolio card.
+            const daysLeftMs =
+              liveMatchById?.daysLeft != null
+                ? liveMatchById.daysLeft * 86_400_000
+                : maturityAt != null
+                  ? Math.max(0, maturityAt - renderNow)
+                  : null;
+            const closesInLabel =
+              daysLeftMs == null
+                ? null
+                : daysLeftMs <= 0
+                  ? "Resolving now"
+                  : (() => {
+                      const d = Math.round(daysLeftMs / 86_400_000);
+                      if (d === 0) return "Closes today";
+                      if (d === 1) return "Closes in 1 day";
+                      return `Closes in ${d} days`;
+                    })();
+            const contextLine = closesInLabel
+              ? `${tierLabel}-conviction · ${closesInLabel}`
+              : `${tierLabel}-conviction basket`;
             rows.push({
               key: cardKey,
               value,
@@ -674,6 +786,7 @@ export default function PortfolioPage() {
                       <div style={{ width: 4, height: 24, borderRadius: 2, background: tc(tier) }} />
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>{labelId}</div>
+                        <div style={{ fontSize: 11, color: C.textSecondary, fontFamily: FS, marginTop: 2 }}>{contextLine}</div>
                         <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>{qty.toFixed(2)} tokens · avg ${avgCost.toFixed(3)}</div>
                       </div>
                     </div>
@@ -769,10 +882,26 @@ export default function PortfolioPage() {
             const virtualQty = virtualTokensByUuid[p.bundleId] ?? 0;
             const residual = p.qty - virtualQty;
             if (residual <= 0.001) return;
+            // First try the catalog (works when bundleId is already a
+            // STHS- id), then fall through to deriveResidualLabel which
+            // maps a backend UUID → the best-guess STHS-TIER-WINDOW id.
+            // Using p.displayName as a label leaks "LK-70-0515" into the
+            // UI and breaks the basket-detail route.
             const catalogMatch = resolveBasket(p.bundleId);
-            const tier = catalogMatch?.tier ?? p.tier;
-            const nav = catalogMatch?.nav ?? p.navHint;
-            const labelId = catalogMatch?.id ?? p.displayName ?? p.bundleId;
+            let tier: 90 | 70 | 50 | undefined;
+            let nav: number | undefined;
+            let labelId: string;
+            if (catalogMatch) {
+              tier = catalogMatch.tier;
+              nav = catalogMatch.nav;
+              labelId = catalogMatch.id;
+            } else {
+              const derived = deriveResidualLabel(p);
+              if (!derived) return;
+              tier = derived.tier;
+              nav = derived.nav;
+              labelId = derived.labelId;
+            }
             if (tier == null || nav == null) return;
             renderBasketCard({
               cardKey: `${p.bundleId}::residual`,

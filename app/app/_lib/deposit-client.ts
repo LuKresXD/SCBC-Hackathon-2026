@@ -15,25 +15,25 @@
 import { BACKEND_URL } from "./tokens";
 
 /**
- * The UI keys bundles by human name (`STHS-*` or `LK-*`), but the backend's
- * deposit routes validate `bundle_id` as a UUID. We fetch `/api/bundles`
- * once, build a name → UUID map, and cache it for the session.
+ * The UI keys bundles by human name (`STHS-*` or legacy `LK-*`), but the
+ * backend's deposit routes validate `bundle_id` as a UUID. We fetch
+ * `/api/bundles` once, build a name → UUID map, and cache it for the session.
  *
- * We also normalize the post-rebrand `STHS-*` names to the DB's pre-rebrand
- * `LK-*` names — the drift Luka called out in commit `aaafc79`'s caveats
- * block. Once the DB is migrated this normalization becomes a no-op.
- *
- * For the hackathon: the Constellations grid shows 9 synthetic STHS-* baskets
- * built client-side from live Polymarket data, but only 2 LK-* bundles are
- * actually initialized on-chain. When a user clicks Buy on a synthetic basket
- * with no matching LK-* row, we transparently route to the closest-tier
- * initialized bundle so a real on-chain deposit still happens. The card
- * keeps its own identity in the UI — only the underlying vault target is
- * remapped for the purpose of executing the transaction.
+ * Post seed.ts expansion the backend carries a dedicated bundle per
+ * (tier, window) — `STHS-HIGH-SHORT`, `STHS-MID-MED`, `STHS-LOW-LONG`, etc.
+ * — so an exact-name lookup is the happy path and every Constellation click
+ * mints tokens for THAT specific constellation. Legacy LK-90-0430 and
+ * LK-70-0515 rows are kept so historical on-chain positions remain
+ * redeemable; clicking them as a fallback no longer happens once the STHS-*
+ * rows are initialized.
  */
 
 function normalizeName(name: string): string {
-  return name.replace(/^STHS-/, "LK-");
+  // Pass through. The DB used to live with LK-* names pre-rebrand, but the
+  // seed now emits STHS-TIER-WINDOW rows directly, so the STHS-* → LK-*
+  // rewrite that used to live here would actively BREAK the exact-match
+  // lookup below.
+  return name;
 }
 
 type BundleSummary = {

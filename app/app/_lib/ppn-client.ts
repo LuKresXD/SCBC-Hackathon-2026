@@ -24,7 +24,9 @@ import { BACKEND_URL } from "./tokens";
 //             cross-importing so this module stays server-safe + tree-shakable)
 
 function normalizeName(name: string): string {
-  return name.replace(/^STHS-/, "LK-");
+  // Pass through — the DB now seeds STHS-TIER-WINDOW rows directly, so the
+  // old STHS- → LK- rewrite would send PPN setups to the wrong bundle.
+  return name;
 }
 
 type BundleSummary = {

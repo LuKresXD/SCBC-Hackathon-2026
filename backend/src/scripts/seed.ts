@@ -41,6 +41,21 @@ const FALLBACK_LEGS_70: LegInput[] = [
   { conditionId: 'b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5', question: 'Will the 10Y Treasury yield drop below 4% by May 15, 2026?', fallbackProb: 0.58, polymarketUrl: 'https://polymarket.com/event/10y-yield-may26' },
 ];
 
+// Long-shot fallback legs for the 50 tier. Probabilities target the ~5% band
+// so calculateIssuePrice lands near the "STHS-LOW-*" NAV range the UI expects.
+const FALLBACK_LEGS_50: LegInput[] = [
+  { conditionId: 'c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5', question: 'Will a major new crypto regulatory framework pass the US House by resolution?', fallbackProb: 0.08, polymarketUrl: 'https://polymarket.com/event/crypto-framework-2026' },
+  { conditionId: 'd1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6', question: 'Will Bitcoin hit a new all-time high above $150k by resolution?', fallbackProb: 0.12, polymarketUrl: 'https://polymarket.com/event/btc-150k-2026' },
+  { conditionId: 'e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7', question: 'Will Tesla announce a stock split before resolution?', fallbackProb: 0.06, polymarketUrl: 'https://polymarket.com/event/tsla-split-2026' },
+  { conditionId: 'f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8', question: 'Will SpaceX IPO before resolution?', fallbackProb: 0.04, polymarketUrl: 'https://polymarket.com/event/spacex-ipo-2026' },
+  { conditionId: 'a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9', question: 'Will any mammal be cloned and featured publicly by resolution?', fallbackProb: 0.03, polymarketUrl: 'https://polymarket.com/event/mammal-clone-2026' },
+  { conditionId: 'b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0', question: 'Will an ETH L2 surpass Ethereum mainnet TVL before resolution?', fallbackProb: 0.09, polymarketUrl: 'https://polymarket.com/event/l2-flip-eth-2026' },
+  { conditionId: 'c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1', question: 'Will gold settle above $3,500/oz by resolution?', fallbackProb: 0.07, polymarketUrl: 'https://polymarket.com/event/gold-3500-2026' },
+  { conditionId: 'd7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2', question: 'Will a US-listed company announce a $1T acquisition by resolution?', fallbackProb: 0.05, polymarketUrl: 'https://polymarket.com/event/1t-acquisition-2026' },
+  { conditionId: 'e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3', question: 'Will the Fed cut rates by 100bps in a single FOMC decision?', fallbackProb: 0.06, polymarketUrl: 'https://polymarket.com/event/fed-100bps-2026' },
+  { conditionId: 'f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4', question: 'Will a major publicly-traded airline declare bankruptcy by resolution?', fallbackProb: 0.04, polymarketUrl: 'https://polymarket.com/event/airline-bk-2026' },
+];
+
 // ── Bundle definitions ──
 
 interface BundleDef {
@@ -52,22 +67,117 @@ interface BundleDef {
   fallbackLegs: LegInput[];
 }
 
+// Resolution-date offsets for each window. Frontend `live-baskets` derives
+// the window from the leg `daysToResolution` (week <30d, month 30-90d, long
+// 180d+ in stretched mode), so a SHORT bundle resolving in ~5 days, MED in
+// ~60 days, and LONG in ~220 days lands cleanly in each window. The exact
+// dates only matter for the portfolio "MATURES …" line and for the catalog
+// row; they do not affect the live grid (which is computed from Polymarket
+// candidates, not these seeds).
+function resolutionDate(daysFromNow: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysFromNow);
+  return d.toISOString().slice(0, 10);
+}
+
 const BUNDLES: BundleDef[] = [
+  // ── Legacy (kept so existing on-chain positions stay accessible) ──
+  // The frontend never routes new STHS-* clicks here once the per-window
+  // bundles below are seeded + initialized; these only catch lookups for
+  // historical positions that still reference the old name.
   {
     name: 'LK-90-0430',
     risk_tier: 90,
     resolution_date: '2026-04-30',
-    description: 'High-confidence bundle targeting ~90% expected NAV. 10 legs of high-probability events resolving by end of April 2026.',
-    theme: 'High Probability Q2 2026',
+    description: 'Legacy high-confidence bundle resolving April 30 2026 (kept for backward compatibility with the LK-* names).',
+    theme: 'Legacy High Q2 2026',
     fallbackLegs: FALLBACK_LEGS_90,
   },
   {
     name: 'LK-70-0515',
     risk_tier: 70,
     resolution_date: '2026-05-15',
-    description: 'Medium-confidence bundle targeting ~70% expected NAV. 10 legs of mixed-probability events resolving by mid-May 2026.',
-    theme: 'Mixed Q2 2026',
+    description: 'Legacy medium-confidence bundle resolving May 15 2026 (kept for backward compatibility with the LK-* names).',
+    theme: 'Legacy Mid Q2 2026',
     fallbackLegs: FALLBACK_LEGS_70,
+  },
+
+  // ── HIGH tier ── (~95% probability target)
+  {
+    name: 'STHS-HIGH-SHORT',
+    risk_tier: 90,
+    resolution_date: resolutionDate(5),
+    description: 'High-conviction basket on a one-week horizon. ~95% probability target across 10+ near-certain events.',
+    theme: 'High conviction · short horizon',
+    fallbackLegs: FALLBACK_LEGS_90,
+  },
+  {
+    name: 'STHS-HIGH-MED',
+    risk_tier: 90,
+    resolution_date: resolutionDate(60),
+    description: 'High-conviction basket on a one-to-three-month horizon. ~95% probability target across 10+ near-certain events.',
+    theme: 'High conviction · medium horizon',
+    fallbackLegs: FALLBACK_LEGS_90,
+  },
+  {
+    name: 'STHS-HIGH-LONG',
+    risk_tier: 90,
+    resolution_date: resolutionDate(220),
+    description: 'High-conviction basket on a 6-month+ horizon. ~95% probability target across 10+ near-certain events.',
+    theme: 'High conviction · long horizon',
+    fallbackLegs: FALLBACK_LEGS_90,
+  },
+
+  // ── MID tier ── (~50% probability target)
+  {
+    name: 'STHS-MID-SHORT',
+    risk_tier: 70,
+    resolution_date: resolutionDate(6),
+    description: 'Mid-conviction basket on a one-week horizon. ~50% probability target across 10+ mixed events.',
+    theme: 'Mid conviction · short horizon',
+    fallbackLegs: FALLBACK_LEGS_70,
+  },
+  {
+    name: 'STHS-MID-MED',
+    risk_tier: 70,
+    resolution_date: resolutionDate(55),
+    description: 'Mid-conviction basket on a one-to-three-month horizon. ~50% probability target across 10+ mixed events.',
+    theme: 'Mid conviction · medium horizon',
+    fallbackLegs: FALLBACK_LEGS_70,
+  },
+  {
+    name: 'STHS-MID-LONG',
+    risk_tier: 70,
+    resolution_date: resolutionDate(205),
+    description: 'Mid-conviction basket on a 6-month+ horizon. ~50% probability target across 10+ mixed events.',
+    theme: 'Mid conviction · long horizon',
+    fallbackLegs: FALLBACK_LEGS_70,
+  },
+
+  // ── LOW tier ── (~5% probability target — long-shot)
+  {
+    name: 'STHS-LOW-SHORT',
+    risk_tier: 50,
+    resolution_date: resolutionDate(5),
+    description: 'Long-shot basket on a one-week horizon. ~5% probability target across 10+ low-probability events.',
+    theme: 'Long shot · short horizon',
+    fallbackLegs: FALLBACK_LEGS_50,
+  },
+  {
+    name: 'STHS-LOW-MED',
+    risk_tier: 50,
+    resolution_date: resolutionDate(60),
+    description: 'Long-shot basket on a one-to-three-month horizon. ~5% probability target across 10+ low-probability events.',
+    theme: 'Long shot · medium horizon',
+    fallbackLegs: FALLBACK_LEGS_50,
+  },
+  {
+    name: 'STHS-LOW-LONG',
+    risk_tier: 50,
+    resolution_date: resolutionDate(220),
+    description: 'Long-shot basket on a 6-month+ horizon. ~5% probability target across 10+ low-probability events.',
+    theme: 'Long shot · long horizon',
+    fallbackLegs: FALLBACK_LEGS_50,
   },
 ];
 
