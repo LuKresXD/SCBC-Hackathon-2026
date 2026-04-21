@@ -113,6 +113,23 @@ export async function initializeOnchainVaultForBundle(
     legs: legsArg,
   });
 
+  // Second step: create the TRAX mint + USDC vault token account.
+  // The Anchor program splits init into two instructions — initialize_vault
+  // builds the config PDA; initialize_vault_tokens builds the SPL accounts
+  // used by deposit/redeem. Without this second call deposit tx simulations
+  // fail with IncorrectProgramId on the user's TRAX ATA create.
+  try {
+    const { initializeVaultTokens } = await import("../solana/client");
+    await initializeVaultTokens(bundleId);
+  } catch (err) {
+    // Swallow "already exists" errors — the token accounts may have been
+    // created by a prior run. Real errors surface below via the RPC check.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/already in use|already initialized/i.test(msg)) {
+      console.warn(`[onchain] initialize_vault_tokens failed for ${bundleId}:`, msg);
+    }
+  }
+
   await supabase
     .from("bundles")
     .update({

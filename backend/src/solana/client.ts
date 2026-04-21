@@ -339,6 +339,35 @@ export async function initializeVault(
   };
 }
 
+/**
+ * Step 2 of vault init: create the TRAX mint + USDC vault token account.
+ * Must be called once per bundle, after `initializeVault`. Idempotent per
+ * PDA — if the accounts already exist on-chain, the Anchor program throws
+ * and we re-throw. Callers should check on-chain state first if they want
+ * to avoid the throw.
+ */
+export async function initializeVaultTokens(bundleId: string): Promise<string> {
+  const cfg = getConfig();
+  const program = getVaultProgram();
+  const [vaultPda] = deriveVaultPda(bundleId);
+  const [traxMint] = deriveTraxMint(bundleId);
+  const [usdcVault] = deriveUsdcVault(bundleId);
+
+  return await program.methods
+    .initializeVaultTokens()
+    .accounts({
+      authority: cfg.authorityKeypair.publicKey,
+      vault: vaultPda,
+      traxMint,
+      usdcMint: cfg.usdcMint,
+      usdcVault,
+      systemProgram: SystemProgram.programId,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      rent: SYSVAR_RENT_PUBKEY,
+    })
+    .rpc();
+}
+
 export async function resolveLeg(
   bundleId: string,
   legIndex: number,

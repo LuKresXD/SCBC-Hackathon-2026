@@ -26,6 +26,7 @@ import {
   buildRedeemTx as _buildRedeemTx,
   confirmTransaction as _confirmTransaction,
   finalizeVault as _finalizeVault,
+  initializeVaultTokens as _initializeVaultTokens,
   getMockAdapterState as _getMockAdapterState,
   getTokenBalance as _getTokenBalance,
   getVaultState as _getVaultState,
@@ -63,6 +64,7 @@ export const buildRedeemTx = _buildRedeemTx;
 export const buildPpnDepositTx = _buildPpnDepositTx;
 export const buildPpnRedeemTx = _buildPpnRedeemTx;
 export const initializeVault = _initializeVault;
+export const initializeVaultTokens = _initializeVaultTokens;
 export const resolveLeg = _resolveLeg;
 export const finalizeVault = _finalizeVault;
 export const adminWithdrawFees = _adminWithdrawFees;

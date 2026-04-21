@@ -20,14 +20,14 @@ cp backend/.env.example backend/.env
 # initialised with — Victor will DM you this).
 
 # Install
-cd app       && npm install && cd ..
-cd backend   && npm install && cd ..
+npm install                     # frontend — lives at the repo root
+cd backend && npm install && cd ..
 
 # Run (two terminals)
 # Terminal 1
 cd backend && npm run dev       # http://localhost:3001
-# Terminal 2
-cd app && npm run dev           # http://localhost:3000
+# Terminal 2 (from repo root)
+npm run dev                     # http://localhost:3000
 ```
 
 Smoke test:

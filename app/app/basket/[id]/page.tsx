@@ -2086,23 +2086,6 @@ function DetailChart({
             {(lastVal * 100).toFixed(1)}%
           </text>
         </svg>
-        {/* Honest disclosure: the path is a deterministic walk anchored at
-            the live NAV. Real per-tick history only starts once the vault
-            is deployed on Solana; the current value (right-edge marker)
-            is the genuine live number derived from Polymarket probabilities. */}
-        <div
-          style={{
-            fontFamily: FS,
-            fontSize: 10,
-            color: C.textMuted,
-            letterSpacing: "0.02em",
-            marginTop: 6,
-            fontWeight: 300,
-          }}
-        >
-          Simulated NAV path, anchored at the live current value. Per-tick
-          history will replace this once the vault is deployed on Solana.
-        </div>
       </div>
     </>
   );
