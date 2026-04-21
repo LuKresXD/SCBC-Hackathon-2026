@@ -291,6 +291,10 @@ export interface PpnPortfolioEntry {
   maturity_date: string;
   created_at: string;
   total_value: number;
+  tranche_kind: "senior" | "mezzanine" | "junior" | null;
+  tranche_attach: number | null;
+  tranche_detach: number | null;
+  price_per_token: number | null;
 }
 
 export interface PpnPortfolio {

@@ -139,6 +139,10 @@ router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
           created_at: vault.created_at,
           // Total value = principal (always protected) + accrued yield
           total_value: Math.round((vault.principal_usdc + accruedYield) * 100) / 100,
+          tranche_kind: vault.tranche_kind ?? null,
+          tranche_attach: vault.tranche_attach ?? null,
+          tranche_detach: vault.tranche_detach ?? null,
+          price_per_token: vault.price_per_token ?? null,
         };
       })
     );
@@ -411,12 +415,12 @@ router.post('/onchain/confirm', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Transaction has not confirmed yet' });
     }
 
-    const updated = await updatePPNVaultOnchain(vault_id, {
+    // Best-effort: record the signature. If the column doesn't exist in the
+    // DB schema yet, the vault row still exists from the prepare step so the
+    // position is intact — don't fail the confirm over a missing column.
+    await updatePPNVaultOnchain(vault_id, {
       onchain_tx_signature: signature,
-    });
-    if (!updated) {
-      return res.status(500).json({ error: 'Failed to record signature on PPN vault' });
-    }
+    }).catch((err) => console.warn('updatePPNVaultOnchain non-fatal:', err));
 
     // Transaction row for portfolio/history. PPN deposits never pay a
     // structuring fee (fee comes out of yield in harvest).

@@ -223,6 +223,17 @@ export async function prepareDeposit(args: {
   amountUsdc: number;
 }): Promise<DepositPrepareResponse> {
   const uuid = await resolveBundleUuid(args.bundleId);
+  // Persist the synthetic-id -> UUID mapping so the portfolio page can
+  // render positions under the friendly name the user actually clicked
+  // rather than the backend's internal bundle name.
+  if (uuid !== args.bundleId) {
+    try {
+      const { cacheBundleDisplayName } = await import("./portfolio-client");
+      cacheBundleDisplayName(args.walletAddress, uuid, args.bundleId);
+    } catch {
+      // Non-fatal: cache failures shouldn't block deposits.
+    }
+  }
   return postJson<DepositPrepareResponse>("/api/deposit/prepare", {
     bundle_id: uuid,
     wallet_address: args.walletAddress,
@@ -285,11 +296,13 @@ export async function confirmDeposit(args: {
 export async function prepareRedeem(args: {
   bundleId: string;
   walletAddress: string;
+  amountTokens?: number;
 }): Promise<RedeemPrepareResponse> {
   const uuid = await resolveBundleUuid(args.bundleId);
   return postJson<RedeemPrepareResponse>("/api/deposit/redeem/prepare", {
     bundle_id: uuid,
     wallet_address: args.walletAddress,
+    ...(args.amountTokens != null ? { amount_tokens: args.amountTokens } : {}),
   });
 }
 
@@ -302,6 +315,7 @@ export async function confirmRedeem(args: {
   walletAddress: string;
   signature: string;
   expectedUsdc: number;
+  tokensRedeemed?: number;
 }): Promise<RedeemConfirmResponse> {
   const uuid = await resolveBundleUuid(args.bundleId);
   return postJson<RedeemConfirmResponse>("/api/deposit/redeem/confirm", {
@@ -309,6 +323,7 @@ export async function confirmRedeem(args: {
     wallet_address: args.walletAddress,
     signature: args.signature,
     expected_usdc: args.expectedUsdc,
+    ...(args.tokensRedeemed != null ? { tokens_redeemed: args.tokensRedeemed } : {}),
   });
 }
 
@@ -331,6 +346,8 @@ export async function depositIntoBundle(args: {
   wallet: WalletSigner;
   bundleId: string;
   amountUsdc: number;
+  /** Live NAV at deposit time — recorded as the virtual position's cost basis. */
+  navAtDeposit?: number;
   confirmationTimeoutMs?: number;
 }): Promise<{
   signature: string;
@@ -361,6 +378,27 @@ export async function depositIntoBundle(args: {
     feeUsdc: prep.fee_usdc,
   });
 
+  // Record a virtual position with the UI-level bundle id the user clicked
+  // and the NAV observed at deposit time. The portfolio groups by UI bundle
+  // id so multiple windows of the same tier stay separate in the UI even
+  // though they share one on-chain vault; using navAtDeposit as the cost
+  // basis keeps PnL flat at zero on the instant of deposit.
+  try {
+    const { recordVirtualPosition } = await import("./virtual-positions");
+    recordVirtualPosition({
+      wallet: wallet.publicKey.toBase58(),
+      uuid: prep.bundle_id,
+      uiBundleId: bundleId,
+      tokens: prep.tokens_minted,
+      depositedUsdc: amountUsdc,
+      navAtDeposit: args.navAtDeposit ?? prep.issue_price,
+      signature: sig,
+      createdAt: Date.now(),
+    });
+  } catch {
+    // Non-fatal: the virtual ledger is a UX nicety, not a source of truth.
+  }
+
   return { signature: sig, prepare: prep, confirm };
 }
 
@@ -371,6 +409,7 @@ export async function depositIntoBundle(args: {
 export async function redeemFromBundle(args: {
   wallet: WalletSigner;
   bundleId: string;
+  amountTokens?: number;
   confirmationTimeoutMs?: number;
 }): Promise<{
   signature: string;
@@ -383,6 +422,7 @@ export async function redeemFromBundle(args: {
   const prep = await prepareRedeem({
     bundleId,
     walletAddress: wallet.publicKey.toBase58(),
+    amountTokens: args.amountTokens,
   });
 
   const sig = await wallet.signAndSendBase64Tx(prep.transaction_base64);
@@ -395,6 +435,7 @@ export async function redeemFromBundle(args: {
     walletAddress: wallet.publicKey.toBase58(),
     signature: sig,
     expectedUsdc: prep.expected_usdc,
+    tokensRedeemed: args.amountTokens,
   });
 
   return { signature: sig, prepare: prep, confirm };

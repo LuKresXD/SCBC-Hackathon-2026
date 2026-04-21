@@ -9,20 +9,41 @@ import { C, FS, FD, FM, EASE, tc, trancheColor, fmtUsd } from "../_lib/tokens";
 import { useLiveBaskets } from "../_lib/use-live-baskets";
 import { bundleById } from "../_lib/bundles";
 import { useSandbox } from "../_lib/demo-state";
-import { useUsdcBalance } from "../_lib/wallet-bridge";
+import { useUsdcBalance, useWalletSigner } from "../_lib/wallet-bridge";
+import { fetchBasketPortfolio } from "../_lib/portfolio-client";
+import { fetchPpnPortfolio } from "../_lib/ppn-client";
+import { redeemFromBundle, DepositError } from "../_lib/deposit-client";
+import {
+  groupVirtualByUiBundle,
+  clearVirtualPositionsByUiBundleId,
+  type GroupedVirtualPosition,
+} from "../_lib/virtual-positions";
 import { Personalization } from "./_personalization";
 
 type View = "positions" | "personalization";
 
 export default function PortfolioPage() {
-  const { state, totals } = useSandbox();
-  const { connected } = useWallet();
+  const { state, totals, dispatch } = useSandbox();
+  const { connected, publicKey } = useWallet();
   const usdc = useUsdcBalance();
+  const walletSigner = useWalletSigner();
+  const [redeemBusy, setRedeemBusy] = useState<string | null>(null);
+  const [redeemError, setRedeemError] = useState<Record<string, string>>({});
   const basketState = useLiveBaskets();
   // Cash line is the real on-chain USDC in the connected wallet. When
   // disconnected we fall back to 0 so the donut + positions list simply
   // omit the cash slice instead of flashing a stale sandbox counter.
   const liveUsdc = connected ? usdc.uiAmount : 0;
+  // Top-line value uses the live wallet USDC instead of the sandbox counter
+  // so the headline TOTAL VALUE + the breakdown percentages match what
+  // actually sits in the user's wallet.
+  const displayTotal =
+    liveUsdc +
+    totals.basketValue +
+    totals.trancheValue +
+    totals.ppnValue +
+    totals.lendValue -
+    totals.loanDebt;
   const [activeId, setActiveId] = useState<string | null>(null);
   const [renderNow, setRenderNow] = useState<number>(() => Date.now());
   const [view, setView] = useState<View>("positions");
@@ -30,6 +51,82 @@ export default function PortfolioPage() {
     const t = setInterval(() => setRenderNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  // Hydrate basket positions from Supabase whenever the wallet connects
+  // or changes. The reducer is in-memory only, so without this the portfolio
+  // tab would look empty after any browser reload even when the user has
+  // on-chain deposits in the DB.
+  const hydratePortfolio = React.useCallback(async () => {
+    if (!connected || !publicKey) return;
+    const wallet = publicKey.toBase58();
+    await Promise.allSettled([
+      fetchBasketPortfolio(wallet).then((positions) =>
+        dispatch({ type: "basket/hydrate", positions }),
+      ),
+      fetchPpnPortfolio(wallet).then((portfolio) => {
+        const ppnVaults = portfolio.vaults
+          .filter((v) => !v.tranche_kind)
+          .map((v) => ({
+            id: v.vault_id,
+            bundleId: v.bundle_id,
+            principal: v.principal_usdc,
+            basketAmount: v.yield_deployed_usdc,
+            apy: v.estimated_apy,
+            createdAt: new Date(v.created_at).getTime(),
+            maturityDays: v.days_elapsed + v.days_remaining,
+          }));
+        const tranchePositions = portfolio.vaults
+          .filter((v) => v.tranche_kind && v.price_per_token)
+          .map((v) => ({
+            bundleId: v.bundle_id,
+            kind: v.tranche_kind as "senior" | "mezzanine" | "junior",
+            qty: v.principal_usdc / v.price_per_token!,
+            avgCost: v.price_per_token!,
+          }));
+        dispatch({ type: "ppn/hydrate", vaults: ppnVaults });
+        dispatch({ type: "tranche/hydrate", positions: tranchePositions });
+      }),
+    ]);
+  }, [connected, publicKey, dispatch]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (cancelled) return;
+      await hydratePortfolio();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hydratePortfolio]);
+
+  async function handleRedeem(bundleId: string, uiBundleId: string, tokens: number) {
+    if (!connected || !publicKey) return;
+    setRedeemError((prev) => {
+      const next = { ...prev };
+      delete next[bundleId];
+      return next;
+    });
+    setRedeemBusy(bundleId);
+    try {
+      await redeemFromBundle({ wallet: walletSigner, bundleId, amountTokens: tokens });
+      clearVirtualPositionsByUiBundleId(publicKey.toBase58(), bundleId, uiBundleId);
+      await hydratePortfolio();
+      void usdc.refresh();
+    } catch (err) {
+      const msg =
+        err instanceof DepositError
+          ? err.message
+          : err instanceof Error
+            ? /user rejected/i.test(err.message)
+              ? "Transaction was rejected in your wallet."
+              : err.message
+            : String(err);
+      setRedeemError((prev) => ({ ...prev, [bundleId]: msg }));
+    } finally {
+      setRedeemBusy(null);
+    }
+  }
 
   // Live-first basket metadata lookup: if the live pipeline has this
   // id we use the live NAV so open positions track the real feed, and
@@ -190,7 +287,7 @@ export default function PortfolioPage() {
                   TOTAL VALUE
                 </div>
                 <div style={{ fontSize: 24, color: C.textPrimary, fontFamily: FD, fontWeight: 500, letterSpacing: "-0.015em", lineHeight: 1 }}>
-                  {fmtUsd(totals.totalValue, 2)}
+                  {fmtUsd(displayTotal, 2)}
                 </div>
               </div>
               <div style={{ paddingBottom: 16, marginBottom: 14, borderBottom: `0.5px solid ${C.border}` }}>
@@ -203,9 +300,10 @@ export default function PortfolioPage() {
               </div>
               {(() => {
                 const rows = [
-                  { id: "baskets",  label: "Constellations", color: C.teal,   value: totals.basketValue },
-                  { id: "tranches", label: "Tranches",       color: C.amber,  value: totals.trancheValue },
-                  { id: "ppn",      label: "PPNs",           color: C.violet, value: totals.ppnValue },
+                  { id: "cash",     label: "USDC",           color: "#4a5a6a", value: liveUsdc },
+                  { id: "baskets",  label: "Constellations", color: C.teal,    value: totals.basketValue },
+                  { id: "tranches", label: "Tranches",       color: C.amber,   value: totals.trancheValue },
+                  { id: "ppn",      label: "PPNs",           color: C.violet,  value: totals.ppnValue },
                 ];
                 const breakdownTotal = rows.reduce((s, r) => s + r.value, 0);
                 return rows.map((r) => {
@@ -242,10 +340,10 @@ export default function PortfolioPage() {
                       </div>
                       <div style={{ textAlign: "right" }}>
                         <span style={{ fontSize: 14, color: C.textPrimary, fontFamily: FD, fontWeight: 500 }}>
-                          {fmtUsd(r.value, 0)}
+                          {fmtUsd(r.value, 2)}
                         </span>
                         <span style={{ fontSize: 11, color: C.textMuted, fontFamily: FM, marginLeft: 8, letterSpacing: "0.02em" }}>
-                          {pct.toFixed(0)}%
+                          {pct.toFixed(2)}%
                         </span>
                       </div>
                     </div>
@@ -310,22 +408,53 @@ export default function PortfolioPage() {
               <div style={{ position: "relative", zIndex: 3 }}>
                 <SvgDonut data={donutData} size={donutSize} activeId={activeId} onHover={setActiveId} isEmpty={empty} />
                 <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center", pointerEvents: "none", width: 200 }}>
-                  {empty ? (
-                    <>
-                      <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 10 }}>NO POSITIONS</div>
-                      <div style={{ fontSize: 13, color: C.textSecondary, fontFamily: FS }}>Your orbit is empty</div>
-                    </>
-                  ) : (
-                    <>
-                      <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 10 }}>TOTAL VALUE</div>
-                      <div style={{ fontSize: 34, fontWeight: 600, color: C.textPrimary, fontFamily: FS, lineHeight: 1, marginBottom: 10, letterSpacing: "-0.03em" }}>
-                        {fmtUsd(totals.totalValue, 0)}
-                      </div>
-                      <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FM, letterSpacing: "0.08em" }}>
-                        {donutData.length} POSITION{donutData.length !== 1 ? "S" : ""}
-                      </div>
-                    </>
-                  )}
+                  {(() => {
+                    if (empty) {
+                      return (
+                        <>
+                          <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 10 }}>NO POSITIONS</div>
+                          <div style={{ fontSize: 13, color: C.textSecondary, fontFamily: FS }}>Your orbit is empty</div>
+                        </>
+                      );
+                    }
+                    const donutTotal = donutData.reduce((s, d) => s + d.value, 0);
+                    const hovered = activeId
+                      ? donutData.find((d) => d.id === activeId)
+                      : null;
+                    if (hovered) {
+                      const labelMap: Record<string, string> = {
+                        cash: "USDC",
+                        baskets: "CONSTELLATIONS",
+                        tranches: "TRANCHES",
+                        ppn: "PPNs",
+                        lending: "LENDING",
+                      };
+                      const label = labelMap[hovered.id] ?? hovered.id.toUpperCase();
+                      const hoverPct = donutTotal > 0 ? (hovered.value / donutTotal) * 100 : 0;
+                      return (
+                        <>
+                          <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 10 }}>{label}</div>
+                          <div style={{ fontSize: 34, fontWeight: 600, color: C.textPrimary, fontFamily: FS, lineHeight: 1, marginBottom: 10, letterSpacing: "-0.03em" }}>
+                            {fmtUsd(hovered.value, 2)}
+                          </div>
+                          <div style={{ fontSize: 13, color: hovered.color, fontFamily: FM, letterSpacing: "0.06em", fontWeight: 500 }}>
+                            {hoverPct.toFixed(2)}%
+                          </div>
+                        </>
+                      );
+                    }
+                    return (
+                      <>
+                        <div style={{ fontSize: 10, color: C.textMuted, fontFamily: FM, letterSpacing: "0.14em", marginBottom: 10 }}>TOTAL VALUE</div>
+                        <div style={{ fontSize: 34, fontWeight: 600, color: C.textPrimary, fontFamily: FS, lineHeight: 1, marginBottom: 10, letterSpacing: "-0.03em" }}>
+                          {fmtUsd(displayTotal, 0)}
+                        </div>
+                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FM, letterSpacing: "0.08em" }}>
+                          {donutData.length} POSITION{donutData.length !== 1 ? "S" : ""}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -338,26 +467,82 @@ export default function PortfolioPage() {
           // Build all position rows with value for sorting
           const rows: { value: number; el: React.ReactNode; key: string }[] = [];
 
-          state.basketPositions.forEach((p) => {
-            const b = resolveBasket(p.bundleId);
-            if (!b) return;
-            const value = p.qty * b.nav;
-            const pnl = p.qty * (b.nav - p.avgCost);
+          // Pull every virtual-position group the user has deposited. Each
+          // group corresponds to a distinct synthetic id (e.g. STHS-HIGH-
+          // SHORT) and becomes its own card, even when multiple synthetic
+          // ids share a single on-chain UUID.
+          const virtualGroups: GroupedVirtualPosition[] = publicKey
+            ? groupVirtualByUiBundle(publicKey.toBase58())
+            : [];
+          const virtualTokensByUuid = virtualGroups.reduce<Record<string, number>>(
+            (acc, g) => {
+              acc[g.uuid] = (acc[g.uuid] ?? 0) + g.tokens;
+              return acc;
+            },
+            {},
+          );
+
+          const renderBasketCard = (opts: {
+            cardKey: string;
+            uuid: string;
+            labelId: string;
+            qty: number;
+            avgCost: number;
+            nav: number;
+            tier: 90 | 70 | 50;
+            maturityAt?: number | null;
+            status?: string;
+          }) => {
+            const { cardKey, uuid, labelId, qty, avgCost, nav, tier, maturityAt, status } = opts;
+            const value = qty * nav;
+            const pnl = qty * (nav - avgCost);
+            const liveMatchById =
+              basketState.status === "ok"
+                ? basketState.baskets.find((b) => b.id === labelId)
+                : null;
+            const liveMaturityMs =
+              liveMatchById?.daysLeft != null
+                ? Date.now() + liveMatchById.daysLeft * 86_400_000
+                : null;
+            const effectiveMaturityMs = liveMaturityMs ?? maturityAt ?? null;
+            const matured =
+              status === "resolved" ||
+              (effectiveMaturityMs != null && effectiveMaturityMs <= renderNow);
+            const maturityDate = liveMatchById?.date
+              ? liveMatchById.date
+              : maturityAt
+                ? (() => {
+                    const d = new Date(maturityAt);
+                    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+                  })()
+                : null;
+            const maturityLabel =
+              typeof maturityDate === "string"
+                ? maturityDate
+                : maturityDate
+                  ? maturityDate.toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })
+                  : null;
+            const isBusy = redeemBusy === uuid;
+            const errMsg = redeemError[uuid];
             rows.push({
-              key: p.bundleId,
+              key: cardKey,
               value,
               el: (
-                <div key={p.bundleId} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
+                <div key={cardKey} style={{ background: C.card, border: `0.5px solid ${C.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
-                    <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, letterSpacing: "0.08em" }}>BASKET</div>
+                    <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, letterSpacing: "0.08em" }}>CONSTELLATION</div>
                     <Link href="/app/basket" style={{ fontSize: 11, color: C.teal, fontFamily: FS, textDecoration: "none" }}>View all →</Link>
                   </div>
-                  <Link href={`/app/basket/${p.bundleId}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", textDecoration: "none" }}>
+                  <Link href={`/app/basket/${labelId}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", textDecoration: "none" }}>
                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      <div style={{ width: 4, height: 24, borderRadius: 2, background: tc(b.tier) }} />
+                      <div style={{ width: 4, height: 24, borderRadius: 2, background: tc(tier) }} />
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>{b.id}</div>
-                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>{p.qty.toFixed(2)} tokens · avg ${p.avgCost.toFixed(3)}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: C.textPrimary, fontFamily: FD }}>{labelId}</div>
+                        <div style={{ fontSize: 11, color: C.textMuted, fontFamily: FS, marginTop: 2 }}>{qty.toFixed(2)} tokens · avg ${avgCost.toFixed(3)}</div>
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
@@ -365,10 +550,96 @@ export default function PortfolioPage() {
                       <div style={{ fontSize: 11, color: pnl >= 0 ? C.green : C.red, fontFamily: FS, marginTop: 2 }}>{pnl >= 0 ? "+" : ""}{fmtUsd(pnl, 2)}</div>
                     </div>
                   </Link>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 14, paddingTop: 14, borderTop: `0.5px solid ${C.border}` }}>
+                    <div style={{ fontSize: 11, color: matured ? C.green : C.textMuted, fontFamily: FM, letterSpacing: "0.06em" }}>
+                      {matured ? "MATURED" : maturityLabel ? `MATURES ${maturityLabel.toUpperCase()}` : "MATURITY UNKNOWN"}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleRedeem(uuid, labelId, qty);
+                      }}
+                      disabled={!matured || isBusy || !connected}
+                      style={{
+                        padding: "7px 16px",
+                        fontSize: 12,
+                        fontFamily: FD,
+                        fontWeight: 500,
+                        letterSpacing: "0.02em",
+                        borderRadius: 8,
+                        cursor: matured && !isBusy ? "pointer" : "not-allowed",
+                        border: `0.5px solid ${matured ? C.teal : "rgba(255,255,255,0.08)"}`,
+                        background: matured ? "rgba(45, 212, 191, 0.12)" : "transparent",
+                        color: matured ? C.tealLight : C.textMuted,
+                        opacity: isBusy ? 0.6 : 1,
+                        transition: `all 0.15s ${EASE}`,
+                      }}
+                    >
+                      {isBusy ? "Redeeming…" : "Redeem"}
+                    </button>
+                  </div>
+                  {errMsg && (
+                    <div style={{ marginTop: 10, fontSize: 11, fontFamily: FS, color: C.red }}>
+                      {errMsg}
+                    </div>
+                  )}
                 </div>
               ),
             });
+          };
+
+          // Render one card per virtual group, using the NAV at deposit
+          // time as the cost basis so PnL starts at zero.
+          virtualGroups.forEach((g) => {
+            const liveMatch =
+              basketState.status === "ok"
+                ? basketState.baskets.find((b) => b.id === g.uiBundleId)
+                : null;
+            const dbMatch = state.basketPositions.find((p) => p.bundleId === g.uuid);
+            const tier = liveMatch?.tier ?? dbMatch?.tier;
+            const nav = liveMatch?.nav ?? dbMatch?.navHint;
+            if (tier == null || nav == null) return;
+            renderBasketCard({
+              cardKey: `${g.uuid}::${g.uiBundleId}`,
+              uuid: g.uuid,
+              labelId: g.uiBundleId,
+              qty: g.tokens,
+              avgCost: g.avgNavAtDeposit,
+              nav,
+              tier,
+              maturityAt: dbMatch?.maturityAt,
+              status: dbMatch?.status,
+            });
           });
+
+          // For each on-chain position, render a residual card covering
+          // any tokens the virtual ledger hasn't explained (pre-ledger
+          // deposits, localStorage wipes, etc.).
+          state.basketPositions.forEach((p) => {
+            const virtualQty = virtualTokensByUuid[p.bundleId] ?? 0;
+            const residual = p.qty - virtualQty;
+            if (residual <= 0.001) return;
+            const catalogMatch = resolveBasket(p.bundleId);
+            const tier = catalogMatch?.tier ?? p.tier;
+            const nav = catalogMatch?.nav ?? p.navHint;
+            const labelId = catalogMatch?.id ?? p.displayName ?? p.bundleId;
+            if (tier == null || nav == null) return;
+            renderBasketCard({
+              cardKey: `${p.bundleId}::residual`,
+              uuid: p.bundleId,
+              labelId,
+              qty: residual,
+              // Residual positions have no nav-at-deposit capture, so
+              // peg cost basis to current NAV. PnL starts at $0 and
+              // only moves once NAV drifts after this render.
+              avgCost: nav,
+              nav,
+              tier,
+              maturityAt: p.maturityAt,
+              status: p.status,
+            });
+          });
+
 
           state.tranchePositions.forEach((p, i) => {
             const value = p.qty * p.avgCost;

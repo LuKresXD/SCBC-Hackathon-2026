@@ -188,9 +188,10 @@ router.post('/confirm', async (req: Request, res: Response) => {
 
 router.post('/redeem/prepare', validate(redeemSchema), async (req: Request, res: Response) => {
   try {
-    const { bundle_id, wallet_address } = req.body as {
+    const { bundle_id, wallet_address, amount_tokens: amountTokensOverride } = req.body as {
       bundle_id: string;
       wallet_address: string;
+      amount_tokens?: number;
     };
     const bundle = await getBundleById(bundle_id);
     if (!bundle) return res.status(404).json({ error: `Bundle not found: ${bundle_id}` });
@@ -217,7 +218,12 @@ router.post('/redeem/prepare', validate(redeemSchema), async (req: Request, res:
     const totalTokens = positions.reduce((s, p) => s + p.tokens_held, 0);
     if (totalTokens <= 0) return res.status(400).json({ error: 'No tokens to redeem' });
 
-    const amountBaseUnits = BigInt(Math.round(totalTokens * 1_000_000));
+    const redeemTokens =
+      amountTokensOverride != null && amountTokensOverride > 0 && amountTokensOverride <= totalTokens
+        ? amountTokensOverride
+        : totalTokens;
+
+    const amountBaseUnits = BigInt(Math.round(redeemTokens * 1_000_000));
     const built = await buildRedeemTx(
       new PublicKey(wallet_address),
       bundle_id,
@@ -230,7 +236,7 @@ router.post('/redeem/prepare', validate(redeemSchema), async (req: Request, res:
       kind: 'prepared',
       bundle_id,
       wallet_address,
-      total_tokens: totalTokens,
+      total_tokens: redeemTokens,
       expected_usdc: expectedUsdcUi,
       transaction_base64: built.transactionBase64,
       vault_pda: built.vaultPda,
@@ -246,11 +252,12 @@ router.post('/redeem/prepare', validate(redeemSchema), async (req: Request, res:
 
 router.post('/redeem/confirm', async (req: Request, res: Response) => {
   try {
-    const { bundle_id, wallet_address, signature, expected_usdc } = req.body as {
+    const { bundle_id, wallet_address, signature, expected_usdc, tokens_redeemed } = req.body as {
       bundle_id: string;
       wallet_address: string;
       signature: string;
       expected_usdc: number;
+      tokens_redeemed?: number;
     };
 
     const confirmed = await confirmTransaction(signature);
@@ -259,13 +266,26 @@ router.post('/redeem/confirm', async (req: Request, res: Response) => {
     const positions = await getPositionsByWalletAndBundle(wallet_address, bundle_id);
     const totalTokens = positions.reduce((s, p) => s + p.tokens_held, 0);
 
-    await Promise.all(positions.map((p) => updatePositionTokens(p.id, 0)));
+    const toDeduct =
+      tokens_redeemed != null && tokens_redeemed > 0 && tokens_redeemed <= totalTokens
+        ? tokens_redeemed
+        : totalTokens;
+
+    // Deduct tokens from positions (most-recent first, as returned by the query).
+    let remaining = toDeduct;
+    for (const p of positions) {
+      if (remaining <= 0) break;
+      const deduct = Math.min(p.tokens_held, remaining);
+      await updatePositionTokens(p.id, p.tokens_held - deduct);
+      remaining -= deduct;
+    }
+
     const tx = await createTransaction({
       bundle_id,
       wallet_address,
       type: 'redemption',
       amount_usdc: expected_usdc,
-      tokens: totalTokens,
+      tokens: toDeduct,
       fee_usdc: 0,
       tx_signature: signature,
     });
@@ -280,7 +300,7 @@ router.post('/redeem/confirm', async (req: Request, res: Response) => {
     res.status(200).json({
       wallet_address,
       bundle_id,
-      total_tokens: totalTokens,
+      total_tokens: toDeduct,
       payout_usdc: expected_usdc,
       transaction_id: tx?.id,
     });
@@ -331,6 +351,7 @@ router.get('/portfolio/:walletAddress', async (req: Request, res: Response) => {
           bundle_name: bundle?.name ?? 'Unknown',
           bundle_status: bundle?.status ?? 'unknown',
           risk_tier: bundle?.risk_tier ?? 0,
+          resolution_date: bundle?.resolution_date ?? null,
           tokens_held: pos.tokens_held,
           entry_price: pos.entry_price,
           deposited_usdc: pos.deposited_usdc,

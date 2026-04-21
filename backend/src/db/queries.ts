@@ -388,17 +388,48 @@ export async function getAllTransactions(params?: {
 export async function createPPNVault(
   vault: Omit<PPNVault, 'id' | 'created_at'>
 ): Promise<PPNVault | null> {
-  const { data, error } = await supabase
-    .from('ppn_vaults')
-    .insert(vault)
-    .select()
-    .single();
+  // All columns that may be absent on older Supabase schemas. We strip these
+  // proactively and add any extra ones reported by the API on each attempt.
+  const knownOptional = new Set([
+    'note_seed_hex',
+    'onchain_tx_signature',
+    'redemption_tx_signature',
+    'maturity_ts',
+    'tranche_kind',
+    'tranche_attach',
+    'tranche_detach',
+    'price_per_token',
+    'vault_address',
+  ]);
 
-  if (error) {
-    console.error('createPPNVault error:', error.message);
-    return null;
+  let payload: Record<string, unknown> = { ...vault };
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const { data, error } = await supabase
+      .from('ppn_vaults')
+      .insert(payload)
+      .select()
+      .single();
+
+    if (!error) return data;
+
+    const missing = Array.from(
+      error.message.matchAll(/Could not find the '([^']*)' column/g),
+    ).map((m: RegExpMatchArray) => m[1]);
+
+    if (missing.length === 0) {
+      console.error('createPPNVault error:', error.message);
+      throw new Error(`createPPNVault: ${error.message}`);
+    }
+
+    for (const col of missing) knownOptional.add(col);
+    payload = Object.fromEntries(
+      Object.entries(payload).filter(([k]) => !knownOptional.has(k)),
+    );
+    console.warn('createPPNVault: retrying without columns', Array.from(knownOptional));
   }
-  return data;
+
+  throw new Error('createPPNVault: gave up after 10 retries');
 }
 
 export async function getPPNVaultsByWallet(walletAddress: string): Promise<PPNVault[]> {
@@ -507,18 +538,38 @@ export async function updatePPNVaultOnchain(
     >
   >
 ): Promise<PPNVault | null> {
-  const { data, error } = await supabase
-    .from('ppn_vaults')
-    .update(updates)
-    .eq('id', id)
-    .select()
-    .single();
+  let payload: Record<string, unknown> = { ...updates };
 
-  if (error) {
-    console.error('updatePPNVaultOnchain error:', error.message);
-    return null;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    if (Object.keys(payload).length === 0) {
+      // Nothing left to update — fetch and return the existing row.
+      const { data } = await supabase.from('ppn_vaults').select('*').eq('id', id).single();
+      return data ?? null;
+    }
+
+    const { data, error } = await supabase
+      .from('ppn_vaults')
+      .update(payload)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (!error) return data;
+
+    const missing = Array.from(
+      error.message.matchAll(/Could not find the '([^']*)' column/g),
+    ).map((m: RegExpMatchArray) => m[1]);
+
+    if (missing.length === 0) {
+      console.error('updatePPNVaultOnchain error:', error.message);
+      return null;
+    }
+
+    for (const col of missing) delete payload[col];
+    console.warn('updatePPNVaultOnchain: retrying without columns', missing);
   }
-  return data;
+
+  return null;
 }
 
 /**
