@@ -1,4 +1,4 @@
-# Senthos / Traxis · SCBC Hackathon 2026 · Combined Repo
+# Senthos · SCBC Hackathon 2026 · Combined Repo
 
 Structured-prediction-market protocol with four product primitives (Native Basket, Tranches, Principal Protected Notes, Lending/Repo) plus a custom hedge builder, all running on Solana devnet with live Polymarket data and an NLP-gated market filter.
 
